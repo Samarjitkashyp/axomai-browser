@@ -92,18 +92,35 @@ const char* DEFAULT_PAGE_HTML = R"HTML(
 )HTML";
 
 bool LoadEngineDll() {
-    LPCWSTR dllPaths[] = {
-        L"..\\rust_engine\\target\\release\\axomai_engine.dll",
-        L"..\\rust_engine\\target\\debug\\axomai_engine.dll",
-        L"axomai_engine.dll"
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    std::wstring exeDir(exePath);
+    size_t lastSlash = exeDir.rfind(L'\\');
+    if (lastSlash != std::wstring::npos) {
+        exeDir = exeDir.substr(0, lastSlash + 1);
+    }
+
+    std::vector<std::wstring> dllPaths = {
+        exeDir + L"axomai_engine.dll",
+        exeDir + L"..\\rust_engine\\target\\release\\axomai_engine.dll",
+        exeDir + L"..\\..\\native\\rust_engine\\target\\release\\axomai_engine.dll",
+        L"axomai_engine.dll",
+        L"native\\cpp_gui\\axomai_engine.dll",
+        L"native\\rust_engine\\target\\release\\axomai_engine.dll"
     };
 
-    for (int i = 0; i < 3; i++) {
-        g_hEngineDll = LoadLibraryW(dllPaths[i]);
+    for (const auto& path : dllPaths) {
+        g_hEngineDll = LoadLibraryW(path.c_str());
         if (g_hEngineDll) break;
     }
 
-    if (!g_hEngineDll) return false;
+    if (!g_hEngineDll) {
+        DWORD err = GetLastError();
+        wchar_t msg[512];
+        swprintf_s(msg, 512, L"Could not load axomai_engine.dll!\nError Code: %lu\nExe Directory: %s", err, exeDir.c_str());
+        MessageBoxW(NULL, msg, L"Axomai Engine Error", MB_ICONERROR);
+        return false;
+    }
 
     p_axomai_engine_create = (fn_axomai_engine_create)GetProcAddress(g_hEngineDll, "axomai_engine_create");
     p_axomai_engine_free = (fn_axomai_engine_free)GetProcAddress(g_hEngineDll, "axomai_engine_free");

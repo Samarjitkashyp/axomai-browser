@@ -16,6 +16,7 @@ cd ..\..
 echo.
 echo [2/3] Copying axomai_engine.dll...
 copy /Y "native\rust_engine\target\release\axomai_engine.dll" "native\cpp_gui\axomai_engine.dll"
+copy /Y "native\rust_engine\target\release\axomai_engine.dll" "axomai_engine.dll"
 
 echo.
 echo [3/3] Compiling C++ Win32 GUI App...
@@ -27,9 +28,10 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 cd ..\..
+copy /Y "native\cpp_gui\axomai_browser.exe" "axomai_browser.exe"
 
 echo.
 echo =======================================================
 echo  SUCCESS! Axomai Browser compiled successfully.
-echo  Run: .\native\cpp_gui\axomai_browser.exe
+echo  Run: .\axomai_browser.exe or .\native\cpp_gui\axomai_browser.exe
 echo =======================================================
