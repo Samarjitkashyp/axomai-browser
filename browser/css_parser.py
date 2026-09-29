@@ -112,10 +112,17 @@ class CSSParser:
             if not sel_text:
                 continue
 
-            selector = parse_selector(sel_text)
             declarations = parse_declarations(body_text)
-            if selector and declarations:
-                rules.append(Rule(selector, declarations))
+            if not declarations:
+                continue
+
+            # Split comma-separated selectors e.g. "head, script, style" or "h1, h2"
+            for sub_sel in sel_text.split(","):
+                sub_sel = sub_sel.strip()
+                if sub_sel:
+                    selector = parse_selector(sub_sel)
+                    if selector:
+                        rules.append(Rule(selector, declarations))
 
         return rules
 

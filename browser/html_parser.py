@@ -67,16 +67,21 @@ class HTMLParser:
             # Check for script/style contents
             if self.unfinished:
                 top_tag = self.unfinished[-1].tag
-                if top_tag in ["script", "style"] and not self.body.startswith(f"</{top_tag}>", i):
-                    end_raw = self.body.find(f"</{top_tag}>", i)
+                if top_tag in ["script", "style"]:
+                    close_tag = f"</{top_tag}>"
+                    end_raw = self.body.lower().find(close_tag, i)
                     if end_raw != -1:
                         raw_content = self.body[i:end_raw]
-                        self.add_text(raw_content)
-                        i = end_raw
+                        if raw_content:
+                            self.add_text(raw_content)
+                        i = end_raw + len(close_tag)
+                        self.unfinished.pop()
                         continue
                     else:
                         raw_content = self.body[i:]
-                        self.add_text(raw_content)
+                        if raw_content:
+                            self.add_text(raw_content)
+                        self.unfinished.pop()
                         break
 
             if c == "<":
