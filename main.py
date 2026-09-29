@@ -39,6 +39,7 @@ DEFAULT_PAGE = """
         var statusMsg = "7. ⚡ JavaScript Engine: Inline script execution & DOM document.write mutation!";
         document.write("<p><b>" + statusMsg + "</b></p>");
       </script>
+      <p>8. 🖼️ <b>Image Subsystem:</b> Real image fetching, base64 decoding & Pillow PhotoImage rendering!</p>
       <p>Try live websites:</p>
       <p>👉 <a href="https://example.org">Visit Example.org</a></p>
       <p>👉 <a href="https://wikipedia.org">Visit Wikipedia</a></p>
@@ -191,7 +192,7 @@ class AxomaiBrowserGUI:
             style_tree(dom_root, all_rules)
 
             self.status_var.set("Computing Layout...")
-            layout_root = build_layout_tree(dom_root)
+            layout_root = build_layout_tree(dom_root, self.current_url_obj)
 
             canvas_width = max(self.canvas.winfo_width(), 800)
             if layout_root:

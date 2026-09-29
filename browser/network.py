@@ -150,6 +150,70 @@ class URL:
         body = body_bytes.decode("utf-8", errors="replace")
         return headers, body
 
+    def request_bytes(self) -> tuple[dict[str, str], bytes]:
+        """Fetches raw binary data (e.g. images) from URL."""
+        if self.scheme == "file":
+            try:
+                with open(self.path, "rb") as f:
+                    return {}, f.read()
+            except Exception:
+                return {}, b""
+
+        if self.scheme == "data":
+            if "," in self.path:
+                header, body_str = self.path.split(",", 1)
+                if ";base64" in header:
+                    import base64
+                    try:
+                        return {"content-type": header}, base64.b64decode(body_str)
+                    except Exception:
+                        return {"content-type": header}, b""
+                return {"content-type": header}, body_str.encode("utf-8")
+            return {}, self.path.encode("utf-8")
+
+        s = socket.create_connection((self.host, self.port), timeout=10)
+        response_bytes = bytearray()
+        try:
+            if self.scheme == "https":
+                ctx = ssl.create_default_context()
+                s = ctx.wrap_socket(s, server_hostname=self.host)
+
+            request_data = (
+                f"GET {self.path} HTTP/1.1\r\n"
+                f"Host: {self.host}\r\n"
+                f"User-Agent: AxomaiBrowser/1.0\r\n"
+                f"Connection: close\r\n"
+                f"Accept: image/*,*/*\r\n"
+                f"\r\n"
+            )
+            s.sendall(request_data.encode("utf-8"))
+
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                response_bytes.extend(chunk)
+        finally:
+            s.close()
+
+        delimiter = b"\r\n\r\n"
+        if delimiter in response_bytes:
+            header_bytes, body_bytes = response_bytes.split(delimiter, 1)
+        elif b"\n\n" in response_bytes:
+            header_bytes, body_bytes = response_bytes.split(b"\n\n", 1)
+        else:
+            header_bytes = response_bytes
+            body_bytes = b""
+
+        header_lines = header_bytes.decode("iso-8859-1", errors="replace").splitlines()
+        headers = {}
+        for line in header_lines[1:]:
+            if ":" in line:
+                key, val = line.split(":", 1)
+                headers[key.strip().lower()] = val.strip()
+
+        return headers, bytes(body_bytes)
+
 
 def fetch(url_str: str) -> tuple[dict[str, str], str]:
     """Helper function to fetch URL directly."""

@@ -1,3 +1,5 @@
+import io
+from PIL import Image, ImageTk
 from browser.layout import LayoutBox
 from browser.html_parser import Element, Text
 
@@ -36,6 +38,35 @@ class DrawText:
         )
 
 
+class DrawImage:
+    def __init__(self, x: float, y: float, width: float, height: float, image_bytes: bytes):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.image_bytes = image_bytes
+        self._tk_photo = None
+
+    def execute(self, canvas, scroll_y: float):
+        if not self._tk_photo and self.image_bytes:
+            try:
+                pil_img = Image.open(io.BytesIO(self.image_bytes))
+                w = int(self.width) if self.width > 0 else pil_img.width
+                h = int(self.height) if self.height > 0 else pil_img.height
+                if w > 0 and h > 0 and (w != pil_img.width or h != pil_img.height):
+                    pil_img = pil_img.resize((w, h), Image.Resampling.LANCZOS)
+                self._tk_photo = ImageTk.PhotoImage(pil_img)
+            except Exception as e:
+                print(f"[Painter Image Error]: {e}")
+                return
+
+        if self._tk_photo:
+            canvas.create_image(
+                self.x, self.y - scroll_y,
+                image=self._tk_photo, anchor="nw"
+            )
+
+
 def build_display_list(box: LayoutBox, display_list: list = None) -> list:
     if display_list is None:
         display_list = []
@@ -58,6 +89,13 @@ def build_display_list(box: LayoutBox, display_list: list = None) -> list:
         display_list.append(DrawText(
             box.x, box.y, box.width, box.height,
             box.word, box.font, color, box.href
+        ))
+
+    # 3. Paint image nodes
+    if box.box_type == "image" and getattr(box, "image_bytes", None):
+        display_list.append(DrawImage(
+            box.x, box.y, box.width, box.height,
+            box.image_bytes
         ))
 
     # 3. Recursively paint child boxes

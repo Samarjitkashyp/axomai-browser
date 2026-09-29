@@ -134,17 +134,34 @@ class LayoutBox:
         return (cursor_y - y) + line_height
 
 
-def build_layout_tree(node: Node) -> LayoutBox:
+def build_layout_tree(node: Node, current_url_obj=None) -> LayoutBox:
     if isinstance(node, Element):
         display = node.style.get("display", "block")
         if display == "none":
             return None
 
+        if node.tag == "img":
+            img_box = LayoutBox(node, "image")
+            src = node.attributes.get("src", "")
+            if src and current_url_obj:
+                full_src = current_url_obj.resolve(src)
+                try:
+                    from browser.network import URL
+                    headers, img_bytes = URL(full_src).request_bytes()
+                    img_box.image_bytes = img_bytes
+                except Exception:
+                    img_box.image_bytes = b""
+            w_str = node.attributes.get("width", node.style.get("width", "200px"))
+            h_str = node.attributes.get("height", node.style.get("height", "150px"))
+            img_box.width = parse_px(w_str, 200.0)
+            img_box.height = parse_px(h_str, 150.0)
+            return img_box
+
         box_type = "block" if display in ["block", "flex", "table"] else "inline"
         root_box = LayoutBox(node, box_type)
 
         for child in node.children:
-            child_box = build_layout_tree(child)
+            child_box = build_layout_tree(child, current_url_obj)
             if child_box:
                 root_box.children.append(child_box)
 
