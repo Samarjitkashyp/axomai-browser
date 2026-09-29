@@ -102,8 +102,15 @@ class AxomaiBrowserGUI:
 
         self.load_url(url_str)
 
+    def _short_url(self, url_str: str) -> str:
+        clean = url_str.split("\n", 1)[0]
+        if len(clean) > 50:
+            return clean[:47] + "..."
+        return clean
+
     def load_url(self, url_str: str):
-        self.status_var.set(f"Connecting to {url_str}...")
+        short = self._short_url(url_str)
+        self.status_var.set(f"Connecting to {short}...")
         self.root.update_idletasks()
 
         try:
@@ -147,12 +154,12 @@ class AxomaiBrowserGUI:
 
             self.scroll_y = 0.0
             self.render()
-            self.status_var.set(f"Loaded {url_str}")
+            self.status_var.set(f"Loaded {short}")
             self._update_nav_buttons()
 
         except Exception as e:
-            messagebox.showerror("Page Load Error", f"Failed to load {url_str}:\n{e}")
-            self.status_var.set(f"Error loading {url_str}")
+            messagebox.showerror("Page Load Error", f"Failed to load {short}:\n{e}")
+            self.status_var.set(f"Error loading {short}")
 
     def _extract_style_tags(self, node, css_list: list):
         if isinstance(node, Element) and node.tag == "style":

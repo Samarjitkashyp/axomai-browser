@@ -49,8 +49,8 @@ def build_display_list(box: LayoutBox, display_list: list = None) -> list:
             bg_color
         ))
 
-    # 2. Paint text nodes
-    if box.box_type == "text" and box.word:
+    # 2. Paint text nodes (only leaf text boxes)
+    if box.box_type == "text" and box.word and not box.children:
         color = box.style.get("color", "black")
         display_list.append(DrawText(
             box.x, box.y,
