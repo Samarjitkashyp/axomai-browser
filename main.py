@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from browser.network import URL
-from browser.html_parser import HTMLParser
+from browser.html_parser import HTMLParser, Element, Text
 from browser.css_parser import CSSParser, DEFAULT_UA_STYLES, style_tree
 from browser.layout import build_layout_tree
 from browser.painter import build_display_list
