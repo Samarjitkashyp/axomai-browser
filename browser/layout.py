@@ -28,6 +28,15 @@ def parse_px(val: str, default: float = 0.0) -> float:
         return default
 
 
+def get_href(node: Node) -> str:
+    curr = node
+    while curr:
+        if isinstance(curr, Element) and curr.tag == "a":
+            return curr.attributes.get("href", "")
+        curr = getattr(curr, "parent", None)
+    return ""
+
+
 class LayoutBox:
     def __init__(self, node: Node, box_type: str = "block"):
         self.node = node
@@ -40,6 +49,7 @@ class LayoutBox:
         self.word = ""  # for text boxes
         self.font = None
         self.style = getattr(node, "style", {})
+        self.href = get_href(node)
 
     def layout(self, x: float, y: float, max_width: float) -> float:
         """
@@ -53,27 +63,31 @@ class LayoutBox:
             self.width = max_width
             margin_top = parse_px(self.style.get("margin-top", "0px"))
             margin_bottom = parse_px(self.style.get("margin-bottom", "0px"))
+            padding_top = parse_px(self.style.get("padding-top", self.style.get("padding", "0px")))
+            padding_bottom = parse_px(self.style.get("padding-bottom", self.style.get("padding", "0px")))
+            padding_left = parse_px(self.style.get("padding-left", self.style.get("padding", "0px")))
+            padding_right = parse_px(self.style.get("padding-right", self.style.get("padding", "0px")))
 
-            cursor_y = y + margin_top
-            child_x = x
+            content_width = max(0.0, self.width - padding_left - padding_right)
+            cursor_y = y + margin_top + padding_top
+            child_x = x + padding_left
 
             # Collect inline/text elements into line wrapper boxes or recursive blocks
             line_boxes = []
             for child in self.children:
                 if child.box_type == "block":
-                    # Flush pending inline line boxes first
                     if line_boxes:
-                        cursor_y += self._layout_inline_lines(line_boxes, child_x, cursor_y, self.width)
+                        cursor_y += self._layout_inline_lines(line_boxes, child_x, cursor_y, content_width)
                         line_boxes = []
-                    child_height = child.layout(child_x, cursor_y, self.width)
+                    child_height = child.layout(child_x, cursor_y, content_width)
                     cursor_y += child_height
                 else:
                     line_boxes.append(child)
 
             if line_boxes:
-                cursor_y += self._layout_inline_lines(line_boxes, child_x, cursor_y, self.width)
+                cursor_y += self._layout_inline_lines(line_boxes, child_x, cursor_y, content_width)
 
-            self.height = (cursor_y - y) + margin_bottom
+            self.height = (cursor_y - y) + margin_bottom + padding_bottom
             return self.height
 
         return 0.0
@@ -112,6 +126,7 @@ class LayoutBox:
                     word_box.height = line_height
                     word_box.font = font
                     word_box.style = child.style
+                    word_box.href = child.href
                     child.children.append(word_box)
 
                     cursor_x += w

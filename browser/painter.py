@@ -18,12 +18,15 @@ class DrawRect:
 
 
 class DrawText:
-    def __init__(self, x: float, y: float, text: str, font, color: str):
+    def __init__(self, x: float, y: float, width: float, height: float, text: str, font, color: str, href: str = ""):
         self.x = x
         self.y = y
+        self.width = width
+        self.height = height
         self.text = text
         self.font = font
         self.color = color
+        self.href = href
 
     def execute(self, canvas, scroll_y: float):
         canvas.create_text(
@@ -53,8 +56,8 @@ def build_display_list(box: LayoutBox, display_list: list = None) -> list:
     if box.box_type == "text" and box.word and not box.children:
         color = box.style.get("color", "black")
         display_list.append(DrawText(
-            box.x, box.y,
-            box.word, box.font, color
+            box.x, box.y, box.width, box.height,
+            box.word, box.font, color, box.href
         ))
 
     # 3. Recursively paint child boxes

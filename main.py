@@ -33,6 +33,10 @@ DEFAULT_PAGE = """
       <p>3. 🎨 <b>CSS Engine:</b> Selectors, Cascade, Inheritance & UA Stylesheets.</p>
       <p>4. 📏 <b>Layout Engine:</b> Box geometry, Block stacking & Inline text wrapping.</p>
       <p>5. 🖌️ <b>Painter:</b> Display command list painted on Tkinter Canvas.</p>
+      <p>6. 🔗 <b>Interactive Links:</b> Clickable hyper-linking & relative URL resolution.</p>
+      <p>Try live websites:</p>
+      <p>👉 <a href="https://example.org">Visit Example.org</a></p>
+      <p>👉 <a href="https://wikipedia.org">Visit Wikipedia</a></p>
     </div>
   </body>
 </html>
@@ -53,6 +57,7 @@ class AxomaiBrowserGUI:
         self.max_scroll_y = 0.0
         self.display_list = []
 
+        self.current_url_obj = None
         self._setup_ui()
         self._bind_events()
 
@@ -88,9 +93,38 @@ class AxomaiBrowserGUI:
 
     def _bind_events(self):
         self.canvas.bind("<Configure>", lambda e: self.render())
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.root.bind("<Up>", lambda e: self.scroll(-SCROLL_STEP))
         self.root.bind("<Down>", lambda e: self.scroll(SCROLL_STEP))
         self.root.bind("<MouseWheel>", lambda e: self.scroll(-int(e.delta / 2)))
+
+    def _on_canvas_click(self, event):
+        click_x = event.x
+        click_y = event.y + self.scroll_y
+        for cmd in self.display_list:
+            if hasattr(cmd, "href") and cmd.href:
+                if cmd.x <= click_x <= cmd.x + cmd.width and cmd.y <= click_y <= cmd.y + cmd.height:
+                    target = self.current_url_obj.resolve(cmd.href) if self.current_url_obj else cmd.href
+                    self.load_url(target)
+                    break
+
+    def _on_canvas_motion(self, event):
+        hover_x = event.x
+        hover_y = event.y + self.scroll_y
+        hovered_href = None
+        for cmd in self.display_list:
+            if hasattr(cmd, "href") and cmd.href:
+                if cmd.x <= hover_x <= cmd.x + cmd.width and cmd.y <= hover_y <= cmd.y + cmd.height:
+                    hovered_href = cmd.href
+                    break
+
+        if hovered_href:
+            self.canvas.config(cursor="hand2")
+            target = self.current_url_obj.resolve(hovered_href) if self.current_url_obj else hovered_href
+            self.status_var.set(f"Link: {target}")
+        else:
+            self.canvas.config(cursor="")
 
     def navigate(self):
         url_str = self.url_entry.get().strip()
@@ -115,6 +149,7 @@ class AxomaiBrowserGUI:
 
         try:
             url = URL(url_str)
+            self.current_url_obj = url
             headers, body = url.request()
 
             # Record history

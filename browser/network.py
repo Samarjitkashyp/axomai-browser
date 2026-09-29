@@ -46,6 +46,25 @@ class URL:
             elif self.scheme == "https":
                 self.port = 443
 
+    def resolve(self, relative_url: str) -> str:
+        """Resolves relative URL path against this URL's base location."""
+        if not relative_url:
+            return f"{self.scheme}://{self.host}{self.path}"
+        if "://" in relative_url or relative_url.startswith("data:") or relative_url.startswith("file:"):
+            return relative_url
+        if relative_url.startswith("//"):
+            return f"{self.scheme}:{relative_url}"
+        
+        port_suffix = f":{self.port}" if self.port and self.port not in [80, 443] else ""
+        if relative_url.startswith("/"):
+            return f"{self.scheme}://{self.host}{port_suffix}{relative_url}"
+        
+        dir_path = self.path.rsplit("/", 1)[0]
+        if not dir_path.startswith("/"):
+            dir_path = "/" + dir_path
+        full_path = f"{dir_path}/{relative_url}".replace("//", "/")
+        return f"{self.scheme}://{self.host}{port_suffix}{full_path}"
+
     def request(self) -> tuple[dict[str, str], str]:
         """
         Fetches the URL over HTTP/HTTPS or local file/data scheme.
