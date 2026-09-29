@@ -7,6 +7,7 @@ from browser.html_parser import HTMLParser, Element, Text
 from browser.css_parser import CSSParser, DEFAULT_UA_STYLES, style_tree
 from browser.layout import build_layout_tree
 from browser.painter import build_display_list
+from browser.js_engine import JSEngine
 
 DEFAULT_PAGE = """
 <html>
@@ -34,6 +35,10 @@ DEFAULT_PAGE = """
       <p>4. 📏 <b>Layout Engine:</b> Box geometry, Block stacking & Inline text wrapping.</p>
       <p>5. 🖌️ <b>Painter:</b> Display command list painted on Tkinter Canvas.</p>
       <p>6. 🔗 <b>Interactive Links:</b> Clickable hyper-linking & relative URL resolution.</p>
+      <script>
+        var statusMsg = "7. ⚡ JavaScript Engine: Inline script execution & DOM document.write mutation!";
+        document.write("<p><b>" + statusMsg + "</b></p>");
+      </script>
       <p>Try live websites:</p>
       <p>👉 <a href="https://example.org">Visit Example.org</a></p>
       <p>👉 <a href="https://wikipedia.org">Visit Wikipedia</a></p>
@@ -165,6 +170,15 @@ class AxomaiBrowserGUI:
             self.status_var.set("Parsing HTML & CSS...")
             dom_root = HTMLParser(body).parse()
 
+            # Execute inline JavaScript <script> tags
+            scripts = []
+            self._extract_script_tags(dom_root, scripts)
+            if scripts:
+                self.status_var.set("Executing JavaScript...")
+                js_engine = JSEngine(dom_root)
+                for js_code in scripts:
+                    js_engine.execute(js_code)
+
             author_css = ""
             # Extract inline <style> contents
             self._extract_style_tags(dom_root, author_css_list:=[])
@@ -203,6 +217,14 @@ class AxomaiBrowserGUI:
                     css_list.append(child.text)
         for child in getattr(node, "children", []):
             self._extract_style_tags(child, css_list)
+
+    def _extract_script_tags(self, node, script_list: list):
+        if isinstance(node, Element) and node.tag == "script":
+            for child in node.children:
+                if isinstance(child, Text):
+                    script_list.append(child.text)
+        for child in getattr(node, "children", []):
+            self._extract_script_tags(child, script_list)
 
     def render(self):
         self.canvas.delete("all")
