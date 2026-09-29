@@ -56,6 +56,12 @@ class JSEngine:
     def _eval_expr(self, expr_str: str):
         expr_str = expr_str.strip()
         
+        # Handle string concatenation '+' outside quotes first
+        if "+" in expr_str:
+            parts = self._split_addition(expr_str)
+            if len(parts) > 1:
+                return "".join(str(self._eval_expr(p)) for p in parts)
+
         # String literal "..." or '...'
         if (expr_str.startswith('"') and expr_str.endswith('"')) or (expr_str.startswith("'") and expr_str.endswith("'")):
             return expr_str[1:-1]
@@ -72,12 +78,27 @@ class JSEngine:
         if expr_str in self.variables:
             return self.variables[expr_str]
 
-        # Simple string concatenation a + b
-        if "+" in expr_str:
-            parts = [self._eval_expr(p) for p in expr_str.split("+")]
-            return "".join(str(p) for p in parts)
-
         return expr_str
+
+    def _split_addition(self, expr: str) -> list[str]:
+        parts = []
+        in_quote = None
+        curr = ""
+        for c in expr:
+            if c in ['"', "'"]:
+                if in_quote is None:
+                    in_quote = c
+                elif in_quote == c:
+                    in_quote = None
+                curr += c
+            elif c == "+" and in_quote is None:
+                parts.append(curr)
+                curr = ""
+            else:
+                curr += c
+        if curr:
+            parts.append(curr)
+        return parts
 
     def _find_body(self, node: Node):
         if isinstance(node, Element) and node.tag == "body":
