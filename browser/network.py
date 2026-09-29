@@ -8,25 +8,35 @@ class URL:
         self.port = None
         self.path = "/"
 
-        # Handle scheme
-        if "://" in url_string:
-            self.scheme, url_string = url_string.split("://", 1)
-        elif ":" in url_string and "/" not in url_string.split(":", 1)[0]:
+        # Handle scheme matching strictly at the start of the URL string
+        if url_string.startswith("https://"):
+            self.scheme = "https"
+            url_string = url_string[8:]
+        elif url_string.startswith("http://"):
+            self.scheme = "http"
+            url_string = url_string[7:]
+        elif url_string.startswith("file://"):
+            self.scheme = "file"
+            self.path = url_string[7:]
+            return
+        elif url_string.startswith("data:"):
+            self.scheme = "data"
+            self.path = url_string[5:]
+            return
+        elif ":" in url_string:
             scheme_part, rest = url_string.split(":", 1)
             if scheme_part.lower() in ["http", "https", "file", "data"]:
                 self.scheme = scheme_part.lower()
                 url_string = rest
-        
+                if self.scheme == "data":
+                    self.path = rest
+                    return
+                elif self.scheme == "file":
+                    self.path = rest
+                    return
+
         if self.scheme not in ["http", "https", "file", "data"]:
             raise ValueError(f"Unsupported scheme: {self.scheme}")
-
-        if self.scheme == "file":
-            self.path = url_string
-            return
-
-        if self.scheme == "data":
-            self.path = url_string
-            return
 
         # Separate host and path
         if "/" in url_string:
