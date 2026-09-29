@@ -14,3 +14,15 @@ ENV/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Rust build target
+native/rust_engine/target/
+target/
+
+# C++ binaries and build artifacts
+*.exe
+*.dll
+*.obj
+*.lib
+*.pdb
+*.ilk

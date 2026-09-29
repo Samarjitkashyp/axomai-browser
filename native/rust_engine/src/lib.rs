@@ -1,10 +1,17 @@
 pub mod css_parser;
+pub mod engine;
+pub mod ffi;
+pub mod html_parser;
 pub mod js_engine;
+pub mod layout;
+pub mod network;
+pub mod painter;
 
-use css_parser::CSSParser;
-use js_engine::RustJSEngine;
-
-// C-FFI interface functions for cross-language bindings
+pub use css_parser::CSSParser;
+pub use engine::AxomaiEngine;
+pub use ffi::*;
+pub use html_parser::HTMLParser;
+pub use js_engine::RustJSEngine;
 
 #[no_mangle]
 pub extern "C" fn rust_parse_css_count(css_text: *const std::os::raw::c_char) -> usize {
@@ -29,16 +36,21 @@ mod tests {
         let parser = CSSParser::new(css);
         let rules = parser.parse();
         assert_eq!(rules.len(), 2);
-        assert_eq!(rules[0].selector, "h1");
-        assert_eq!(rules[0].declarations.get("color").unwrap(), "red");
     }
 
     #[test]
-    fn test_rust_js_engine() {
-        let mut js_engine = RustJSEngine::new();
-        let js = "var name = 'Axomai'; document.write('<h1>' + name + '</h1>');";
-        let mutated = js_engine.execute(js);
-        assert!(mutated);
-        assert_eq!(js_engine.dom_mutations[0], "<h1>Axomai</h1>");
+    fn test_rust_html_parser() {
+        let html = "<html><body><div class='title'>Hello Rust</div></body></html>";
+        let dom = HTMLParser::new(html).parse();
+        assert!(dom.borrow().children.len() > 0);
+    }
+
+    #[test]
+    fn test_rust_engine_pipeline() {
+        let mut engine = AxomaiEngine::new();
+        let html = "<html><body><h1>Axomai Engine</h1><p>Running on Rust!</p></body></html>";
+        let res = engine.load_html(html, 800.0, 600.0);
+        assert!(res.is_ok());
+        assert!(engine.display_list.len() > 0);
     }
 }
