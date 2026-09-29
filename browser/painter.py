@@ -67,6 +67,58 @@ class DrawImage:
             )
 
 
+class DrawInput:
+    def __init__(self, x: float, y: float, width: float, height: float, value: str, placeholder: str, is_focused: bool = False, node=None):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.value = value
+        self.placeholder = placeholder
+        self.is_focused = is_focused
+        self.node = node
+
+    def execute(self, canvas, scroll_y: float):
+        border_color = "#0284c7" if self.is_focused else "#cbd5e1"
+        bg_color = "#ffffff"
+        canvas.create_rectangle(
+            self.x, self.y - scroll_y,
+            self.x + self.width, self.y + self.height - scroll_y,
+            fill=bg_color, outline=border_color, width=2 if self.is_focused else 1
+        )
+        display_text = self.value if self.value else self.placeholder
+        text_color = "#0f172a" if self.value else "#94a3b8"
+        if self.is_focused:
+            display_text += "|"
+        if display_text:
+            canvas.create_text(
+                self.x + 8, self.y + (self.height / 2) - scroll_y,
+                text=display_text, fill=text_color, anchor="w",
+                font=("sans-serif", 10)
+            )
+
+
+class DrawButton:
+    def __init__(self, x: float, y: float, width: float, height: float, label: str):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.label = label
+
+    def execute(self, canvas, scroll_y: float):
+        canvas.create_rectangle(
+            self.x, self.y - scroll_y,
+            self.x + self.width, self.y + self.height - scroll_y,
+            fill="#0284c7", outline="#0369a1", width=1
+        )
+        canvas.create_text(
+            self.x + (self.width / 2), self.y + (self.height / 2) - scroll_y,
+            text=self.label, fill="#ffffff", anchor="center",
+            font=("sans-serif", 10, "bold")
+        )
+
+
 def build_display_list(box: LayoutBox, display_list: list = None) -> list:
     if display_list is None:
         display_list = []
@@ -98,7 +150,27 @@ def build_display_list(box: LayoutBox, display_list: list = None) -> list:
             box.image_bytes
         ))
 
-    # 3. Recursively paint child boxes
+    # 4. Paint input fields
+    if box.box_type == "input":
+        display_list.append(DrawInput(
+            box.x, box.y, box.width, box.height,
+            getattr(box, "value", ""),
+            getattr(box, "placeholder", ""),
+            is_focused=getattr(box, "is_focused", False),
+            node=box.node
+        ))
+
+    # 5. Paint buttons
+    if box.box_type == "button":
+        btn_label = "Submit"
+        if box.children and hasattr(box.children[0], "word"):
+            btn_label = box.children[0].word.strip()
+        display_list.append(DrawButton(
+            box.x, box.y, box.width, box.height,
+            btn_label
+        ))
+
+    # 6. Recursively paint child boxes
     for child in box.children:
         build_display_list(child, display_list)
 

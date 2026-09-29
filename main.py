@@ -6,7 +6,7 @@ from browser.network import URL
 from browser.html_parser import HTMLParser, Element, Text
 from browser.css_parser import CSSParser, DEFAULT_UA_STYLES, style_tree
 from browser.layout import build_layout_tree
-from browser.painter import build_display_list
+from browser.painter import build_display_list, DrawInput, DrawButton
 from browser.js_engine import JSEngine
 
 DEFAULT_PAGE = """
@@ -40,6 +40,12 @@ DEFAULT_PAGE = """
         document.write("<p><b>" + statusMsg + "</b></p>");
       </script>
       <p>8. 🖼️ <b>Image Subsystem:</b> Real image fetching, base64 decoding & Pillow PhotoImage rendering!</p>
+      <p>9. 📝 <b>Form Controls:</b> Interactive Canvas Input Fields & Live Search Buttons!</p>
+      <p>🔍 <b>Try Live Web Search:</b></p>
+      <p>
+        <input placeholder="Type search query here..." value="" />
+        <button>Search</button>
+      </p>
       <p>Try live websites:</p>
       <p>👉 <a href="https://example.org">Visit Example.org</a></p>
       <p>👉 <a href="https://wikipedia.org">Visit Wikipedia</a></p>
@@ -62,6 +68,7 @@ class AxomaiBrowserGUI:
         self.scroll_y = 0.0
         self.max_scroll_y = 0.0
         self.display_list = []
+        self.focused_input = None
 
         self.current_url_obj = None
         self._setup_ui()
@@ -101,6 +108,7 @@ class AxomaiBrowserGUI:
         self.canvas.bind("<Configure>", lambda e: self.render())
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.canvas.bind("<Motion>", self._on_canvas_motion)
+        self.root.bind("<Key>", self._on_key_press)
         self.root.bind("<Up>", lambda e: self.scroll(-SCROLL_STEP))
         self.root.bind("<Down>", lambda e: self.scroll(SCROLL_STEP))
         self.root.bind("<MouseWheel>", lambda e: self.scroll(-int(e.delta / 2)))
@@ -108,12 +116,54 @@ class AxomaiBrowserGUI:
     def _on_canvas_click(self, event):
         click_x = event.x
         click_y = event.y + self.scroll_y
+
+        if self.focused_input:
+            self.focused_input.is_focused = False
+            self.focused_input = None
+
         for cmd in self.display_list:
+            if isinstance(cmd, DrawInput):
+                if cmd.x <= click_x <= cmd.x + cmd.width and cmd.y <= click_y <= cmd.y + cmd.height:
+                    cmd.is_focused = True
+                    self.focused_input = cmd
+                    self.render()
+                    return
+
+            if isinstance(cmd, DrawButton):
+                if cmd.x <= click_x <= cmd.x + cmd.width and cmd.y <= click_y <= cmd.y + cmd.height:
+                    query = self.focused_input.value if self.focused_input else ""
+                    if query:
+                        search_url = f"https://html.duckduckgo.com/html/?q={query}"
+                        self.load_url(search_url)
+                    return
+
             if hasattr(cmd, "href") and cmd.href:
                 if cmd.x <= click_x <= cmd.x + cmd.width and cmd.y <= click_y <= cmd.y + cmd.height:
                     target = self.current_url_obj.resolve(cmd.href) if self.current_url_obj else cmd.href
                     self.load_url(target)
-                    break
+                    return
+
+        self.render()
+
+    def _on_key_press(self, event):
+        if not self.focused_input:
+            return
+
+        if event.keysym == "BackSpace":
+            self.focused_input.value = self.focused_input.value[:-1]
+            if hasattr(self.focused_input, "node") and self.focused_input.node:
+                self.focused_input.node.attributes["value"] = self.focused_input.value
+            self.render()
+        elif event.keysym == "Return":
+            query = self.focused_input.value.strip()
+            if query:
+                search_url = f"https://html.duckduckgo.com/html/?q={query}"
+                self.load_url(search_url)
+        elif len(event.char) == 1 and ord(event.char) >= 32:
+            self.focused_input.value += event.char
+            if hasattr(self.focused_input, "node") and self.focused_input.node:
+                self.focused_input.node.attributes["value"] = self.focused_input.value
+            self.render()
 
     def _on_canvas_motion(self, event):
         hover_x = event.x

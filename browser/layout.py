@@ -157,6 +157,24 @@ def build_layout_tree(node: Node, current_url_obj=None) -> LayoutBox:
             img_box.height = parse_px(h_str, 150.0)
             return img_box
 
+        if node.tag == "input":
+            input_box = LayoutBox(node, "input")
+            input_box.value = node.attributes.get("value", "")
+            input_box.placeholder = node.attributes.get("placeholder", "")
+            input_box.width = parse_px(node.attributes.get("width", node.style.get("width", "180px")), 180.0)
+            input_box.height = parse_px(node.attributes.get("height", node.style.get("height", "30px")), 30.0)
+            return input_box
+
+        if node.tag == "button":
+            btn_box = LayoutBox(node, "button")
+            btn_box.width = parse_px(node.attributes.get("width", node.style.get("width", "100px")), 100.0)
+            btn_box.height = parse_px(node.attributes.get("height", node.style.get("height", "32px")), 32.0)
+            for child in node.children:
+                child_box = build_layout_tree(child, current_url_obj)
+                if child_box:
+                    btn_box.children.append(child_box)
+            return btn_box
+
         box_type = "block" if display in ["block", "flex", "table"] else "inline"
         root_box = LayoutBox(node, box_type)
 
