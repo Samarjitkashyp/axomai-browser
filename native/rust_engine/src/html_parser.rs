@@ -275,7 +275,7 @@ impl<'a> HTMLParser<'a> {
         (tag_name, attributes)
     }
 
-    fn finish(mut self) -> NodePtr {
+    fn finish(self) -> NodePtr {
         if !self.unfinished.is_empty() {
             return Rc::clone(&self.unfinished[0]);
         }

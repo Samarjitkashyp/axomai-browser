@@ -1,6 +1,6 @@
 use crate::engine::AxomaiEngine;
 use crate::painter::DisplayCommand;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::slice;
 

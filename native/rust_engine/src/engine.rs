@@ -1,5 +1,5 @@
 use crate::css_parser::{style_tree, CSSParser, DEFAULT_UA_STYLES};
-use crate::html_parser::{HTMLParser, NodeData, NodePtr, NodeType};
+use crate::html_parser::{HTMLParser, NodePtr, NodeType};
 use crate::js_engine::RustJSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
 use crate::network::URL;
