@@ -13,54 +13,63 @@ DEFAULT_PAGE = """
 <html>
   <head>
     <style>
-      body { font-family: sans-serif; background-color: #f4f6f9; }
-      .header { background-color: #1e293b; color: #ffffff; padding: 15px; }
-      .container { margin: 20px; background-color: #ffffff; padding: 20px; border-radius: 8px; }
-      h1 { color: #38bdf8; font-size: 28px; }
-      p { color: #334155; font-size: 16px; margin-top: 10px; }
-      b { color: #0284c7; }
+      body { font-family: 'Segoe UI', system-ui, sans-serif; background-color: #ffffff; margin: 0px; color: #202124; }
+      .hero { text-align: center; margin-top: 40px; margin-bottom: 20px; }
+      .title { font-size: 36px; font-weight: bold; color: #1a73e8; margin-bottom: 10px; }
+      .subtitle { font-size: 14px; color: #5f6368; }
+      .search-box { margin-top: 25px; margin-bottom: 30px; text-align: center; }
+      .container { max-width: 800px; margin-left: auto; margin-right: auto; padding: 20px; }
+      .card { background-color: #f8f9fa; border: 1px solid #dadce0; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+      h2 { color: #1a73e8; font-size: 20px; margin-top: 0px; }
+      p { color: #3c4043; font-size: 14px; margin-top: 8px; line-height: 1.5; }
+      b { color: #1a73e8; }
+      a { color: #1a73e8; text-decoration: none; font-weight: bold; }
     </style>
   </head>
   <body>
-    <div class="header">
-      <h1>🚀 Axomai Browser</h1>
+    <div class="hero">
+      <div class="title">🚀 Axomai Chrome Engine</div>
+      <div class="subtitle">Built 100% from scratch in Python • High Performance Browser Pipeline</div>
     </div>
     <div class="container">
-      <h2>Welcome to Axomai Browser!</h2>
-      <p>This browser is built <b>100% from scratch</b> in Python!</p>
-      <p>Features supported in this milestone:</p>
-      <p>1. 🌐 <b>Network Layer:</b> HTTP, HTTPS, File, and Data URLs socket engine.</p>
-      <p>2. 🏗️ <b>HTML Parser:</b> Stack-based DOM Tree builder.</p>
-      <p>3. 🎨 <b>CSS Engine:</b> Selectors, Cascade, Inheritance & UA Stylesheets.</p>
-      <p>4. 📏 <b>Layout Engine:</b> Box geometry, Block stacking & Inline text wrapping.</p>
-      <p>5. 🖌️ <b>Painter:</b> Display command list painted on Tkinter Canvas.</p>
-      <p>6. 🔗 <b>Interactive Links:</b> Clickable hyper-linking & relative URL resolution.</p>
-      <script>
-        var statusMsg = "7. ⚡ JavaScript Engine: Inline script execution & DOM document.write mutation!";
-        document.write("<p><b>" + statusMsg + "</b></p>");
-      </script>
-      <p>8. 🖼️ <b>Image Subsystem:</b> Real image fetching, base64 decoding & Pillow PhotoImage rendering!</p>
-      <p>9. 📝 <b>Form Controls:</b> Interactive Canvas Input Fields & Live Search Buttons!</p>
-      <p>🔍 <b>Try Live Web Search:</b></p>
-      <p>
-        <input placeholder="Type search query here..." value="" />
-        <button>Search</button>
-      </p>
-      <p>Try live websites:</p>
-      <p>👉 <a href="https://example.org">Visit Example.org</a></p>
-      <p>👉 <a href="https://wikipedia.org">Visit Wikipedia</a></p>
+      <div class="search-box">
+        <p><b>Search the Web or Enter URL:</b></p>
+        <p>
+          <input placeholder="Search Google or type a URL..." value="" width="480px" height="42px" />
+          <button width="90px" height="42px">Search</button>
+        </p>
+      </div>
+      <div class="card">
+        <h2>⚡ Browser Subsystems Status</h2>
+        <p>1. 🌐 <b>Network Sockets:</b> HTTP, HTTPS (SSL), File & Data URLs.</p>
+        <p>2. 🏗️ <b>HTML DOM Parser:</b> Stack-based AST & Error Recovery.</p>
+        <p>3. 🎨 <b>CSS Style Engine:</b> Cascading rules, selectors & UA styles.</p>
+        <p>4. 📏 <b>Layout Engine:</b> Box Model, Text wrapping & Pill geometry.</p>
+        <p>5. 🖌️ <b>Painter Engine:</b> Tkinter Display List commands & Canvas drawing.</p>
+        <p>6. 🔗 <b>Hyperlinks:</b> Interactive link resolution & hover cursor.</p>
+        <script>
+          var statusMsg = "7. ⚡ JavaScript Engine: Inline script execution & DOM document.write mutation!";
+          document.write("<p><b>" + statusMsg + "</b></p>");
+        </script>
+        <p>8. 🖼️ <b>Image Subsystem:</b> Pillow PhotoImage rendering & base64 decoding.</p>
+        <p>9. 📝 <b>Form Controls:</b> Chrome Pill Input Fields & Canvas Typing.</p>
+      </div>
+      <div class="card">
+        <h2>🌐 Quick Shortcuts</h2>
+        <p>👉 <a href="https://example.org">Example.org</a> • <a href="https://wikipedia.org">Wikipedia</a> • <a href="https://github.com/Samarjitkashyp/axomai-browser">Axomai GitHub Repo</a></p>
+      </div>
     </div>
   </body>
 </html>
 """
 
-WIDTH, HEIGHT = 900, 650
+WIDTH, HEIGHT = 950, 680
 SCROLL_STEP = 40
 
 class AxomaiBrowserGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Axomai Browser")
+        self.root.title("Axomai Browser - Chrome Engine")
         self.root.geometry(f"{WIDTH}x{HEIGHT}")
 
         self.history = []
@@ -78,18 +87,24 @@ class AxomaiBrowserGUI:
         self.load_url("data:text/html," + DEFAULT_PAGE)
 
     def _setup_ui(self):
-        # Top toolbar
-        toolbar = ttk.Frame(self.root, padding=5)
+        # Chrome Top Toolbar
+        toolbar = ttk.Frame(self.root, padding=6)
         toolbar.pack(fill="x", side="top")
 
-        self.back_btn = ttk.Button(toolbar, text="◀", width=3, command=self.go_back)
+        self.back_btn = ttk.Button(toolbar, text="◄", width=3, command=self.go_back)
         self.back_btn.pack(side="left", padx=2)
 
-        self.forward_btn = ttk.Button(toolbar, text="▶", width=3, command=self.go_forward)
+        self.forward_btn = ttk.Button(toolbar, text="►", width=3, command=self.go_forward)
         self.forward_btn.pack(side="left", padx=2)
 
+        self.reload_btn = ttk.Button(toolbar, text="↻", width=3, command=self.reload_page)
+        self.reload_btn.pack(side="left", padx=2)
+
+        self.home_btn = ttk.Button(toolbar, text="🏠", width=3, command=lambda: self.load_url("data:text/html," + DEFAULT_PAGE))
+        self.home_btn.pack(side="left", padx=2)
+
         self.url_entry = ttk.Entry(toolbar)
-        self.url_entry.pack(side="left", fill="x", expand=True, padx=5)
+        self.url_entry.pack(side="left", fill="x", expand=True, padx=6)
         self.url_entry.bind("<Return>", lambda e: self.navigate())
 
         self.go_btn = ttk.Button(toolbar, text="Go", width=5, command=self.navigate)
@@ -101,8 +116,12 @@ class AxomaiBrowserGUI:
         status_bar.pack(fill="x", side="bottom")
 
         # Main Rendering Canvas
-        self.canvas = tk.Canvas(self.root, bg="white")
+        self.canvas = tk.Canvas(self.root, bg="#ffffff", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, side="top")
+
+    def reload_page(self):
+        if self.history and self.history_idx >= 0:
+            self.load_url(self.history[self.history_idx])
 
     def _bind_events(self):
         self.canvas.bind("<Configure>", lambda e: self.render())

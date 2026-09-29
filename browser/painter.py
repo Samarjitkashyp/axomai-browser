@@ -67,6 +67,24 @@ class DrawImage:
             )
 
 
+def draw_rounded_rect(canvas, x1, y1, x2, y2, radius=14, fill="", outline="", width=1):
+    points = [
+        x1 + radius, y1,
+        x2 - radius, y1,
+        x2, y1,
+        x2, y1 + radius,
+        x2, y2 - radius,
+        x2, y2,
+        x2 - radius, y2,
+        x1 + radius, y2,
+        x1, y2,
+        x1, y2 - radius,
+        x1, y1 + radius,
+        x1, y1
+    ]
+    return canvas.create_polygon(points, fill=fill, outline=outline, width=width, smooth=True)
+
+
 class DrawInput:
     def __init__(self, x: float, y: float, width: float, height: float, value: str, placeholder: str, is_focused: bool = False, node=None):
         self.x = x
@@ -79,22 +97,34 @@ class DrawInput:
         self.node = node
 
     def execute(self, canvas, scroll_y: float):
-        border_color = "#0284c7" if self.is_focused else "#cbd5e1"
-        bg_color = "#ffffff"
-        canvas.create_rectangle(
+        border_color = "#1a73e8" if self.is_focused else "#dfe1e5"
+        bg_color = "#ffffff" if self.is_focused else "#f8f9fa"
+        radius = min(18, self.height / 2)
+        
+        # Chrome Pill Search Bar Box
+        draw_rounded_rect(
+            canvas,
             self.x, self.y - scroll_y,
             self.x + self.width, self.y + self.height - scroll_y,
-            fill=bg_color, outline=border_color, width=2 if self.is_focused else 1
+            radius=radius, fill=bg_color, outline=border_color, width=2 if self.is_focused else 1
         )
+        
+        # Search icon prefix
+        canvas.create_text(
+            self.x + 12, self.y + (self.height / 2) - scroll_y,
+            text="🔍", font=("sans-serif", 9), fill="#5f6368", anchor="w"
+        )
+        
         display_text = self.value if self.value else self.placeholder
-        text_color = "#0f172a" if self.value else "#94a3b8"
+        text_color = "#202124" if self.value else "#80868b"
         if self.is_focused:
             display_text += "|"
+            
         if display_text:
             canvas.create_text(
-                self.x + 8, self.y + (self.height / 2) - scroll_y,
+                self.x + 30, self.y + (self.height / 2) - scroll_y,
                 text=display_text, fill=text_color, anchor="w",
-                font=("sans-serif", 10)
+                font=("Segoe UI", 10)
             )
 
 
@@ -107,15 +137,17 @@ class DrawButton:
         self.label = label
 
     def execute(self, canvas, scroll_y: float):
-        canvas.create_rectangle(
+        radius = min(16, self.height / 2)
+        draw_rounded_rect(
+            canvas,
             self.x, self.y - scroll_y,
             self.x + self.width, self.y + self.height - scroll_y,
-            fill="#0284c7", outline="#0369a1", width=1
+            radius=radius, fill="#1a73e8", outline="#174ea6", width=1
         )
         canvas.create_text(
             self.x + (self.width / 2), self.y + (self.height / 2) - scroll_y,
             text=self.label, fill="#ffffff", anchor="center",
-            font=("sans-serif", 10, "bold")
+            font=("Segoe UI", 10, "bold")
         )
 
 
