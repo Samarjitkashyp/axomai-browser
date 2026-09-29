@@ -1,0 +1,17 @@
+[package]
+name = "axomai_engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["Samarjit Kashyap <samarjitkashyp@gmail.com>"]
+description = "High-performance Rust CSS Parser and JS Engine for Axomai Browser"
+
+[lib]
+name = "axomai_engine"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python = ["dep:pyo3"]
