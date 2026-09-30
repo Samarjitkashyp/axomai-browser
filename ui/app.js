@@ -233,7 +233,32 @@ window.__axomai_render_display_list = function(displayList) {
         window.ipc.postMessage(`click:${clickX},${clickY}`);
       }
     });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (window.ipc) {
+        window.ipc.postMessage(`wheel:${e.deltaY}`);
+      }
+    }, { passive: false });
+
+    canvas.tabIndex = 0; // Make canvas focusable for keyboard events
     canvas._clickBound = true;
+  }
+
+  // Global key listener for native page inputs
+  if (!window._axomaiKeyBound) {
+    window.addEventListener('keydown', (e) => {
+      const active = document.activeElement;
+      if (active && (active.classList.contains('omnibox-input') || active.classList.contains('search-input') || active.classList.contains('ai-text-input'))) {
+        return; // Don't intercept browser chrome inputs
+      }
+      if (engineViewport && engineViewport.style.display !== 'none') {
+        if (window.ipc) {
+          window.ipc.postMessage(`key:${e.key}`);
+        }
+      }
+    });
+    window._axomaiKeyBound = true;
   }
 
   const containerW = (engineViewport && engineViewport.clientWidth) || 1200;

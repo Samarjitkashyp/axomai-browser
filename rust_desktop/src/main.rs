@@ -51,8 +51,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let coords = &msg[6..];
                     if let Some(comma) = coords.find(',') {
                         if let (Ok(x), Ok(y)) = (coords[..comma].parse::<f32>(), coords[comma + 1..].parse::<f32>()) {
-                            let _ = eng.handle_click(x, y, 0.0);
+                            if let Some(nav_url) = eng.handle_click(x, y, 0.0) {
+                                println!("[Axomai Desktop] Navigating to clicked link: {}", nav_url);
+                                let _ = eng.load_url(&nav_url, 1380.0, 860.0);
+                            }
                         }
+                    }
+                } else if msg.starts_with("key:") {
+                    let key_str = &msg[4..];
+                    if let Some(nav_url) = eng.handle_key(key_str) {
+                        println!("[Axomai Desktop] Key triggered navigation: {}", nav_url);
+                        let _ = eng.load_url(&nav_url, 1380.0, 860.0);
+                    }
+                } else if msg.starts_with("wheel:") {
+                    let delta = &msg[6..];
+                    if let Ok(dy) = delta.parse::<f32>() {
+                        let _ = eng.handle_scroll(dy);
                     }
                 }
             }

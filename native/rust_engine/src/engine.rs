@@ -14,6 +14,7 @@ static NEXT_ENGINE_ID: AtomicUsize = AtomicUsize::new(1);
 
 pub struct NavigationResponse {
     pub engine_id: usize,
+    pub document_id: u64,
     pub url: URL,
     pub body: String,
     pub error: Option<String>,
@@ -28,6 +29,7 @@ pub enum ScriptKind {
 }
 
 pub struct PendingScript {
+    pub document_id: u64,
     pub order: usize,
     pub kind: ScriptKind,
     pub url: String,
@@ -36,15 +38,18 @@ pub struct PendingScript {
 
 pub struct AxomaiEngine {
     pub engine_id: usize,
+    pub document_id: u64,
     pub current_url: Option<URL>,
     pub dom_root: Option<NodePtr>,
     pub layout_root: Option<LayoutBox>,
     pub display_list: Vec<DisplayCommand>,
+    pub scroll_y: f32,
     pub max_scroll_y: f32,
     pub focused_input_idx: Option<usize>,
     pub status_message: String,
     pub js_engine: V8JSEngine,
     pub active_css_rules: Vec<Rule>,
+    pub is_dirty: bool,
     nav_tx: Sender<NavigationResponse>,
     nav_rx: Receiver<NavigationResponse>,
     script_tx: Sender<PendingScript>,
@@ -65,15 +70,18 @@ impl AxomaiEngine {
 
         AxomaiEngine {
             engine_id,
+            document_id: 1,
             current_url: None,
             dom_root: None,
             layout_root: None,
             display_list: Vec::new(),
+            scroll_y: 0.0,
             max_scroll_y: 0.0,
             focused_input_idx: None,
             status_message: "Ready".to_string(),
             js_engine,
             active_css_rules: Vec::new(),
+            is_dirty: true,
             nav_tx,
             nav_rx,
             script_tx,
@@ -88,6 +96,7 @@ impl AxomaiEngine {
     pub fn load_url(&mut self, url_str: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
         let url = URL::parse(url_str)?;
         self.current_url = Some(url.clone());
+        self.scroll_y = 0.0;
 
         // Local or inline schemes load synchronously
         if url.scheme == "data" || url.scheme == "file" || url_str.starts_with("about:") {
@@ -95,15 +104,19 @@ impl AxomaiEngine {
             return self.load_html(&body, viewport_w, viewport_h);
         }
 
-        // Network schemes (http/https): execute non-blocking in background worker thread with per-engine channel
-        self.status_message = format!("Connecting to {}...", url.host);
-        let url_clone = url.clone();
+        // Increment document lifecycle generation ID to cancel any in-flight navigation/scripts from prior page
+        self.document_id += 1;
+        let document_id = self.document_id;
         let engine_id = self.engine_id;
         let nav_tx = self.nav_tx.clone();
+        let url_clone = url.clone();
+
+        self.status_message = format!("Connecting to {}...", url.host);
         thread::spawn(move || {
             let (_headers, body) = url_clone.request();
             let _ = nav_tx.send(NavigationResponse {
                 engine_id,
+                document_id,
                 url: url_clone,
                 body,
                 error: None,
@@ -114,10 +127,16 @@ impl AxomaiEngine {
     }
 
     pub fn load_html(&mut self, html_content: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
-        // Reset script execution ordering state for the new document
+        // Increment document lifecycle generation ID for new document
+        self.document_id += 1;
+        let doc_id = self.document_id;
+
+        // Reset script execution ordering state & scrolling for the new document
         self.next_ordered_script_to_run = 0;
         self.ordered_scripts_buffer.clear();
         self.pending_scripts = 0;
+        self.scroll_y = 0.0;
+        self.is_dirty = true;
 
         // 1. HTML DOM Parse
         let dom_root = HTMLParser::new(html_content).parse();
@@ -134,23 +153,24 @@ impl AxomaiEngine {
 
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
-        let mut script_order = 0;
+        let mut ordered_script_counter = 0;
 
         for entry in scripts {
             match entry {
                 ScriptEntry::Inline { code, kind } => {
                     if kind == ScriptKind::Async {
                         let _ = self.js_engine.execute(&code);
-                    } else if script_order == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
+                    } else if ordered_script_counter == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
                         let _ = self.js_engine.execute(&code);
                         self.next_ordered_script_to_run += 1;
-                        script_order += 1;
+                        ordered_script_counter += 1;
                     } else {
-                        let order = script_order;
-                        script_order += 1;
+                        let order = ordered_script_counter;
+                        ordered_script_counter += 1;
                         self.ordered_scripts_buffer.insert(
                             order,
                             PendingScript {
+                                document_id: doc_id,
                                 order,
                                 kind,
                                 url: "inline".to_string(),
@@ -171,16 +191,17 @@ impl AxomaiEngine {
                             if !js_code.is_empty() {
                                 if kind == ScriptKind::Async {
                                     let _ = self.js_engine.execute(&js_code);
-                                } else if script_order == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
+                                } else if ordered_script_counter == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
                                     let _ = self.js_engine.execute(&js_code);
                                     self.next_ordered_script_to_run += 1;
-                                    script_order += 1;
+                                    ordered_script_counter += 1;
                                 } else {
-                                    let order = script_order;
-                                    script_order += 1;
+                                    let order = ordered_script_counter;
+                                    ordered_script_counter += 1;
                                     self.ordered_scripts_buffer.insert(
                                         order,
                                         PendingScript {
+                                            document_id: doc_id,
                                             order,
                                             kind,
                                             url: resolved_url,
@@ -190,14 +211,19 @@ impl AxomaiEngine {
                                 }
                             }
                         } else {
-                            // Non-blocking async ScriptScheduler with browser ordering semantics
+                            // Non-blocking async ScriptScheduler with generation tracking & browser ordering semantics
+                            let order = if kind == ScriptKind::Async {
+                                0
+                            } else {
+                                let ord = ordered_script_counter;
+                                ordered_script_counter += 1;
+                                ord
+                            };
                             println!(
-                                "[Axomai ScriptScheduler] Queued {:?} external script (order {}): {}",
-                                kind, script_order, resolved_url
+                                "[Axomai ScriptScheduler] Queued {:?} external script (doc_id {}, order {}): {}",
+                                kind, doc_id, order, resolved_url
                             );
                             let script_tx = self.script_tx.clone();
-                            let order = script_order;
-                            script_order += 1;
                             self.pending_scripts += 1;
                             let script_url = resolved_url.clone();
                             thread::spawn(move || {
@@ -209,6 +235,7 @@ impl AxomaiEngine {
                                     }
                                 };
                                 let _ = script_tx.send(PendingScript {
+                                    document_id: doc_id,
                                     order,
                                     kind,
                                     url: script_url,
@@ -251,6 +278,7 @@ impl AxomaiEngine {
             if let Some(mut layout_box) = build_layout_tree(dom_root, self.current_url.as_ref()) {
                 let total_h = layout_box.layout(0.0, 0.0, viewport_w.max(800.0));
                 self.max_scroll_y = (total_h - viewport_h).max(0.0);
+                self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y);
 
                 // 3. Rebuild Display List
                 let mut list = Vec::new();
@@ -262,12 +290,25 @@ impl AxomaiEngine {
                 self.layout_root = None;
                 self.display_list.clear();
                 self.max_scroll_y = 0.0;
+                self.scroll_y = 0.0;
             }
+            self.is_dirty = true;
         }
     }
 
+    pub fn handle_scroll(&mut self, delta_y: f32) -> bool {
+        let old_scroll = self.scroll_y;
+        self.scroll_y = (self.scroll_y + delta_y).clamp(0.0, self.max_scroll_y);
+        let changed = (old_scroll - self.scroll_y).abs() > 0.1;
+        if changed {
+            self.is_dirty = true;
+        }
+        changed
+    }
+
     pub fn handle_click(&mut self, click_x: f32, click_y: f32, scroll_y: f32) -> Option<String> {
-        let abs_y = click_y + scroll_y;
+        let effective_scroll = if scroll_y != 0.0 { scroll_y } else { self.scroll_y };
+        let abs_y = click_y + effective_scroll;
         let query = self.get_focused_input_val();
 
         // Unfocus previous input
@@ -278,6 +319,7 @@ impl AxomaiEngine {
                 }
             }
             self.focused_input_idx = None;
+            self.is_dirty = true;
         }
 
         for (idx, cmd) in self.display_list.iter_mut().enumerate() {
@@ -293,6 +335,7 @@ impl AxomaiEngine {
                     if click_x >= *x && click_x <= *x + *width && abs_y >= *y && abs_y <= *y + *height {
                         *is_focused = true;
                         self.focused_input_idx = Some(idx);
+                        self.is_dirty = true;
                         self.js_engine.dispatch_click_event("input", click_x, abs_y);
                         return None;
                     }
@@ -347,13 +390,15 @@ impl AxomaiEngine {
                 {
                     if key_str == "BackSpace" || key_str == "\u{8}" {
                         value.pop();
-                    } else if key_str == "Return" || key_str == "\r" || key_str == "\n" {
+                        self.is_dirty = true;
+                    } else if key_str == "Return" || key_str == "Enter" || key_str == "\r" || key_str == "\n" {
                         let query = value.trim().to_string();
                         if !query.is_empty() {
                             return Some(format!("https://html.duckduckgo.com/html/?q={}", query));
                         }
                     } else if key_str.len() == 1 {
                         value.push_str(key_str);
+                        self.is_dirty = true;
                     }
                 }
             }
@@ -362,7 +407,8 @@ impl AxomaiEngine {
     }
 
     pub fn handle_hover(&self, hover_x: f32, hover_y: f32, scroll_y: f32) -> Option<String> {
-        let abs_y = hover_y + scroll_y;
+        let effective_scroll = if scroll_y != 0.0 { scroll_y } else { self.scroll_y };
+        let abs_y = hover_y + effective_scroll;
         for cmd in &self.display_list {
             if let DisplayCommand::DrawText {
                 x,
@@ -404,8 +450,12 @@ impl AxomaiEngine {
     pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
         let mut executed = false;
 
-        // 1. Process completed non-blocking page navigations via per-engine channel
+        // 1. Process completed non-blocking page navigations via per-engine channel with document generation filter
         while let Ok(nav) = self.nav_rx.try_recv() {
+            if nav.document_id != self.document_id {
+                println!("[Axomai Engine] Discarding stale navigation response (doc_id {} vs current {})", nav.document_id, self.document_id);
+                continue;
+            }
             self.current_url = Some(nav.url);
             let _ = self.load_html(&nav.body, viewport_w, viewport_h);
             self.status_message = "Page Loaded Successfully".to_string();
@@ -420,11 +470,18 @@ impl AxomaiEngine {
             executed = true;
         }
 
-        // 3. Process completed external scripts via async ScriptScheduler with strict sequential ordering
+        // 3. Process completed external scripts via async ScriptScheduler with generation tracking & strict ordering
         let mut script_mutated = false;
         let mut async_scripts = Vec::new();
 
         while let Ok(script) = self.script_rx.try_recv() {
+            if script.document_id != self.document_id {
+                println!(
+                    "[Axomai ScriptScheduler] Discarding obsolete script from previous document (doc_id {} vs current {})",
+                    script.document_id, self.document_id
+                );
+                continue;
+            }
             if self.pending_scripts > 0 {
                 self.pending_scripts -= 1;
             }
@@ -469,12 +526,16 @@ impl AxomaiEngine {
             self.restyle_and_relayout(viewport_w, viewport_h);
         }
 
-        executed
+        let was_dirty = self.is_dirty;
+        self.is_dirty = false;
+
+        executed || was_dirty
     }
 
-    /// Serialize current display list commands to JSON for desktop WebView/canvas rendering bridge
+    /// Serialize current display list commands to JSON for desktop WebView/canvas rendering bridge with scroll offset
     pub fn get_display_list_json(&self) -> String {
         let mut json = String::from("[");
+        let scroll_y = self.scroll_y;
         for (i, cmd) in self.display_list.iter().enumerate() {
             if i > 0 {
                 json.push(',');
@@ -483,7 +544,7 @@ impl AxomaiEngine {
                 DisplayCommand::DrawRect { x1, y1, x2, y2, color } => {
                     json.push_str(&format!(
                         r#"{{"type":"rect","x1":{},"y1":{},"x2":{},"y2":{},"color":"{}"}}"#,
-                        x1, y1, x2, y2, color
+                        x1, y1 - scroll_y, x2, y2 - scroll_y, color
                     ));
                 }
                 DisplayCommand::DrawText {
@@ -501,7 +562,7 @@ impl AxomaiEngine {
                     let escaped_text = text.replace('\\', "\\\\").replace('"', "\\\"");
                     json.push_str(&format!(
                         r#"{{"type":"text","x":{},"y":{},"width":{},"height":{},"text":"{}","fontSize":{},"fontWeight":"{}","fontStyle":"{}","color":"{}","href":"{}"}}"#,
-                        x, y, width, height, escaped_text, font_size, font_weight, font_style, color, href
+                        x, y - scroll_y, width, height, escaped_text, font_size, font_weight, font_style, color, href
                     ));
                 }
                 DisplayCommand::DrawInput {
@@ -515,7 +576,7 @@ impl AxomaiEngine {
                 } => {
                     json.push_str(&format!(
                         r#"{{"type":"input","x":{},"y":{},"width":{},"height":{},"value":"{}","placeholder":"{}","isFocused":{}}}"#,
-                        x, y, width, height, value, placeholder, is_focused
+                        x, y - scroll_y, width, height, value, placeholder, is_focused
                     ));
                 }
                 DisplayCommand::DrawButton {
@@ -527,7 +588,7 @@ impl AxomaiEngine {
                 } => {
                     json.push_str(&format!(
                         r#"{{"type":"button","x":{},"y":{},"width":{},"height":{},"label":"{}"}}"#,
-                        x, y, width, height, label
+                        x, y - scroll_y, width, height, label
                     ));
                 }
                 DisplayCommand::DrawImage {
@@ -544,7 +605,7 @@ impl AxomaiEngine {
                     };
                     json.push_str(&format!(
                         r#"{{"type":"image","x":{},"y":{},"width":{},"height":{},"src":"{}"}}"#,
-                        x, y, width, height, b64
+                        x, y - scroll_y, width, height, b64
                     ));
                 }
             }
@@ -555,7 +616,7 @@ impl AxomaiEngine {
 
     /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
     pub fn has_pending_events(&self) -> bool {
-        self.pending_scripts > 0 || !self.ordered_scripts_buffer.is_empty() || self.js_engine.has_pending_events()
+        self.is_dirty || self.pending_scripts > 0 || !self.ordered_scripts_buffer.is_empty() || self.js_engine.has_pending_events()
     }
 }
 
@@ -634,4 +695,5 @@ fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
         extract_script_tags(child, script_list);
     }
 }
+
 
