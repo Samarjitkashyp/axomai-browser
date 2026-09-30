@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 ureq = { version = "2.9", features = ["tls"] }
 html-escape = "0.2"
+v8 = "152.2.0"
 
 [features]
 default = []

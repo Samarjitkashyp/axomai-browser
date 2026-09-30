@@ -1,6 +1,6 @@
 use crate::css_parser::{style_tree, CSSParser, DEFAULT_UA_STYLES};
 use crate::html_parser::{HTMLParser, NodePtr, NodeType};
-use crate::js_engine::RustJSEngine;
+use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
 use crate::network::URL;
 use crate::painter::{build_display_list, DisplayCommand};
@@ -44,9 +44,9 @@ impl AxomaiEngine {
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
         if !scripts.is_empty() {
-            let mut js_engine = RustJSEngine::new();
+            let mut js_engine = V8JSEngine::new();
             for js in scripts {
-                js_engine.execute(&js, Some(&dom_root));
+                let _ = js_engine.execute(&js, Some(&dom_root));
             }
         }
 

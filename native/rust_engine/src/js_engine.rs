@@ -1,147 +1,131 @@
 use crate::html_parser::{HTMLParser, NodeData, NodePtr, NodeType};
-use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::Once;
+use v8;
 
-pub struct RustJSEngine {
-    pub variables: HashMap<String, String>,
+static V8_INIT: Once = Once::new();
+
+fn ensure_v8_initialized() {
+    V8_INIT.call_once(|| {
+        let platform = v8::new_default_platform(0, false).make_shared();
+        v8::V8::initialize_platform(platform);
+        v8::V8::initialize();
+    });
+}
+
+pub struct V8JSEngine {
+    isolate: Option<v8::OwnedIsolate>,
     pub console_logs: Vec<String>,
     pub dom_mutations: Vec<String>,
 }
 
-impl RustJSEngine {
+impl V8JSEngine {
     pub fn new() -> Self {
-        RustJSEngine {
-            variables: HashMap::new(),
+        ensure_v8_initialized();
+
+        let isolate = v8::Isolate::new(Default::default());
+
+        Self {
+            isolate: Some(isolate),
             console_logs: Vec::new(),
             dom_mutations: Vec::new(),
         }
     }
 
-    pub fn execute(&mut self, js_code: &str, dom_root: Option<&NodePtr>) -> bool {
-        let mut dom_mutated = false;
-        let statements: Vec<&str> = js_code.split(';').map(|s| s.trim()).collect();
+    pub fn execute(&mut self, source: &str, dom_root: Option<&NodePtr>) -> Result<String, String> {
+        let isolate = self.isolate.as_mut().ok_or("V8 Isolate not available")?;
 
-        for stmt in statements {
-            if stmt.is_empty() {
-                continue;
-            }
+        let handle_scope = &mut v8::HandleScope::new(isolate);
+        let context = v8::Context::new(handle_scope, Default::default());
+        let scope = &mut v8::ContextScope::new(handle_scope, context);
 
-            // 1. console.log(...)
-            if stmt.starts_with("console.log") {
-                if let (Some(open), Some(close)) = (stmt.find('('), stmt.rfind(')')) {
-                    let expr = &stmt[open + 1..close];
-                    let val = self.eval_expr(expr);
-                    println!("[JS Console (Rust)]: {}", val);
-                    self.console_logs.push(val);
-                }
-                continue;
-            }
+        let global = context.global(scope);
 
-            // 2. document.write(...)
-            if stmt.starts_with("document.write") {
-                if let (Some(open), Some(close)) = (stmt.find('('), stmt.rfind(')')) {
-                    let expr = &stmt[open + 1..close];
-                    let html_snippet = self.eval_expr(expr);
-                    self.dom_mutations.push(html_snippet.clone());
+        // 1. Setup `console.log`
+        let console_key = v8::String::new(scope, "console").unwrap();
+        let console_obj = v8::Object::new(scope);
 
-                    if let Some(root) = dom_root {
-                        let snippet_node = HTMLParser::new(&html_snippet).parse();
-                        let target = find_body(root).unwrap_or_else(|| Rc::clone(root));
-
-                        let snippet_is_html = {
-                            let b = snippet_node.borrow();
-                            if let NodeType::Element { ref tag, .. } = b.node_type {
-                                tag == "html"
-                            } else {
-                                false
-                            }
-                        };
-
-                        if snippet_is_html {
-                            let children = snippet_node.borrow().children.clone();
-                            for child in children {
-                                NodeData::add_child(&target, &child);
-                            }
-                        } else {
-                            NodeData::add_child(&target, &snippet_node);
-                        }
+        let log_key = v8::String::new(scope, "log").unwrap();
+        let log_fn = v8::Function::new(
+            scope,
+            |scope: &mut v8::HandleScope,
+             args: v8::FunctionCallbackArguments,
+             _rv: v8::ReturnValue| {
+                let mut log_line = String::new();
+                for i in 0..args.length() {
+                    let arg = args.get(i);
+                    let val_str = arg.to_rust_string_lossy(scope);
+                    if i > 0 {
+                        log_line.push(' ');
                     }
-
-                    dom_mutated = true;
+                    log_line.push_str(&val_str);
                 }
-                continue;
-            }
+                println!("[V8 Console]: {}", log_line);
+            },
+        )
+        .unwrap();
 
-            // 3. Variable declarations var x = ... / let / const
-            if stmt.starts_with("var ") || stmt.starts_with("let ") || stmt.starts_with("const ") {
-                let rest = stmt.split_whitespace().skip(1).collect::<Vec<&str>>().join(" ");
-                if let Some(eq_idx) = rest.find('=') {
-                    let var_name = rest[..eq_idx].trim().to_string();
-                    let expr = rest[eq_idx + 1..].trim();
-                    let val = self.eval_expr(expr);
-                    self.variables.insert(var_name, val);
+        console_obj.set(scope, log_key.into(), log_fn.into());
+        global.set(scope, console_key.into(), console_obj.into());
+
+        // 2. Setup `document` API bindings
+        let doc_key = v8::String::new(scope, "document").unwrap();
+        let doc_obj = v8::Object::new(scope);
+
+        // document.write callback
+        let write_key = v8::String::new(scope, "write").unwrap();
+        let write_fn = v8::Function::new(
+            scope,
+            |scope: &mut v8::HandleScope,
+             args: v8::FunctionCallbackArguments,
+             _rv: v8::ReturnValue| {
+                if args.length() > 0 {
+                    let snippet = args.get(0).to_rust_string_lossy(scope);
+                    println!("[V8 document.write]: {}", snippet);
                 }
-                continue;
+            },
+        )
+        .unwrap();
+        doc_obj.set(scope, write_key.into(), write_fn.into());
+
+        global.set(scope, doc_key.into(), doc_obj.into());
+
+        // 3. Compile and Run JavaScript Code via V8
+        let code = v8::String::new(scope, source).ok_or("Failed to allocate JS source string")?;
+
+        let script = v8::Script::compile(scope, code, None).ok_or("V8 Compilation failed")?;
+
+        let result = script.run(scope).ok_or("V8 Execution failed")?;
+
+        // 4. Handle DOM mutations if any document.write occurred
+        if let Some(root) = dom_root {
+            // Apply mutations if detected
+            for snippet in &self.dom_mutations {
+                let snippet_node = HTMLParser::new(snippet).parse();
+                let target = find_body(root).unwrap_or_else(|| Rc::clone(root));
+
+                let snippet_is_html = {
+                    let b = snippet_node.borrow();
+                    if let NodeType::Element { ref tag, .. } = b.node_type {
+                        tag == "html"
+                    } else {
+                        false
+                    }
+                };
+
+                if snippet_is_html {
+                    let children = snippet_node.borrow().children.clone();
+                    for child in children {
+                        NodeData::add_child(&target, &child);
+                    }
+                } else {
+                    NodeData::add_child(&target, &snippet_node);
+                }
             }
         }
 
-        dom_mutated
+        Ok(result.to_rust_string_lossy(scope))
     }
-
-    fn eval_expr(&self, expr_str: &str) -> String {
-        let expr = expr_str.trim();
-
-        // String concatenation with '+'
-        if expr.contains('+') {
-            let parts = split_addition(expr);
-            if parts.len() > 1 {
-                return parts.iter().map(|p| self.eval_expr(p)).collect::<String>();
-            }
-        }
-
-        // String literal "..." or '...'
-        if (expr.starts_with('"') && expr.ends_with('"'))
-            || (expr.starts_with('\'') && expr.ends_with('\''))
-        {
-            if expr.len() >= 2 {
-                return expr[1..expr.len() - 1].to_string();
-            }
-        }
-
-        // Variable lookup
-        if let Some(val) = self.variables.get(expr) {
-            return val.clone();
-        }
-
-        expr.to_string()
-    }
-}
-
-use std::rc::Rc;
-
-fn split_addition(expr: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut in_quote: Option<char> = None;
-    let mut curr = String::new();
-
-    for c in expr.chars() {
-        if c == '"' || c == '\'' {
-            if in_quote.is_none() {
-                in_quote = Some(c);
-            } else if in_quote == Some(c) {
-                in_quote = None;
-            }
-            curr.push(c);
-        } else if c == '+' && in_quote.is_none() {
-            parts.push(curr.clone());
-            curr.clear();
-        } else {
-            curr.push(c);
-        }
-    }
-    if !curr.is_empty() {
-        parts.push(curr);
-    }
-    parts
 }
 
 fn find_body(node: &NodePtr) -> Option<NodePtr> {

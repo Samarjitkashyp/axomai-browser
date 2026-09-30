@@ -11,7 +11,7 @@ pub use css_parser::CSSParser;
 pub use engine::AxomaiEngine;
 pub use ffi::*;
 pub use html_parser::HTMLParser;
-pub use js_engine::RustJSEngine;
+pub use js_engine::V8JSEngine;
 
 #[no_mangle]
 pub extern "C" fn rust_parse_css_count(css_text: *const std::os::raw::c_char) -> usize {
