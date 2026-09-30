@@ -35,6 +35,9 @@ static FETCH_RESULT_QUEUE: Mutex<Option<Vec<FetchResult>>> = Mutex::new(None);
 pub struct FetchResult {
     pub request_id: u64,
     pub status: u16,
+    pub status_text: String,
+    pub headers: Vec<(String, String)>,
+    pub url: String,
     pub body: String,
     pub error: Option<String>,
 }
@@ -279,9 +282,51 @@ impl V8JSEngine {
                     let status_v = v8::Integer::new(scope, fetch_res.status as i32);
                     resp_obj.set(scope, status_k.into(), status_v.into());
 
+                    let status_text_k = v8::String::new(scope, "statusText").unwrap();
+                    let status_text_v = v8::String::new(scope, &fetch_res.status_text).unwrap();
+                    resp_obj.set(scope, status_text_k.into(), status_text_v.into());
+
+                    let url_k = v8::String::new(scope, "url").unwrap();
+                    let url_v = v8::String::new(scope, &fetch_res.url).unwrap();
+                    resp_obj.set(scope, url_k.into(), url_v.into());
+
                     let ok_k = v8::String::new(scope, "ok").unwrap();
                     let ok_v = v8::Boolean::new(scope, fetch_res.status >= 200 && fetch_res.status < 300);
                     resp_obj.set(scope, ok_k.into(), ok_v.into());
+
+                    // Headers object with get(name)
+                    let headers_obj = v8::Object::new(scope);
+                    let headers_map = v8::Object::new(scope);
+                    for (k, v) in &fetch_res.headers {
+                        let hk = v8::String::new(scope, &k.to_lowercase()).unwrap();
+                        let hv = v8::String::new(scope, v).unwrap();
+                        headers_map.set(scope, hk.into(), hv.into());
+                    }
+                    let map_local = headers_map.into();
+                    let get_k = v8::String::new(scope, "get").unwrap();
+                    let get_fn = v8::Function::new(
+                        scope,
+                        move |s: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut r: v8::ReturnValue| {
+                            if args.length() > 0 {
+                                let key = args.get(0).to_rust_string_lossy(s).to_lowercase();
+                                let k_str = v8::String::new(s, &key).unwrap();
+                                if let Some(obj) = map_local.to_object(s) {
+                                    if let Some(val) = obj.get(s, k_str.into()) {
+                                        if !val.is_undefined() {
+                                            r.set(val);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            r.set(v8::null(s).into());
+                        },
+                    )
+                    .unwrap();
+                    headers_obj.set(scope, get_k.into(), get_fn.into());
+
+                    let headers_k = v8::String::new(scope, "headers").unwrap();
+                    resp_obj.set(scope, headers_k.into(), headers_obj.into());
 
                     // text() method
                     let text_k = v8::String::new(scope, "text").unwrap();
@@ -440,9 +485,15 @@ fn register_dom_tree(
     registry: &mut HashMap<usize, NodePtr>,
     next_id: &mut usize,
 ) -> usize {
-    let id = *next_id;
-    *next_id += 1;
-    registry.insert(id, Rc::clone(node));
+    let target_ptr = Rc::as_ptr(node);
+    let id = if let Some((&existing_id, _)) = registry.iter().find(|(_, n)| Rc::as_ptr(n) == target_ptr) {
+        existing_id
+    } else {
+        let new_id = *next_id;
+        *next_id += 1;
+        registry.insert(new_id, Rc::clone(node));
+        new_id
+    };
 
     let children = node.borrow().children.clone();
     for child in &children {
@@ -710,6 +761,51 @@ fn setup_async_fetch_api<'s>(
                 target_url_raw
             };
 
+            // Parse optional init parameter: { method, headers, body }
+            let mut method = "GET".to_string();
+            let mut custom_headers: Vec<(String, String)> = Vec::new();
+            let mut request_body: Option<String> = None;
+
+            if args.length() > 1 && args.get(1).is_object() {
+                if let Some(init_obj) = args.get(1).to_object(scope) {
+                    // 1. method
+                    let method_k = v8::String::new(scope, "method").unwrap();
+                    if let Some(val) = init_obj.get(scope, method_k.into()) {
+                        if !val.is_undefined() && !val.is_null() {
+                            method = val.to_rust_string_lossy(scope);
+                        }
+                    }
+
+                    // 2. body
+                    let body_k = v8::String::new(scope, "body").unwrap();
+                    if let Some(val) = init_obj.get(scope, body_k.into()) {
+                        if !val.is_undefined() && !val.is_null() {
+                            request_body = Some(val.to_rust_string_lossy(scope));
+                        }
+                    }
+
+                    // 3. headers
+                    let headers_k = v8::String::new(scope, "headers").unwrap();
+                    if let Some(h_val) = init_obj.get(scope, headers_k.into()) {
+                        if h_val.is_object() {
+                            if let Some(h_obj) = h_val.to_object(scope) {
+                                if let Some(prop_names) = h_obj.get_property_names(scope) {
+                                    for i in 0..prop_names.length() {
+                                        if let Some(key_val) = prop_names.get_index(scope, i) {
+                                            let key_str = key_val.to_rust_string_lossy(scope);
+                                            if let Some(v_val) = h_obj.get(scope, key_val) {
+                                                let v_str = v_val.to_rust_string_lossy(scope);
+                                                custom_headers.push((key_str, v_str));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Allocate unique Request ID for this fetch
             let request_id = NEXT_FETCH_ID.fetch_add(1, Ordering::SeqCst);
 
@@ -725,15 +821,45 @@ fn setup_async_fetch_api<'s>(
             });
 
             // Spawn background thread to perform non-blocking HTTP request
-            // ONLY plain Rust data (request_id, resolved_url) is moved to worker thread!
+            // ONLY plain Rust data is moved to worker thread!
+            let url_for_worker = resolved_url.clone();
             thread::spawn(move || {
-                match ureq::get(&resolved_url).call() {
+                let mut req = match method.to_uppercase().as_str() {
+                    "POST" => ureq::post(&url_for_worker),
+                    "PUT" => ureq::put(&url_for_worker),
+                    "DELETE" => ureq::delete(&url_for_worker),
+                    "PATCH" => ureq::patch(&url_for_worker),
+                    "HEAD" => ureq::head(&url_for_worker),
+                    _ => ureq::get(&url_for_worker),
+                };
+
+                for (k, v) in &custom_headers {
+                    req = req.set(k, v);
+                }
+
+                let call_res = if let Some(ref body_str) = request_body {
+                    req.send_string(body_str)
+                } else {
+                    req.call()
+                };
+
+                match call_res {
                     Ok(resp) => {
                         let status = resp.status();
+                        let status_text = resp.status_text().to_string();
+                        let mut resp_headers = Vec::new();
+                        for header_name in resp.headers_names() {
+                            if let Some(val) = resp.header(&header_name) {
+                                resp_headers.push((header_name, val.to_string()));
+                            }
+                        }
                         let body = resp.into_string().unwrap_or_default();
                         push_fetch_result(FetchResult {
                             request_id,
                             status,
+                            status_text,
+                            headers: resp_headers,
+                            url: url_for_worker,
                             body,
                             error: None,
                         });
@@ -742,6 +868,9 @@ fn setup_async_fetch_api<'s>(
                         push_fetch_result(FetchResult {
                             request_id,
                             status: 500,
+                            status_text: "Internal Error".to_string(),
+                            headers: Vec::new(),
+                            url: url_for_worker,
                             body: String::new(),
                             error: Some(format!("Fetch Error: {}", err)),
                         });
@@ -1243,57 +1372,262 @@ fn bind_element_event_functions<'s>(
 fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::HandleScope>) {
     let bootstrap_js = r#"
     (function() {
-        // Universal EventTarget implementation with W3C Bubbling
+        // --------------------------------------------------------------------
+        // Web Standards: Headers, Request, Response
+        // --------------------------------------------------------------------
+        function Headers(init) {
+            this._headers = {};
+            if (init) {
+                if (Array.isArray(init)) {
+                    for (let i = 0; i < init.length; i++) {
+                        this.set(init[i][0], init[i][1]);
+                    }
+                } else if (init instanceof Headers) {
+                    init.forEach((v, k) => this.set(k, v));
+                } else if (typeof init === 'object') {
+                    for (const k in init) {
+                        this.set(k, init[k]);
+                    }
+                }
+            }
+        }
+        Headers.prototype.get = function(name) {
+            return this._headers[String(name).toLowerCase()] || null;
+        };
+        Headers.prototype.set = function(name, value) {
+            this._headers[String(name).toLowerCase()] = String(value);
+        };
+        Headers.prototype.has = function(name) {
+            return String(name).toLowerCase() in this._headers;
+        };
+        Headers.prototype.delete = function(name) {
+            delete this._headers[String(name).toLowerCase()];
+        };
+        Headers.prototype.forEach = function(cb, thisArg) {
+            for (const k in this._headers) {
+                cb.call(thisArg, this._headers[k], k, this);
+            }
+        };
+        window.Headers = Headers;
+
+        window.Request = function(input, init) {
+            this.url = typeof input === 'string' ? input : (input ? input.url : '');
+            init = init || {};
+            this.method = (init.method || 'GET').toUpperCase();
+            this.headers = new Headers(init.headers);
+            this.body = init.body || null;
+        };
+
+        window.Response = function(body, init) {
+            init = init || {};
+            this.status = init.status || 200;
+            this.statusText = init.statusText || 'OK';
+            this.ok = this.status >= 200 && this.status < 300;
+            this.headers = new Headers(init.headers);
+            this._body = String(body || '');
+        };
+        Response.prototype.text = function() { return Promise.resolve(this._body); };
+        Response.prototype.json = function() {
+            try {
+                return Promise.resolve(JSON.parse(this._body));
+            } catch(e) {
+                return Promise.reject(e);
+            }
+        };
+
+        // --------------------------------------------------------------------
+        // Web Standards: Event Constructors & Phases
+        // --------------------------------------------------------------------
+        function Event(type, options) {
+            options = options || {};
+            this.type = String(type);
+            this.bubbles = !!options.bubbles;
+            this.cancelable = !!options.cancelable;
+            this.defaultPrevented = false;
+            this.eventPhase = 0; // NONE
+            this.timeStamp = Date.now();
+            this._stopped = false;
+            this._immediateStopped = false;
+            this.target = null;
+            this.currentTarget = null;
+        }
+        Event.NONE = 0;
+        Event.CAPTURING_PHASE = 1;
+        Event.AT_TARGET = 2;
+        Event.BUBBLING_PHASE = 3;
+
+        Event.prototype.preventDefault = function() {
+            if (this.cancelable) this.defaultPrevented = true;
+        };
+        Event.prototype.stopPropagation = function() {
+            this._stopped = true;
+        };
+        Event.prototype.stopImmediatePropagation = function() {
+            this._stopped = true;
+            this._immediateStopped = true;
+        };
+        window.Event = Event;
+
+        window.CustomEvent = function(type, options) {
+            Event.call(this, type, options);
+            this.detail = (options && options.detail !== undefined) ? options.detail : null;
+        };
+        CustomEvent.prototype = Object.create(Event.prototype);
+
+        window.MouseEvent = function(type, options) {
+            Event.call(this, type, options);
+            options = options || {};
+            this.clientX = options.clientX || 0;
+            this.clientY = options.clientY || 0;
+            this.button = options.button || 0;
+        };
+        MouseEvent.prototype = Object.create(Event.prototype);
+
+        window.KeyboardEvent = function(type, options) {
+            Event.call(this, type, options);
+            options = options || {};
+            this.key = options.key || '';
+            this.code = options.code || '';
+        };
+        KeyboardEvent.prototype = Object.create(Event.prototype);
+
+        // --------------------------------------------------------------------
+        // Universal W3C EventTarget with True Capture & Bubble Phases
+        // --------------------------------------------------------------------
         function setupEventTarget(obj) {
             if (!obj) return obj;
-            obj.__events = {};
-            obj.addEventListener = function(type, listener) {
-                if (!this.__events[type]) this.__events[type] = [];
-                this.__events[type].push(listener);
+            obj.__listeners = {};
+
+            obj.addEventListener = function(type, listener, options) {
+                if (!listener) return;
+                if (!this.__listeners[type]) this.__listeners[type] = [];
+
+                let capture = false;
+                let once = false;
+                let passive = false;
+                let signal = null;
+
+                if (typeof options === 'boolean') {
+                    capture = options;
+                } else if (typeof options === 'object' && options !== null) {
+                    capture = !!options.capture;
+                    once = !!options.once;
+                    passive = !!options.passive;
+                    signal = options.signal;
+                }
+
+                if (signal) {
+                    if (signal.aborted) return;
+                    signal.addEventListener('abort', () => {
+                        this.removeEventListener(type, listener, { capture });
+                    });
+                }
+
+                const exists = this.__listeners[type].some(l => l.listener === listener && l.capture === capture);
+                if (!exists) {
+                    this.__listeners[type].push({ listener, capture, once, passive });
+                }
             };
-            obj.removeEventListener = function(type, listener) {
-                if (!this.__events || !this.__events[type]) return;
-                this.__events[type] = this.__events[type].filter(l => l !== listener);
+
+            obj.removeEventListener = function(type, listener, options) {
+                if (!this.__listeners || !this.__listeners[type]) return;
+                let capture = false;
+                if (typeof options === 'boolean') {
+                    capture = options;
+                } else if (typeof options === 'object' && options !== null) {
+                    capture = !!options.capture;
+                }
+                this.__listeners[type] = this.__listeners[type].filter(l => !(l.listener === listener && l.capture === capture));
             };
+
             obj.dispatchEvent = function(event) {
-                const evt = (typeof event === 'string') ? { type: event, bubbles: true } : event;
-                if (!evt.target) evt.target = this;
-                evt.currentTarget = this;
-
-                // 1. Invoke Target Listeners
-                if (typeof this['on' + evt.type] === 'function') {
-                    this['on' + evt.type].call(this, evt);
+                if (typeof event === 'string') {
+                    event = new Event(event, { bubbles: true, cancelable: true });
                 }
-                if (this.__events && this.__events[evt.type]) {
-                    this.__events[evt.type].forEach(l => l.call(this, evt));
+                if (!event.target) event.target = this;
+
+                // Build full hierarchy propagation path: [target, parent, ..., document, window]
+                const path = [];
+                let curr = this;
+                while (curr) {
+                    path.push(curr);
+                    curr = curr.parentElement;
+                }
+                if (typeof document !== 'undefined' && path.indexOf(document) === -1) {
+                    path.push(document);
+                }
+                if (typeof window !== 'undefined' && path.indexOf(window) === -1) {
+                    path.push(window);
                 }
 
-                // 2. Bubble up to parents if bubbles is true and propagation is not stopped
-                if (evt.bubbles && !evt._stopped) {
-                    let curr = this.parentElement;
-                    while (curr && !evt._stopped) {
-                        evt.currentTarget = curr;
-                        if (typeof curr['on' + evt.type] === 'function') {
-                            curr['on' + evt.type].call(curr, evt);
+                // 1. CAPTURING PHASE (Window down to target's parent)
+                event.eventPhase = 1; // Event.CAPTURING_PHASE
+                for (let i = path.length - 1; i > 0; i--) {
+                    if (event._immediateStopped || event._stopped) break;
+                    const node = path[i];
+                    event.currentTarget = node;
+                    if (node.__listeners && node.__listeners[event.type]) {
+                        const list = node.__listeners[event.type].slice();
+                        for (let j = 0; j < list.length; j++) {
+                            const l = list[j];
+                            if (l.capture) {
+                                try { l.listener.call(node, event); } catch(e) { console.error(e); }
+                                if (l.once) node.removeEventListener(event.type, l.listener, true);
+                                if (event._immediateStopped) break;
+                            }
                         }
-                        if (curr.__events && curr.__events[evt.type]) {
-                            curr.__events[evt.type].forEach(l => l.call(curr, evt));
-                        }
-                        curr = curr.parentElement;
-                    }
-
-                    // Document Level Bubbling
-                    if (!evt._stopped && typeof document !== 'undefined' && document.__events && document.__events[evt.type]) {
-                        evt.currentTarget = document;
-                        document.__events[evt.type].forEach(l => l.call(document, evt));
-                    }
-
-                    // Window Level Bubbling
-                    if (!evt._stopped && typeof window !== 'undefined' && window.__events && window.__events[evt.type]) {
-                        evt.currentTarget = window;
-                        window.__events[evt.type].forEach(l => l.call(window, evt));
                     }
                 }
+
+                // 2. AT TARGET PHASE
+                if (!event._immediateStopped) {
+                    event.eventPhase = 2; // Event.AT_TARGET
+                    event.currentTarget = this;
+
+                    // Inline on[type] handler
+                    if (typeof this['on' + event.type] === 'function') {
+                        try { this['on' + event.type].call(this, event); } catch(e) { console.error(e); }
+                    }
+
+                    if (!event._immediateStopped && this.__listeners && this.__listeners[event.type]) {
+                        const list = this.__listeners[event.type].slice();
+                        for (let j = 0; j < list.length; j++) {
+                            const l = list[j];
+                            try { l.listener.call(this, event); } catch(e) { console.error(e); }
+                            if (l.once) this.removeEventListener(event.type, l.listener, l.capture);
+                            if (event._immediateStopped) break;
+                        }
+                    }
+                }
+
+                // 3. BUBBLING PHASE (Target's parent up to Window)
+                if (event.bubbles && !event._stopped && !event._immediateStopped) {
+                    event.eventPhase = 3; // Event.BUBBLING_PHASE
+                    for (let i = 1; i < path.length; i++) {
+                        if (event._immediateStopped || event._stopped) break;
+                        const node = path[i];
+                        event.currentTarget = node;
+
+                        if (typeof node['on' + event.type] === 'function') {
+                            try { node['on' + event.type].call(node, event); } catch(e) { console.error(e); }
+                        }
+
+                        if (!event._immediateStopped && node.__listeners && node.__listeners[event.type]) {
+                            const list = node.__listeners[event.type].slice();
+                            for (let j = 0; j < list.length; j++) {
+                                const l = list[j];
+                                if (!l.capture) {
+                                    try { l.listener.call(node, event); } catch(e) { console.error(e); }
+                                    if (l.once) node.removeEventListener(event.type, l.listener, false);
+                                    if (event._immediateStopped) break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                event.eventPhase = 0; // Event.NONE
+                return !event.defaultPrevented;
             };
             return obj;
         }

@@ -50,13 +50,13 @@ A modern web browser designed with high-performance Rust core, native windowing,
 
 | Subsystem | Tech Stack | Responsibility |
 | :--- | :--- | :--- |
-| **Network Layer** | Rust (`network.rs`) | URL parsing (`http`, `https`, `file`, `data`), TCP socket creation, SSL wrapping via `ureq`, HTTP GET formatting & response handling. |
-| **HTML Parser** | Rust (`html_parser.rs`) | Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), and stack-based tree construction with auto-closing tag recovery. |
-| **CSS Engine** | Rust (`css_parser.rs`) | Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade, and style inheritance. |
+| **Network Layer** | Rust (`network.rs`, `engine.rs`) | Non-blocking asynchronous page navigation, background worker pipeline, URL parsing (`http`, `https`, `file`, `data`), TCP socket creation, SSL wrapping via `ureq`, and HTTP response handling. |
+| **HTML Parser** | Rust (`html_parser.rs`) | Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), idempotent pointer registration (`register_dom_tree`), and stack-based tree construction with auto-closing tag recovery. |
+| **CSS Engine** | Rust (`css_parser.rs`) | Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade (`active_css_rules`), and persistent dynamic restyling upon DOM mutation. |
 | **Layout Engine** | Rust (`layout.rs`) | Box model calculations, block vertical stacking, inline text word-wrapping, and pill geometry measurement. |
-| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`) | **ECMAScript Engine**: Full modern ECMAScript (ES2024+, Promises, async/await, closures) powered by persistent Google V8 Isolate & Page Context.<br>**Web APIs & DOM Bridge**: Asynchronous non-blocking `fetch()`, W3C EventTarget with bubbling (`target` → `parent` → `document` → `window`), DOM bridge (`getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `innerHTML`, `textContent`, `setAttribute`), Timers (`setTimeout`, `setInterval`), and dynamic cascade restyling. |
-| **Painter Engine** | Rust (`painter.rs`) | Walk layout tree in document order, emit `DrawRect`, `DrawText`, `DrawInput`, `DrawButton` display commands over C-FFI ABI. |
-| **Browser GUI** | C++ (`cpp_gui/main.cpp`) | Win32 Window, address bar navigation, Back/Forward browser history, status updates, GDI+ canvas rendering, and mouse/keyboard interaction. |
+| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`) | **ECMAScript Engine**: Full modern ECMAScript (ES2024+, Promises, async/await, closures) powered by persistent Google V8 Isolate & Page Context.<br>**Web APIs & DOM Bridge**: Asynchronous non-blocking `fetch()` with HTTP methods (`GET`, `POST`, `PUT`, `DELETE`), custom headers & bodies, `Headers`, `Request`, `Response`; W3C EventTarget with 3 true phases (Capturing, At Target, Bubbling) + `eventPhase`, `once`, `passive`, `signal`; DOM bridge (`getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `innerHTML`, `textContent`, `setAttribute`), Timers (`setTimeout`, `setInterval`), and microtask checkpoints. |
+| **Desktop Shell** | Rust (`rust_desktop/main.rs`) | Native Tao windowing & Wry host directly connected to `AxomaiEngine` via IPC bridge and 60 FPS event loop ticking. |
+| **Painter & GUI** | Rust & C++ (`painter.rs`, `cpp_gui/`) | Walk layout tree in document order, emit display commands over C-FFI ABI, Win32 double-buffered GDI+ rendering, and 60 FPS event loop timers. |
 
 ---
 

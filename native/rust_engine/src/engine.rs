@@ -4,6 +4,41 @@ use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
 use crate::network::URL;
 use crate::painter::{build_display_list, DisplayCommand};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::thread;
+
+pub struct NavigationResponse {
+    pub url: URL,
+    pub body: String,
+    pub error: Option<String>,
+}
+
+static NAVIGATION_QUEUE: Mutex<Option<Vec<NavigationResponse>>> = Mutex::new(None);
+static HAS_PENDING_NAVIGATION: AtomicBool = AtomicBool::new(false);
+
+fn push_navigation_response(resp: NavigationResponse) {
+    let mut lock = NAVIGATION_QUEUE.lock().unwrap();
+    if lock.is_none() {
+        *lock = Some(Vec::new());
+    }
+    if let Some(ref mut q) = *lock {
+        q.push(resp);
+    }
+    HAS_PENDING_NAVIGATION.store(true, Ordering::SeqCst);
+}
+
+fn drain_navigation_responses() -> Vec<NavigationResponse> {
+    if !HAS_PENDING_NAVIGATION.swap(false, Ordering::SeqCst) {
+        return Vec::new();
+    }
+    let mut lock = NAVIGATION_QUEUE.lock().unwrap();
+    if let Some(ref mut q) = *lock {
+        std::mem::take(q)
+    } else {
+        Vec::new()
+    }
+}
 
 pub struct AxomaiEngine {
     pub current_url: Option<URL>,
@@ -32,12 +67,30 @@ impl AxomaiEngine {
         }
     }
 
+    /// Load URL with non-blocking asynchronous network fetching for http/https
     pub fn load_url(&mut self, url_str: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
         let url = URL::parse(url_str)?;
         self.current_url = Some(url.clone());
 
-        let (_headers, body) = url.request();
-        self.load_html(&body, viewport_w, viewport_h)
+        // Local or inline schemes load synchronously
+        if url.scheme == "data" || url.scheme == "file" || url_str.starts_with("about:") {
+            let (_headers, body) = url.request();
+            return self.load_html(&body, viewport_w, viewport_h);
+        }
+
+        // Network schemes (http/https): execute non-blocking in background worker thread
+        self.status_message = format!("Connecting to {}...", url.host);
+        let url_clone = url.clone();
+        thread::spawn(move || {
+            let (_headers, body) = url_clone.request();
+            push_navigation_response(NavigationResponse {
+                url: url_clone,
+                body,
+                error: None,
+            });
+        });
+
+        Ok(())
     }
 
     pub fn load_html(&mut self, html_content: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
@@ -259,17 +312,31 @@ impl AxomaiEngine {
     }
 
     pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
-        let executed = self.js_engine.process_event_loop();
-        if executed {
+        let mut executed = false;
+
+        // 1. Process completed non-blocking page navigations
+        let completed_navs = drain_navigation_responses();
+        for nav in completed_navs {
+            self.current_url = Some(nav.url);
+            let _ = self.load_html(&nav.body, viewport_w, viewport_h);
+            self.status_message = "Page Loaded Successfully".to_string();
+            executed = true;
+        }
+
+        // 2. Process JS engine event loop (timers, async fetch, microtasks)
+        let js_executed = self.js_engine.process_event_loop();
+        if js_executed {
             // Reapply author + UA styles and recalculate layout
             self.restyle_and_relayout(viewport_w, viewport_h);
+            executed = true;
         }
+
         executed
     }
 
-    /// Check if there are pending async fetch responses or timers ready for event loop processing
+    /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
     pub fn has_pending_events(&self) -> bool {
-        self.js_engine.has_pending_events()
+        HAS_PENDING_NAVIGATION.load(Ordering::SeqCst) || self.js_engine.has_pending_events()
     }
 }
 
