@@ -81,8 +81,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 } else if msg.starts_with("key:") {
-                    let key_str = &msg[4..];
-                    if let Some(nav_url) = eng.handle_key(key_str) {
+                    let payload = &msg[4..];
+                    let parts: Vec<&str> = payload.split(',').collect();
+                    if parts.len() >= 9 {
+                        let ev_type = parts[0];
+                        let key_str = parts[1];
+                        let code_str = parts[2];
+                        let key_code = parts[3].parse::<u32>().unwrap_or(0);
+                        let ctrl = parts[4] == "1";
+                        let alt = parts[5] == "1";
+                        let shift = parts[6] == "1";
+                        let meta = parts[7] == "1";
+                        let repeat = parts[8] == "1";
+
+                        if let Some(nav_url) = eng.handle_key_event(
+                            ev_type, key_str, code_str, key_code, ctrl, alt, shift, meta, repeat,
+                        ) {
+                            println!("[Axomai Desktop] Key event triggered navigation: {}", nav_url);
+                            let _ = eng.load_url(&nav_url, 1380.0, 860.0);
+                        }
+                    } else if let Some(nav_url) = eng.handle_key(payload) {
                         println!("[Axomai Desktop] Key triggered navigation: {}", nav_url);
                         let _ = eng.load_url(&nav_url, 1380.0, 860.0);
                     }

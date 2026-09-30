@@ -305,23 +305,32 @@ window.__axomai_render_display_list = function(displayList) {
 
   // Global key listener for native page inputs
   if (!window._axomaiKeyBound) {
-    window.addEventListener('keydown', (e) => {
+    function sendKeyEvent(evType, e) {
       const active = document.activeElement;
       if (active && (active.classList.contains('omnibox-input') || active.classList.contains('search-input') || active.classList.contains('ai-text-input'))) {
-        return; // Don't intercept browser chrome inputs
+        return;
       }
       const isBrowserShortcut = (e.ctrlKey || e.metaKey || e.altKey) || e.key === 'F5' || e.key === 'F12' || e.key === 'F11';
       if (engineViewport && engineViewport.style.display !== 'none') {
-        if (!isBrowserShortcut) {
+        if (!isBrowserShortcut && evType === 'keydown') {
           if (e.key === 'Backspace' || e.key === 'Enter' || e.key === 'Tab' || e.key === ' ' || e.key.length === 1 || e.key.startsWith('Arrow')) {
             e.preventDefault();
           }
         }
         if (window.ipc) {
-          window.ipc.postMessage(`key:${e.key}`);
+          const ctrl = e.ctrlKey ? '1' : '0';
+          const alt = e.altKey ? '1' : '0';
+          const shift = e.shiftKey ? '1' : '0';
+          const meta = e.metaKey ? '1' : '0';
+          const repeat = e.repeat ? '1' : '0';
+          const keyCode = e.keyCode || (e.key.length === 1 ? e.key.charCodeAt(0) : 0);
+          window.ipc.postMessage(`key:${evType},${e.key},${e.code || ''},${keyCode},${ctrl},${alt},${shift},${meta},${repeat}`);
         }
       }
-    });
+    }
+
+    window.addEventListener('keydown', (e) => sendKeyEvent('keydown', e));
+    window.addEventListener('keyup', (e) => sendKeyEvent('keyup', e));
     window._axomaiKeyBound = true;
   }
 

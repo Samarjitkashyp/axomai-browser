@@ -193,6 +193,92 @@ pub fn parse_border_properties(style: &mut HashMap<String, String>, containing_w
     border_widths
 }
 
+pub fn parse_grid_tracks(track_str: &str, available_space: f32, gap: f32) -> Vec<f32> {
+    let mut tokens: Vec<String> = Vec::new();
+    let trimmed = track_str.trim();
+    if trimmed.is_empty() {
+        return vec![available_space.max(10.0)];
+    }
+
+    let mut s = trimmed;
+    while let Some(rep_idx) = s.find("repeat(") {
+        let before = &s[..rep_idx];
+        for tok in before.split_whitespace() {
+            if !tok.is_empty() {
+                tokens.push(tok.to_string());
+            }
+        }
+        if let Some(close_idx) = s[rep_idx..].find(')') {
+            let inner = &s[rep_idx + 7..rep_idx + close_idx];
+            let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+            if parts.len() >= 2 {
+                let count = parts[0].parse::<usize>().unwrap_or(1);
+                let pattern = parts[1];
+                for _ in 0..count {
+                    tokens.push(pattern.to_string());
+                }
+            }
+            s = &s[rep_idx + close_idx + 1..];
+        } else {
+            break;
+        }
+    }
+    for tok in s.split_whitespace() {
+        if !tok.is_empty() {
+            tokens.push(tok.to_string());
+        }
+    }
+
+    if tokens.is_empty() {
+        return vec![available_space.max(10.0)];
+    }
+
+    let n = tokens.len();
+    let total_gap = (n.saturating_sub(1) as f32) * gap;
+    let net_space = (available_space - total_gap).max(0.0);
+
+    let mut fixed_sum: f32 = 0.0;
+    let mut total_fr: f32 = 0.0;
+    let mut track_kinds: Vec<(Option<f32>, f32)> = Vec::new();
+
+    for tok in &tokens {
+        if tok.ends_with("fr") {
+            let fr_val = tok[..tok.len() - 2].trim().parse::<f32>().unwrap_or(1.0).max(0.1);
+            total_fr += fr_val;
+            track_kinds.push((None, fr_val));
+        } else if tok.ends_with("px") {
+            let px = tok[..tok.len() - 2].trim().parse::<f32>().unwrap_or(0.0);
+            fixed_sum += px;
+            track_kinds.push((Some(px), 0.0));
+        } else if tok.ends_with('%') {
+            let pct = tok[..tok.len() - 1].trim().parse::<f32>().unwrap_or(0.0) / 100.0;
+            let px = net_space * pct;
+            fixed_sum += px;
+            track_kinds.push((Some(px), 0.0));
+        } else if tok == "auto" {
+            total_fr += 1.0;
+            track_kinds.push((None, 1.0));
+        } else if let Ok(px) = tok.parse::<f32>() {
+            fixed_sum += px;
+            track_kinds.push((Some(px), 0.0));
+        } else {
+            total_fr += 1.0;
+            track_kinds.push((None, 1.0));
+        }
+    }
+
+    let remaining_for_fr = (net_space - fixed_sum).max(0.0);
+    let fr_unit = if total_fr > 0.0 { remaining_for_fr / total_fr } else { 0.0 };
+
+    track_kinds.into_iter().map(|(fixed, fr)| {
+        if let Some(px) = fixed {
+            px
+        } else {
+            (fr * fr_unit).max(10.0)
+        }
+    }).collect()
+}
+
 /// Multiplies two 2D affine transform matrices [a, b, c, d, tx, ty]
 pub fn multiply_transforms(m1: [f32; 6], m2: [f32; 6]) -> [f32; 6] {
     let [a1, b1, c1, d1, tx1, ty1] = m1;
@@ -380,6 +466,7 @@ pub enum BoxType {
     Block,
     Inline,
     Flex,
+    Grid,
     Text,
     Image,
     Input,
@@ -421,6 +508,10 @@ pub struct LayoutBox {
     pub transform: String,
     pub transform_matrix: Option<[f32; 6]>,
     pub background_gradient: Option<String>,
+    pub id: String,
+    pub class_name: String,
+    pub tag_name: String,
+    pub node_id: usize,
 }
 
 impl LayoutBox {
@@ -480,6 +571,10 @@ impl LayoutBox {
             transform,
             transform_matrix: None,
             background_gradient,
+            id: String::new(),
+            class_name: String::new(),
+            tag_name: String::new(),
+            node_id: 0,
         }
     }
 
@@ -489,11 +584,165 @@ impl LayoutBox {
         self.dimensions.border = parse_border_properties(&mut self.style, max_width);
 
         match self.box_type {
+            BoxType::Grid => self.layout_grid(x, y, max_width),
             BoxType::Flex => self.layout_flex(x, y, max_width),
             BoxType::Block | BoxType::AnonymousBlock => self.layout_block(x, y, max_width),
             BoxType::Image | BoxType::Input | BoxType::Button => self.layout_leaf(x, y),
             _ => self.layout_block(x, y, max_width),
         }
+    }
+
+    pub fn collect_layout_boxes_geometry(&self, map: &mut HashMap<String, (f32, f32, f32, f32, f32, f32)>) {
+        if !self.id.is_empty() {
+            map.insert(
+                format!("#{}", self.id),
+                (self.x, self.y, self.width, self.height, self.scroll_width, self.scroll_height),
+            );
+            map.insert(
+                self.id.clone(),
+                (self.x, self.y, self.width, self.height, self.scroll_width, self.scroll_height),
+            );
+        }
+        if !self.class_name.is_empty() {
+            for cls in self.class_name.split_whitespace() {
+                map.entry(format!(".{}", cls)).or_insert((
+                    self.x, self.y, self.width, self.height, self.scroll_width, self.scroll_height,
+                ));
+            }
+        }
+        if !self.tag_name.is_empty() {
+            map.entry(self.tag_name.clone()).or_insert((
+                self.x, self.y, self.width, self.height, self.scroll_width, self.scroll_height,
+            ));
+        }
+        if self.node_id > 0 {
+            map.insert(
+                format!("__node_{}", self.node_id),
+                (self.x, self.y, self.width, self.height, self.scroll_width, self.scroll_height),
+            );
+        }
+
+        for child in &self.children {
+            child.collect_layout_boxes_geometry(map);
+        }
+    }
+
+    fn layout_grid(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let is_border_box = self.style.get("box-sizing").map(|s| s.as_str() == "border-box").unwrap_or(false);
+        let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
+
+        let content_width = if explicit_w >= 0.0 {
+            if is_border_box {
+                (explicit_w
+                    - self.dimensions.padding.left
+                    - self.dimensions.padding.right
+                    - self.dimensions.border.left
+                    - self.dimensions.border.right)
+                    .max(0.0)
+            } else {
+                explicit_w
+            }
+        } else {
+            (max_width
+                - self.dimensions.margin.left
+                - self.dimensions.margin.right
+                - self.dimensions.padding.left
+                - self.dimensions.padding.right
+                - self.dimensions.border.left
+                - self.dimensions.border.right)
+                .max(0.0)
+        };
+
+        self.dimensions.content.x = x + self.dimensions.margin.left + self.dimensions.border.left + self.dimensions.padding.left;
+        self.dimensions.content.y = y + self.dimensions.margin.top + self.dimensions.border.top + self.dimensions.padding.top;
+        self.dimensions.content.width = content_width;
+
+        let col_gap_str = self.style.get("column-gap").or_else(|| self.style.get("grid-column-gap")).or_else(|| self.style.get("gap")).map(|s| s.as_str()).unwrap_or("0px");
+        let row_gap_str = self.style.get("row-gap").or_else(|| self.style.get("grid-row-gap")).or_else(|| self.style.get("gap")).map(|s| s.as_str()).unwrap_or("0px");
+        let col_gap = parse_px(col_gap_str, 0.0);
+        let row_gap = parse_px(row_gap_str, 0.0);
+
+        let col_template = self.style.get("grid-template-columns").map(|s| s.as_str()).unwrap_or("1fr");
+        let col_widths = parse_grid_tracks(col_template, content_width, col_gap);
+        let num_cols = col_widths.len().max(1);
+
+        let start_x = self.dimensions.content.x;
+        let start_y = self.dimensions.content.y;
+
+        let mut cursor_row = 0;
+        let mut cursor_col = 0;
+        let mut row_heights: Vec<f32> = Vec::new();
+        let mut current_row_max_h: f32 = 0.0;
+        let mut item_placements: Vec<(usize, usize, usize)> = Vec::new();
+
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            if cursor_col >= num_cols {
+                row_heights.push(current_row_max_h);
+                cursor_row += 1;
+                cursor_col = 0;
+                current_row_max_h = 0.0;
+            }
+
+            let cell_w = col_widths.get(cursor_col).cloned().unwrap_or(100.0);
+            child.width = cell_w;
+            let child_h = child.layout(0.0, 0.0, cell_w);
+            current_row_max_h = current_row_max_h.max(child_h);
+
+            item_placements.push((idx, cursor_col, cursor_row));
+            cursor_col += 1;
+        }
+        if !self.children.is_empty() {
+            row_heights.push(current_row_max_h);
+        }
+
+        let mut row_offsets: Vec<f32> = Vec::new();
+        let mut acc_y = 0.0;
+        for (r, &rh) in row_heights.iter().enumerate() {
+            row_offsets.push(acc_y);
+            acc_y += rh + if r + 1 < row_heights.len() { row_gap } else { 0.0 };
+        }
+
+        let mut col_offsets: Vec<f32> = Vec::new();
+        let mut acc_x = 0.0;
+        for (c, &cw) in col_widths.iter().enumerate() {
+            col_offsets.push(acc_x);
+            acc_x += cw + if c + 1 < col_widths.len() { col_gap } else { 0.0 };
+        }
+
+        for (idx, col_idx, row_idx) in item_placements {
+            let child = &mut self.children[idx];
+            let cell_x = start_x + col_offsets.get(col_idx).cloned().unwrap_or(0.0);
+            let cell_y = start_y + row_offsets.get(row_idx).cloned().unwrap_or(0.0);
+            let cell_w = col_widths.get(col_idx).cloned().unwrap_or(100.0);
+
+            child.x = cell_x;
+            child.y = cell_y;
+            child.layout(cell_x, cell_y, cell_w);
+        }
+
+        let total_grid_height = acc_y;
+        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
+        let final_content_height = if explicit_h >= 0.0 { explicit_h } else { total_grid_height };
+        self.dimensions.content.height = final_content_height;
+
+        let border_box = self.dimensions.border_box();
+        self.x = border_box.x;
+        self.y = border_box.y;
+        self.width = border_box.width;
+        self.height = border_box.height;
+
+        self.scroll_height = total_grid_height + self.dimensions.padding.top + self.dimensions.padding.bottom + self.dimensions.border.top + self.dimensions.border.bottom;
+        self.scroll_width = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
+        let is_scroll_overflow = self.overflow == "auto" || self.overflow == "scroll" || self.overflow == "hidden";
+        self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
+
+        if !self.transform.is_empty() {
+            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+        }
+
+        self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
+
+        self.dimensions.margin_box().height
     }
 
     fn layout_block(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
@@ -1207,9 +1456,15 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
             }
 
             let href = get_href(node);
+            let id = attributes.get("id").cloned().unwrap_or_default();
+            let class_name = attributes.get("class").cloned().unwrap_or_default();
+            let tag_name = tag.clone();
 
             if tag == "img" {
                 let mut img_box = LayoutBox::new(BoxType::Image, style.clone(), href);
+                img_box.id = id;
+                img_box.class_name = class_name;
+                img_box.tag_name = tag_name;
                 let src = attributes.get("src").cloned().unwrap_or_default();
 
                 if !src.is_empty() {
@@ -1232,6 +1487,9 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
 
             if tag == "input" {
                 let mut input_box = LayoutBox::new(BoxType::Input, style.clone(), href);
+                input_box.id = id;
+                input_box.class_name = class_name;
+                input_box.tag_name = tag_name;
                 input_box.value = attributes.get("value").cloned().unwrap_or_default();
                 input_box.placeholder = attributes.get("placeholder").cloned().unwrap_or_default();
 
@@ -1245,6 +1503,9 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
 
             if tag == "button" {
                 let mut btn_box = LayoutBox::new(BoxType::Button, style.clone(), href);
+                btn_box.id = id;
+                btn_box.class_name = class_name;
+                btn_box.tag_name = tag_name;
                 let w_str = attributes.get("width").or_else(|| style.get("width")).map(|s| s.as_str()).unwrap_or("100px");
                 let h_str = attributes.get("height").or_else(|| style.get("height")).map(|s| s.as_str()).unwrap_or("32px");
 
@@ -1259,7 +1520,9 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 return Some(btn_box);
             }
 
-            let box_type = if display == "flex" {
+            let box_type = if display == "grid" || display == "inline-grid" {
+                BoxType::Grid
+            } else if display == "flex" {
                 BoxType::Flex
             } else if display == "block" || display == "table" {
                 BoxType::Block
@@ -1268,6 +1531,9 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
             };
 
             let mut root_box = LayoutBox::new(box_type, style.clone(), href);
+            root_box.id = id;
+            root_box.class_name = class_name;
+            root_box.tag_name = tag_name;
             for child in &node_borrow.children {
                 if let Some(child_box) = build_layout_tree(child, current_url) {
                     root_box.children.push(child_box);

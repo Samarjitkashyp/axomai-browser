@@ -594,6 +594,73 @@ impl V8JSEngine {
         self.execute(&js).unwrap_or(false)
     }
 
+    /// Dispatch a full W3C KeyboardEvent (keydown, keyup, keypress) to activeElement or document
+    pub fn dispatch_keyboard_event(
+        &mut self,
+        event_type: &str,
+        key: &str,
+        code: &str,
+        key_code: u32,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+        meta: bool,
+        repeat: bool,
+    ) -> bool {
+        let js = format!(
+            r#"
+            (function() {{
+                const target = document.activeElement || document.body || document;
+                if (target) {{
+                    const opts = {{
+                        key: "{}",
+                        code: "{}",
+                        keyCode: {},
+                        which: {},
+                        ctrlKey: {},
+                        altKey: {},
+                        shiftKey: {},
+                        metaKey: {},
+                        repeat: {},
+                        bubbles: true,
+                        cancelable: true
+                    }};
+                    const ev = new KeyboardEvent("{}", opts);
+                    target.dispatchEvent(ev);
+                    return !ev.defaultPrevented;
+                }}
+                return false;
+            }})();
+            "#,
+            key.replace('\\', "\\\\").replace('"', "\\\""),
+            code.replace('\\', "\\\\").replace('"', "\\\""),
+            key_code,
+            key_code,
+            ctrl,
+            alt,
+            shift,
+            meta,
+            repeat,
+            event_type
+        );
+        self.execute(&js).unwrap_or(false)
+    }
+
+    /// Synchronize computed layout box geometry (x, y, width, height, scrollWidth, scrollHeight) to V8 DOM registry
+    pub fn sync_layout_geometry(&mut self, geom_map: &HashMap<String, (f32, f32, f32, f32, f32, f32)>) {
+        if geom_map.is_empty() {
+            return;
+        }
+        let mut json = String::from("{");
+        for (i, (key, (x, y, w, h, sw, sh))) in geom_map.iter().enumerate() {
+            if i > 0 { json.push(','); }
+            json.push_str(&format!(r#""{}":[{},{},{},{},{},{}]"#, key.replace('"', "\\\""), x, y, w, h, sw, sh));
+        }
+        json.push('}');
+        let js = format!("window.__layoutGeometryRegistry = {};", json);
+        let _ = self.execute(&js);
+    }
+
     /// Dispatch DOMContentLoaded event when DOM parsing finishes and defer scripts have run
     pub fn dispatch_dom_content_loaded(&mut self) -> bool {
         let js = r#"
@@ -1998,6 +2065,15 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             options = options || {};
             this.key = options.key || '';
             this.code = options.code || '';
+            this.keyCode = options.keyCode || (this.key.length === 1 ? this.key.toUpperCase().charCodeAt(0) : 0);
+            this.which = options.which || this.keyCode;
+            this.charCode = options.charCode || (type === 'keypress' ? this.keyCode : 0);
+            this.ctrlKey = !!options.ctrlKey;
+            this.shiftKey = !!options.shiftKey;
+            this.altKey = !!options.altKey;
+            this.metaKey = !!options.metaKey;
+            this.repeat = !!options.repeat;
+            this.location = options.location || 0;
         };
         KeyboardEvent.prototype = Object.create(Event.prototype);
 
@@ -2064,6 +2140,143 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             obj.hasPointerCapture = function(pointerId) {
                 return this.__pointerCaptures.has(Number(pointerId) || 1);
             };
+
+            // Focus Spec APIs
+            obj.focus = function() {
+                const prevActive = document.activeElement;
+                if (prevActive === this) return;
+                if (prevActive && typeof prevActive.dispatchEvent === 'function') {
+                    prevActive.dispatchEvent(new Event('blur', { bubbles: false }));
+                    prevActive.dispatchEvent(new Event('focusout', { bubbles: true }));
+                }
+                document.activeElement = this;
+                this.dispatchEvent(new Event('focus', { bubbles: false }));
+                this.dispatchEvent(new Event('focusin', { bubbles: true }));
+            };
+
+            obj.blur = function() {
+                if (document.activeElement === this) {
+                    document.activeElement = document.body;
+                    this.dispatchEvent(new Event('blur', { bubbles: false }));
+                    this.dispatchEvent(new Event('focusout', { bubbles: true }));
+                }
+            };
+
+            // DOM Geometry Spec APIs
+            obj.getBoundingClientRect = function() {
+                let geom = null;
+                if (window.__layoutGeometryRegistry) {
+                    if (this.id && window.__layoutGeometryRegistry[this.id]) {
+                        geom = window.__layoutGeometryRegistry[this.id];
+                    } else if (this.className && window.__layoutGeometryRegistry['.' + this.className.split(' ')[0]]) {
+                        geom = window.__layoutGeometryRegistry['.' + this.className.split(' ')[0]];
+                    } else if (this.tagName && window.__layoutGeometryRegistry[this.tagName.toLowerCase()]) {
+                        geom = window.__layoutGeometryRegistry[this.tagName.toLowerCase()];
+                    }
+                }
+                const x = geom ? geom[0] : (this.offsetLeft || 0);
+                const y = geom ? geom[1] : (this.offsetTop || 0);
+                const w = geom ? geom[2] : (this.clientWidth || 0);
+                const h = geom ? geom[3] : (this.clientHeight || 0);
+                const sx = window.scrollX || 0;
+                const sy = window.scrollY || 0;
+                const top = y - sy;
+                const left = x - sx;
+                return {
+                    x: left,
+                    y: top,
+                    width: w,
+                    height: h,
+                    top: top,
+                    right: left + w,
+                    bottom: top + h,
+                    left: left,
+                    toJSON: function() { return this; }
+                };
+            };
+
+            Object.defineProperty(obj, 'offsetLeft', {
+                get: function() {
+                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
+                        return window.__layoutGeometryRegistry[this.id][0];
+                    }
+                    return this.__offsetLeft || 0;
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'offsetTop', {
+                get: function() {
+                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
+                        return window.__layoutGeometryRegistry[this.id][1];
+                    }
+                    return this.__offsetTop || 0;
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'offsetWidth', {
+                get: function() {
+                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
+                        return window.__layoutGeometryRegistry[this.id][2];
+                    }
+                    return this.__offsetWidth || 0;
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'offsetHeight', {
+                get: function() {
+                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
+                        return window.__layoutGeometryRegistry[this.id][3];
+                    }
+                    return this.__offsetHeight || 0;
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'clientWidth', {
+                get: function() { return this.offsetWidth; },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'clientHeight', {
+                get: function() { return this.offsetHeight; },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'clientTop', {
+                get: function() { return 0; },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'clientLeft', {
+                get: function() { return 0; },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'offsetParent', {
+                get: function() {
+                    let p = this.parentElement;
+                    while (p) {
+                        if (p.style && (p.style.position === 'relative' || p.style.position === 'absolute' || p.style.position === 'fixed')) {
+                            return p;
+                        }
+                        p = p.parentElement;
+                    }
+                    return document.body;
+                },
+                configurable: true,
+                enumerable: true
+            });
 
             // Element Scrolling APIs
             Object.defineProperty(obj, 'scrollTop', {

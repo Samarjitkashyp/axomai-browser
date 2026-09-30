@@ -516,6 +516,11 @@ impl AxomaiEngine {
                 self.max_scroll_y = (total_h - viewport_h).max(0.0);
                 self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y);
 
+                // Sync live computed geometry to V8 DOM registry
+                let mut geom_map = HashMap::new();
+                layout_box.collect_layout_boxes_geometry(&mut geom_map);
+                self.js_engine.sync_layout_geometry(&geom_map);
+
                 // 3. Rebuild Display List
                 let mut list = Vec::new();
                 build_display_list(&layout_box, &mut list);
@@ -674,6 +679,28 @@ impl AxomaiEngine {
             }
         }
 
+        None
+    }
+
+    pub fn handle_key_event(
+        &mut self,
+        event_type: &str,
+        key_str: &str,
+        code_str: &str,
+        key_code: u32,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+        meta: bool,
+        repeat: bool,
+    ) -> Option<String> {
+        let not_prevented = self.js_engine.dispatch_keyboard_event(
+            event_type, key_str, code_str, key_code, ctrl, alt, shift, meta, repeat,
+        );
+
+        if (event_type == "keydown" || event_type == "keypress") && not_prevented {
+            return self.handle_key(key_str);
+        }
         None
     }
 
