@@ -2333,13 +2333,19 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 }
             );
 
-            // Rewrite imported identifiers in module body using token scanner
+            // Scope-aware token scanner to rewrite imported identifiers to live getters
             const keys = Object.keys(identMap);
             if (keys.length > 0) {
                 let rewritten = '';
                 let idx = 0;
                 const tLen = transformed.length;
                 let prevNonSpaceChar = '';
+                let lastDeclKeyword = '';
+                let inParamParen = 0;
+                let currentParamScope = null;
+
+                // Stack of Sets of shadowed local variable/param names
+                const scopeStack = [new Set()];
 
                 while (idx < tLen) {
                     const ch = transformed[idx];
@@ -2364,6 +2370,45 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                         continue;
                     }
 
+                    // Scope blocks { and }
+                    if (ch === '{') {
+                        const newScope = currentParamScope || new Set();
+                        currentParamScope = null;
+                        scopeStack.push(newScope);
+                        rewritten += ch;
+                        prevNonSpaceChar = '{';
+                        idx++;
+                        continue;
+                    }
+                    if (ch === '}') {
+                        if (scopeStack.length > 1) {
+                            scopeStack.pop();
+                        }
+                        rewritten += ch;
+                        prevNonSpaceChar = '}';
+                        idx++;
+                        continue;
+                    }
+
+                    // Parameter list tracking: (a, b, c) => or function(a, b, c)
+                    if (ch === '(') {
+                        if (prevNonSpaceChar === 'function' || prevNonSpaceChar === '>' || lastDeclKeyword === 'function') {
+                            inParamParen++;
+                            if (!currentParamScope) currentParamScope = new Set();
+                        }
+                        rewritten += ch;
+                        prevNonSpaceChar = '(';
+                        idx++;
+                        continue;
+                    }
+                    if (ch === ')') {
+                        if (inParamParen > 0) inParamParen--;
+                        rewritten += ch;
+                        prevNonSpaceChar = ')';
+                        idx++;
+                        continue;
+                    }
+
                     // Identifier scanning
                     if (/[a-zA-Z_$]/.test(ch)) {
                         let idStart = idx;
@@ -2372,11 +2417,55 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                         }
                         const idText = transformed.slice(idStart, idx);
 
-                        if (prevNonSpaceChar !== '.' && identMap[idText]) {
+                        // Check declaration keywords
+                        if (idText === 'var' || idText === 'let' || idText === 'const' || idText === 'function' || idText === 'class') {
+                            lastDeclKeyword = idText;
+                            rewritten += idText;
+                            prevNonSpaceChar = idText;
+                            continue;
+                        }
+
+                        // Local variable or function declaration
+                        if (lastDeclKeyword) {
+                            const curScope = scopeStack[scopeStack.length - 1];
+                            curScope.add(idText);
+                            lastDeclKeyword = '';
+                            rewritten += idText;
+                            prevNonSpaceChar = idText[idText.length - 1];
+                            continue;
+                        }
+
+                        // Function parameter
+                        if (inParamParen > 0 && currentParamScope) {
+                            currentParamScope.add(idText);
+                            rewritten += idText;
+                            prevNonSpaceChar = idText[idText.length - 1];
+                            continue;
+                        }
+
+                        // Check if identifier is shadowed in any active lexical scope
+                        let isShadowed = false;
+                        for (let s = scopeStack.length - 1; s >= 0; s--) {
+                            if (scopeStack[s].has(idText)) {
+                                isShadowed = true;
+                                break;
+                            }
+                        }
+
+                        if (!isShadowed && prevNonSpaceChar !== '.' && identMap[idText]) {
                             let peek = idx;
                             while (peek < tLen && /\s/.test(transformed[peek])) peek++;
+
+                            // Object literal explicit key: `{ count: 123 }` or `{ count: val }`
                             if (peek < tLen && transformed[peek] === ':' && (prevNonSpaceChar === '{' || prevNonSpaceChar === ',')) {
                                 rewritten += idText;
+                            } else if (prevNonSpaceChar === '{' || prevNonSpaceChar === ',') {
+                                // Object literal shorthand: `{ count }` or `{ a, count }`
+                                if (peek < tLen && (transformed[peek] === '}' || transformed[peek] === ',')) {
+                                    rewritten += idText + ': ' + identMap[idText];
+                                } else {
+                                    rewritten += identMap[idText];
+                                }
                             } else {
                                 rewritten += identMap[idText];
                             }

@@ -169,9 +169,14 @@ impl<'a> CSSParser<'a> {
                 break;
             }
 
-            if self.css_text[i..].starts_with("/*") {
-                if let Some(end_comm) = self.css_text[i + 2..].find("*/") {
-                    i += 2 + end_comm + 2;
+            // Block comment: /* ... */
+            if i + 1 < n && chars[i] == '/' && chars[i + 1] == '*' {
+                i += 2;
+                while i + 1 < n && !(chars[i] == '*' && chars[i + 1] == '/') {
+                    i += 1;
+                }
+                if i + 1 < n {
+                    i += 2;
                 } else {
                     i = n;
                 }
@@ -185,14 +190,16 @@ impl<'a> CSSParser<'a> {
             if i >= n {
                 break;
             }
-            let sel_text = self.css_text[sel_start..i].trim();
+            let sel_text: String = chars[sel_start..i].iter().collect();
+            let sel_text = sel_text.trim();
             i += 1; // consume '{'
 
             let body_start = i;
             while i < n && chars[i] != '}' {
                 i += 1;
             }
-            let body_text = self.css_text[body_start..i].trim();
+            let body_text: String = chars[body_start..i].iter().collect();
+            let body_text = body_text.trim();
             if i < n {
                 i += 1; // consume '}'
             }
@@ -201,7 +208,7 @@ impl<'a> CSSParser<'a> {
                 continue;
             }
 
-            let declarations = parse_declarations(body_text);
+            let declarations = parse_declarations(&body_text);
             if declarations.is_empty() {
                 continue;
             }
