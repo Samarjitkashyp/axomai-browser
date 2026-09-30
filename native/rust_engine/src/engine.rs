@@ -66,8 +66,12 @@ pub struct AxomaiEngine {
     script_tx: Sender<PendingScript>,
     script_rx: Receiver<PendingScript>,
     pub pending_scripts: usize,
+    pub pending_defer_scripts: usize,
     pub next_ordered_script_to_run: usize,
     pub ordered_scripts_buffer: HashMap<usize, PendingScript>,
+    pub next_ordered_defer_to_run: usize,
+    pub ordered_defer_buffer: HashMap<usize, PendingScript>,
+    pub dom_parsing_complete: bool,
     pub dom_content_loaded_dispatched: bool,
     pub load_dispatched: bool,
 }
@@ -103,8 +107,12 @@ impl AxomaiEngine {
             script_tx,
             script_rx,
             pending_scripts: 0,
+            pending_defer_scripts: 0,
             next_ordered_script_to_run: 0,
             ordered_scripts_buffer: HashMap::new(),
+            next_ordered_defer_to_run: 0,
+            ordered_defer_buffer: HashMap::new(),
+            dom_parsing_complete: false,
             dom_content_loaded_dispatched: false,
             load_dispatched: false,
         }
@@ -171,9 +179,7 @@ impl AxomaiEngine {
         // 1. Establish ONE persistent V8 Context bound to the root DOM BEFORE parsing begins
         self.js_engine.reset_page_context(Some(&dom_root), &url_str);
 
-        let mut ordered_script_counter = 0;
-        let mut defer_scripts = Vec::new();
-        let mut scheduled_scripts = Vec::new();
+        let mut defer_script_counter = 0;
         let current_url = self.current_url.clone();
         let script_tx = self.script_tx.clone();
 
@@ -203,21 +209,96 @@ impl AxomaiEngine {
                         src.trim().to_string()
                     };
 
-                    if kind == ScriptKind::Defer || kind == ScriptKind::Async {
-                        scheduled_scripts.push((resolved_url, kind));
-                    } else {
-                        // Classic external script
+                    if kind == ScriptKind::Defer {
+                        let defer_order = defer_script_counter;
+                        defer_script_counter += 1;
+                        self.pending_defer_scripts += 1;
+                        self.pending_scripts += 1;
+
                         if let Ok(url_obj) = URL::parse(&resolved_url) {
                             if url_obj.scheme == "file" || url_obj.scheme == "data" {
-                                // Local synchronous script: pause parser, execute, resume!
                                 let (_headers, js_code) = url_obj.request();
-                                if !js_code.is_empty() {
-                                    println!("[Axomai ParserController] Synchronous parser pause -> executing local script: {}", resolved_url);
-                                    let _ = self.js_engine.execute(&js_code);
-                                }
+                                self.pending_defer_scripts -= 1;
+                                self.pending_scripts -= 1;
+                                self.ordered_defer_buffer.insert(
+                                    defer_order,
+                                    PendingScript {
+                                        document_id: doc_id,
+                                        order: defer_order,
+                                        kind: ScriptKind::Defer,
+                                        url: resolved_url,
+                                        code: js_code,
+                                    },
+                                );
                             } else {
-                                scheduled_scripts.push((resolved_url, kind));
+                                println!(
+                                    "[Axomai ScriptScheduler] Queued external DEFER script (doc_id {}, defer_order {}): {}",
+                                    doc_id, defer_order, resolved_url
+                                );
+                                let tx = script_tx.clone();
+                                let script_url = resolved_url.clone();
+                                thread::spawn(move || {
+                                    let js_code = match ureq::get(&script_url).timeout(Duration::from_secs(5)).call() {
+                                        Ok(resp) => resp.into_string().unwrap_or_default(),
+                                        Err(e) => {
+                                            eprintln!("[Axomai ScriptScheduler] Defer script fetch failed for {}: {}", script_url, e);
+                                            String::new()
+                                        }
+                                    };
+                                    let _ = tx.send(PendingScript {
+                                        document_id: doc_id,
+                                        order: defer_order,
+                                        kind: ScriptKind::Defer,
+                                        url: script_url,
+                                        code: js_code,
+                                    });
+                                });
                             }
+                        }
+                    } else if kind == ScriptKind::Async {
+                        self.pending_scripts += 1;
+                        println!("[Axomai ScriptScheduler] Queued external ASYNC script: {}", resolved_url);
+                        let tx = script_tx.clone();
+                        let script_url = resolved_url.clone();
+                        thread::spawn(move || {
+                            let js_code = match ureq::get(&script_url).timeout(Duration::from_secs(5)).call() {
+                                Ok(resp) => resp.into_string().unwrap_or_default(),
+                                Err(e) => {
+                                    eprintln!("[Axomai ScriptScheduler] Async script fetch failed for {}: {}", script_url, e);
+                                    String::new()
+                                }
+                            };
+                            let _ = tx.send(PendingScript {
+                                document_id: doc_id,
+                                order: 0,
+                                kind: ScriptKind::Async,
+                                url: script_url,
+                                code: js_code,
+                            });
+                        });
+                    } else {
+                        // Classic external script: GENUINE SYNCHRONOUS PARSER BLOCKING FETCH + EXECUTE
+                        println!("[Axomai ParserController] Synchronous parser pause -> fetching blocking classic script: {}", resolved_url);
+                        let js_code = if let Ok(url_obj) = URL::parse(&resolved_url) {
+                            if url_obj.scheme == "file" || url_obj.scheme == "data" {
+                                let (_headers, code) = url_obj.request();
+                                code
+                            } else {
+                                match ureq::get(&resolved_url).timeout(Duration::from_secs(5)).call() {
+                                    Ok(resp) => resp.into_string().unwrap_or_default(),
+                                    Err(e) => {
+                                        eprintln!("[Axomai ParserController] Blocking script fetch failed for {}: {}", resolved_url, e);
+                                        String::new()
+                                    }
+                                }
+                            }
+                        } else {
+                            String::new()
+                        };
+                        if !js_code.is_empty() {
+                            println!("[Axomai ParserController] Executing blocking classic script ({} bytes) -> live DOM mutation", js_code.len());
+                            let _ = self.js_engine.execute(&js_code);
+                            println!("[Axomai ParserController] Blocking classic script execution complete -> parser resumed");
                         }
                     }
                     return;
@@ -227,74 +308,53 @@ impl AxomaiEngine {
             // Inline script handling
             if !body.trim().is_empty() {
                 if kind == ScriptKind::Defer {
-                    defer_scripts.push(body.to_string());
+                    let defer_order = defer_script_counter;
+                    defer_script_counter += 1;
+                    self.ordered_defer_buffer.insert(
+                        defer_order,
+                        PendingScript {
+                            document_id: doc_id,
+                            order: defer_order,
+                            kind: ScriptKind::Defer,
+                            url: "inline-defer".to_string(),
+                            code: body.to_string(),
+                        },
+                    );
                 } else {
                     // GENUINE SYNCHRONOUS PARSER PAUSE -> EXECUTE -> RESUME
-                    println!("[Axomai ParserController] Synchronous parser pause -> executing inline script ({} bytes)", body.len());
+                    println!("[Axomai ParserController] Synchronous parser pause -> executing inline classic script ({} bytes)", body.len());
                     let _ = self.js_engine.execute(body);
-                    println!("[Axomai ParserController] Inline script execution complete -> parser resumed");
+                    println!("[Axomai ParserController] Inline classic script execution complete -> parser resumed");
                 }
             }
         });
 
         self.dom_root = Some(Rc::clone(&final_dom_root));
+        self.dom_parsing_complete = true;
 
-        // 3. Schedule external async / deferred scripts
-        for (resolved_url, kind) in scheduled_scripts {
-            if let Ok(url_obj) = URL::parse(&resolved_url) {
-                if url_obj.scheme == "file" || url_obj.scheme == "data" {
-                    let (_headers, js_code) = url_obj.request();
-                    if !js_code.is_empty() {
-                        if kind == ScriptKind::Defer {
-                            defer_scripts.push(js_code);
-                        } else {
-                            let _ = self.js_engine.execute(&js_code);
-                        }
-                    }
-                } else {
-                    let order = if kind == ScriptKind::Async {
-                        0
-                    } else {
-                        let ord = ordered_script_counter;
-                        ordered_script_counter += 1;
-                        ord
-                    };
-                    println!(
-                        "[Axomai ScriptScheduler] Queued {:?} external script (doc_id {}, order {}): {}",
-                        kind, doc_id, order, resolved_url
-                    );
-                    let tx = script_tx.clone();
-                    self.pending_scripts += 1;
-                    let script_url = resolved_url.clone();
-                    thread::spawn(move || {
-                        let js_code = match ureq::get(&script_url).timeout(Duration::from_secs(5)).call() {
-                            Ok(resp) => resp.into_string().unwrap_or_default(),
-                            Err(e) => {
-                                eprintln!("[Axomai ScriptScheduler] Script fetch failed for {}: {}", script_url, e);
-                                String::new()
-                            }
-                        };
-                        let _ = tx.send(PendingScript {
-                            document_id: doc_id,
-                            order,
-                            kind,
-                            url: script_url,
-                            code: js_code,
-                        });
-                    });
-                }
+        // 3. Drain all currently available defer scripts in strict document order
+        while let Some(defer_script) = self.ordered_defer_buffer.remove(&self.next_ordered_defer_to_run) {
+            if !defer_script.code.is_empty() {
+                println!(
+                    "[Axomai ScriptController] Executing deferred script (defer_order {}): {}",
+                    self.next_ordered_defer_to_run, defer_script.url
+                );
+                let _ = self.js_engine.execute(&defer_script.code);
             }
+            self.next_ordered_defer_to_run += 1;
         }
 
-        // 4. Execute all collected defer scripts in strict document order after parser completion
-        for defer_code in defer_scripts {
-            println!("[Axomai ScriptController] Executing deferred script in document order");
-            let _ = self.js_engine.execute(&defer_code);
+        // 4. Dispatch DOMContentLoaded IF AND ONLY IF all defer scripts have finished executing!
+        if self.pending_defer_scripts == 0 {
+            println!("[Axomai Lifecycle] All defer scripts finished -> Dispatching DOMContentLoaded");
+            self.js_engine.dispatch_dom_content_loaded();
+            self.dom_content_loaded_dispatched = true;
+        } else {
+            println!(
+                "[Axomai Lifecycle] Parser complete but {} external defer script(s) still in-flight -> DOMContentLoaded gated",
+                self.pending_defer_scripts
+            );
         }
-
-        // 5. Dispatch DOMContentLoaded event when DOM parsing finishes and defer scripts have executed
-        self.js_engine.dispatch_dom_content_loaded();
-        self.dom_content_loaded_dispatched = true;
 
         // 6. Extract <title> and update current_title & history stack
         let mut title_buf = String::new();
@@ -641,7 +701,12 @@ impl AxomaiEngine {
             if self.pending_scripts > 0 {
                 self.pending_scripts -= 1;
             }
-            if script.kind == ScriptKind::Async {
+            if script.kind == ScriptKind::Defer {
+                if self.pending_defer_scripts > 0 {
+                    self.pending_defer_scripts -= 1;
+                }
+                self.ordered_defer_buffer.insert(script.order, script);
+            } else if script.kind == ScriptKind::Async {
                 async_scripts.push(script);
             } else {
                 self.ordered_scripts_buffer.insert(script.order, script);
@@ -659,6 +724,34 @@ impl AxomaiEngine {
                 }
             }
             executed = true;
+        }
+
+        // If DOM parsing is complete, execute deferred scripts in strict document order
+        if self.dom_parsing_complete {
+            while let Some(defer_script) = self.ordered_defer_buffer.remove(&self.next_ordered_defer_to_run) {
+                if !defer_script.code.is_empty() {
+                    println!(
+                        "[Axomai ScriptScheduler] Executing deferred script (defer_order {}): {}",
+                        self.next_ordered_defer_to_run, defer_script.url
+                    );
+                    if let Ok(mutated) = self.js_engine.execute(&defer_script.code) {
+                        if mutated {
+                            script_mutated = true;
+                        }
+                    }
+                }
+                self.next_ordered_defer_to_run += 1;
+                executed = true;
+            }
+
+            // Gated DOMContentLoaded dispatch: fires once ALL defer scripts have completed!
+            if self.pending_defer_scripts == 0 && !self.dom_content_loaded_dispatched {
+                println!("[Axomai Lifecycle] In-flight defer scripts completed -> Dispatching DOMContentLoaded");
+                self.js_engine.dispatch_dom_content_loaded();
+                self.dom_content_loaded_dispatched = true;
+                script_mutated = true;
+                executed = true;
+            }
         }
 
         // Execute sequential ordered scripts strictly in order (0 -> 1 -> 2 -> ...)
@@ -682,7 +775,9 @@ impl AxomaiEngine {
             self.restyle_and_relayout(viewport_w, viewport_h);
         }
 
-        if self.pending_scripts == 0 && !self.load_dispatched {
+        // Load event fires once DOMContentLoaded has fired AND all scripts (including async) have completed!
+        if self.pending_scripts == 0 && self.dom_content_loaded_dispatched && !self.load_dispatched {
+            println!("[Axomai Lifecycle] All scripts & subresources complete -> Dispatching load event");
             self.js_engine.dispatch_load_event();
             self.load_dispatched = true;
             executed = true;
@@ -778,7 +873,12 @@ impl AxomaiEngine {
 
     /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
     pub fn has_pending_events(&self) -> bool {
-        self.is_dirty || self.pending_scripts > 0 || !self.ordered_scripts_buffer.is_empty() || self.js_engine.has_pending_events()
+        self.is_dirty
+            || self.pending_scripts > 0
+            || self.pending_defer_scripts > 0
+            || !self.ordered_scripts_buffer.is_empty()
+            || !self.ordered_defer_buffer.is_empty()
+            || self.js_engine.has_pending_events()
     }
 }
 
