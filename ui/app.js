@@ -101,6 +101,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Helper: Navigate via Native Rust Core IPC or fallback
+  function navigateTo(url) {
+    if (window.ipc) {
+      window.ipc.postMessage('navigate:' + url);
+    } else {
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        window.location.href = url;
+      } else {
+        window.location.href = `https://www.google.com/search?q=${encodeURIComponent(url)}`;
+      }
+    }
+  }
+
   // 7. Omnibox Enter handling
   const omnibox = document.querySelector('.omnibox-input');
   if (omnibox) {
@@ -108,11 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') {
         const query = omnibox.value.trim();
         if (query) {
-          if (query.startsWith('http://') || query.startsWith('https://')) {
-            window.location.href = query;
-          } else {
-            window.location.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-          }
+          navigateTo(query);
         }
       }
     });
@@ -125,9 +134,77 @@ document.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') {
         const query = searchInput.value.trim();
         if (query) {
-          window.location.href = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+          navigateTo(`https://www.google.com/search?q=${encodeURIComponent(query)}`);
         }
       }
     });
   }
 });
+
+// Axomai Core Rust Engine DisplayList HTML5 Canvas Rendering Bridge
+window.__axomai_render_display_list = function(displayList) {
+  const list = typeof displayList === 'string' ? JSON.parse(displayList) : displayList;
+  if (!Array.isArray(list) || list.length === 0) return;
+
+  let canvas = document.getElementById('axomai-engine-canvas');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.id = 'axomai-engine-canvas';
+    canvas.style.position = 'fixed';
+    canvas.style.top = '88px';
+    canvas.style.left = '72px';
+    canvas.style.right = '0';
+    canvas.style.bottom = '0';
+    canvas.style.width = 'calc(100vw - 72px)';
+    canvas.style.height = 'calc(100vh - 88px)';
+    canvas.style.zIndex = '900';
+    canvas.style.backgroundColor = '#ffffff';
+    document.body.appendChild(canvas);
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+      if (window.ipc) {
+        window.ipc.postMessage(`click:${clickX},${clickY}`);
+      }
+    });
+  }
+
+  canvas.width = canvas.clientWidth || 1200;
+  canvas.height = canvas.clientHeight || 800;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (const cmd of list) {
+    if (cmd.type === 'rect') {
+      ctx.fillStyle = cmd.color || '#202124';
+      ctx.fillRect(cmd.x1, cmd.y1, cmd.x2 - cmd.x1, cmd.y2 - cmd.y1);
+    } else if (cmd.type === 'text') {
+      ctx.fillStyle = cmd.color || '#202124';
+      ctx.font = `${cmd.fontWeight || 'normal'} ${cmd.fontStyle || 'normal'} ${cmd.fontSize || 14}px 'Segoe UI', sans-serif`;
+      ctx.fillText(cmd.text || '', cmd.x, cmd.y + (cmd.fontSize || 14));
+    } else if (cmd.type === 'input') {
+      ctx.fillStyle = cmd.isFocused ? '#ffffff' : '#f8f9fa';
+      ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      ctx.strokeStyle = cmd.isFocused ? '#1a73e8' : '#dadce0';
+      ctx.lineWidth = cmd.isFocused ? 2 : 1;
+      ctx.strokeRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      ctx.fillStyle = '#202124';
+      ctx.font = "14px 'Segoe UI', sans-serif";
+      const val = cmd.value || cmd.placeholder || '';
+      ctx.fillText(val + (cmd.isFocused ? '|' : ''), cmd.x + 10, cmd.y + 22);
+    } else if (cmd.type === 'button') {
+      ctx.fillStyle = '#1a73e8';
+      ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = "bold 13px 'Segoe UI', sans-serif";
+      ctx.fillText(cmd.label || '', cmd.x + 12, cmd.y + 20);
+    } else if (cmd.type === 'image') {
+      ctx.fillStyle = '#f1f3f4';
+      ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      ctx.strokeStyle = '#dadce0';
+      ctx.strokeRect(cmd.x, cmd.y, cmd.width, cmd.height);
+    }
+  }
+};

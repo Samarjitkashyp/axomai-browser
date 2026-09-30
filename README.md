@@ -1,13 +1,13 @@
-# 🚀 Axomai Browser `v0.2.0`
+# 🚀 Axomai Browser `v0.3.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
 A modern web browser designed with high-performance Rust core, native windowing, and a rich, glassmorphic UI featuring workspaces, Axomai AI assistant, quick tools, and customizable new tab experience.
 
-- **Modern Browser UI (`v0.2.0`)**: Pixel-perfect native browser shell with multi-tab management, omnibox, quick shortcuts, news feed, quick productivity tools, and dedicated Axomai AI sidebar.
-- **Rust Desktop Shell (`rust_desktop/`)**: Native cross-platform desktop windowing with Tao & Wry (WebView2).
-- **Core Engine (`native/rust_engine/`)**: High-performance HTML5 DOM Parser, CSS3 Cascade Engine, Box Model Layout Calculator, JS Engine, and Display List Painter.
-- **Legacy GUI Engine (`native/cpp_gui/`)**: Win32 GDI+ canvas rendering bridge.
+- **Modern Browser UI (`v0.3.0`)**: Pixel-perfect native browser shell with multi-tab management, omnibox, quick shortcuts, news feed, quick productivity tools, and dedicated Axomai AI sidebar.
+- **Rust Desktop Shell (`rust_desktop/`)**: Native cross-platform desktop windowing with Tao & Wry (WebView2) with full DisplayList HTML5 canvas bridge.
+- **Core Engine (`native/rust_engine/`)**: Partial HTML5-compatible DOM Parser, Partial CSS3 Cascade & Layout Engine, Google V8 ECMAScript runtime with asynchronous ScriptScheduler, and Display List Painter.
+- **Native GUI Engine (`native/cpp_gui/`)**: Win32 GDI+ canvas rendering bridge with full image decoding and custom color parser.
 
 ---
 
@@ -50,13 +50,13 @@ A modern web browser designed with high-performance Rust core, native windowing,
 
 | Subsystem | Tech Stack | Responsibility |
 | :--- | :--- | :--- |
-| **Network Layer** | Rust (`network.rs`, `engine.rs`) | Non-blocking asynchronous page navigation, background worker pipeline, URL parsing (`http`, `https`, `file`, `data`), TCP socket creation, SSL wrapping via `ureq`, and HTTP response handling. |
-| **HTML Parser** | Rust (`html_parser.rs`) | Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), idempotent pointer registration (`register_dom_tree`), and stack-based tree construction with auto-closing tag recovery. |
-| **CSS Engine** | Rust (`css_parser.rs`) | Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade (`active_css_rules`), and persistent dynamic restyling upon DOM mutation. |
+| **Network Layer** | Rust (`network.rs`, `engine.rs`) | Non-blocking asynchronous page navigation via isolated per-engine channels, URL query & fragment resolution, origin calculation, TCP/TLS socket wrapping via `ureq`, and HTTP response handling. |
+| **HTML Parser** | Rust (`html_parser.rs`) | **Partial HTML5-compatible parser**: Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), idempotent pointer registration (`register_dom_tree`), and stack-based tree construction. |
+| **CSS Engine** | Rust (`css_parser.rs`) | **Partial CSS cascade/layout implementation**: Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade (`active_css_rules`), and dynamic restyling upon DOM mutations. |
 | **Layout Engine** | Rust (`layout.rs`) | Box model calculations, block vertical stacking, inline text word-wrapping, and pill geometry measurement. |
-| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`) | **ECMAScript Engine**: Full modern ECMAScript (ES2024+, Promises, async/await, closures) powered by persistent Google V8 Isolate & Page Context.<br>**Web APIs & DOM Bridge**: Asynchronous non-blocking `fetch()` with HTTP methods (`GET`, `POST`, `PUT`, `DELETE`), custom headers & bodies, `Headers`, `Request`, `Response`; W3C EventTarget with 3 true phases (Capturing, At Target, Bubbling) + `eventPhase`, `once`, `passive`, `signal`; DOM bridge (`getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `innerHTML`, `textContent`, `setAttribute`), Timers (`setTimeout`, `setInterval`), and microtask checkpoints. |
-| **Desktop Shell** | Rust (`rust_desktop/main.rs`) | Native Tao windowing & Wry host directly connected to `AxomaiEngine` via IPC bridge and 60 FPS event loop ticking. |
-| **Painter & GUI** | Rust & C++ (`painter.rs`, `cpp_gui/`) | Walk layout tree in document order, emit display commands over C-FFI ABI, Win32 double-buffered GDI+ rendering, and 60 FPS event loop timers. |
+| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`, `engine.rs`) | **Google V8 ECMAScript Runtime**: Persistent Google V8 Isolate & Page Context with microtasks and closures.<br>**Async ScriptScheduler**: Non-blocking external `<script src="...">` fetching that never hangs HTML/CSS page rendering.<br>**Web Platform & Fetch APIs**: Asynchronous non-blocking `fetch()` with HTTP methods (`GET`, `POST`, `PUT`, `DELETE`), custom headers & bodies; W3C EventTarget implementation with true 3-phase dispatch (Capturing, At Target, Bubbling) + `eventPhase`, `once`, `passive`, `signal`; DOM bridge (`getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `innerHTML`, `textContent`, `setAttribute`), and Timers (`setTimeout`, `setInterval`). |
+| **Desktop Shell** | Rust (`rust_desktop/main.rs`) | Native Tao windowing & Wry host directly connected to `AxomaiEngine` via IPC bridge, 60 FPS event loop ticking, and HTML5 canvas display list rendering bridge. |
+| **Painter & GUI** | Rust & C++ (`painter.rs`, `cpp_gui/`) | Walk layout tree in document order, emit display commands over C-FFI ABI, Win32 double-buffered GDI+ rendering (with in-memory bitmap stream decoding for images and CSS named/hex colors), and 60 FPS event loop timers. |
 
 ---
 

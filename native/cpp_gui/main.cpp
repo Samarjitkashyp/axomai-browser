@@ -141,20 +141,37 @@ bool LoadEngineDll() {
     return p_axomai_engine_create && p_axomai_engine_load_url;
 }
 
-Color ParseHexColor(const char* hex) {
-    if (!hex || hex[0] != '#') return Color(255, 0, 0, 0);
-    std::string s(hex + 1);
-    if (s.length() == 6) {
-        int r = std::stoi(s.substr(0, 2), nullptr, 16);
-        int g = std::stoi(s.substr(2, 2), nullptr, 16);
-        int b = std::stoi(s.substr(4, 2), nullptr, 16);
-        return Color(255, r, g, b);
+Color ParseColor(const char* color_str) {
+    if (!color_str || color_str[0] == '\0') return Color(255, 32, 33, 36);
+    std::string s(color_str);
+    if (s[0] == '#') {
+        std::string hex = s.substr(1);
+        if (hex.length() == 6) {
+            int r = std::stoi(hex.substr(0, 2), nullptr, 16);
+            int g = std::stoi(hex.substr(2, 2), nullptr, 16);
+            int b = std::stoi(hex.substr(4, 2), nullptr, 16);
+            return Color(255, r, g, b);
+        } else if (hex.length() == 3) {
+            int r = std::stoi(std::string(2, hex[0]), nullptr, 16);
+            int g = std::stoi(std::string(2, hex[1]), nullptr, 16);
+            int b = std::stoi(std::string(2, hex[2]), nullptr, 16);
+            return Color(255, r, g, b);
+        }
     }
-    if (s == "red") return Color(255, 255, 0, 0);
-    if (s == "blue") return Color(255, 0, 0, 255);
+    // Named CSS colors
+    if (s == "red") return Color(255, 234, 67, 53);
+    if (s == "blue") return Color(255, 26, 115, 232);
+    if (s == "green") return Color(255, 52, 168, 83);
+    if (s == "yellow") return Color(255, 251, 188, 5);
     if (s == "white") return Color(255, 255, 255, 255);
     if (s == "black") return Color(255, 0, 0, 0);
+    if (s == "gray" || s == "grey") return Color(255, 128, 134, 139);
+    if (s == "transparent") return Color(0, 0, 0, 0);
     return Color(255, 32, 33, 36);
+}
+
+Color ParseHexColor(const char* hex) {
+    return ParseColor(hex);
 }
 
 void LoadUrlInEngine(const std::string& url_str, HWND hWnd) {
@@ -204,11 +221,11 @@ void RenderCanvas(HDC hdc, HWND hWnd) {
                 float render_y = cmd.y - g_scroll_y + 50.0f; // offset below toolbar
 
                 if (cmd.cmd_type == 0) { // DrawRect
-                    Color c = ParseHexColor(cmd.color);
+                    Color c = ParseColor(cmd.color);
                     SolidBrush b(c);
                     g.FillRectangle(&b, cmd.x, render_y, cmd.width, cmd.height);
                 } else if (cmd.cmd_type == 1) { // DrawText
-                    Color c = ParseHexColor(cmd.color);
+                    Color c = ParseColor(cmd.color);
                     SolidBrush b(c);
                     int style = FontStyleRegular;
                     if (cmd.font_weight_bold) style |= FontStyleBold;
@@ -223,6 +240,34 @@ void RenderCanvas(HDC hdc, HWND hWnd) {
                     }
                     PointF pt(cmd.x, render_y);
                     g.DrawString(wtext.c_str(), -1, &font, pt, &b);
+                } else if (cmd.cmd_type == 2) { // DrawImage
+                    if (cmd.image_ptr && cmd.image_len > 0) {
+                        HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, cmd.image_len);
+                        if (hGlobal) {
+                            void* pData = GlobalLock(hGlobal);
+                            if (pData) {
+                                memcpy(pData, cmd.image_ptr, cmd.image_len);
+                                GlobalUnlock(hGlobal);
+                                IStream* pStream = NULL;
+                                if (CreateStreamOnHGlobal(hGlobal, TRUE, &pStream) == S_OK) {
+                                    Bitmap* pBmp = Bitmap::FromStream(pStream);
+                                    if (pBmp && pBmp->GetLastStatus() == Ok) {
+                                        g.DrawImage(pBmp, cmd.x, render_y, cmd.width, cmd.height);
+                                        delete pBmp;
+                                    }
+                                    pStream->Release();
+                                }
+                            } else {
+                                GlobalFree(hGlobal);
+                            }
+                        }
+                    } else {
+                        // Image placeholder fallback
+                        SolidBrush phBrush(Color(255, 235, 238, 242));
+                        g.FillRectangle(&phBrush, cmd.x, render_y, cmd.width, cmd.height);
+                        Pen phPen(Color(255, 218, 220, 224), 1.0f);
+                        g.DrawRectangle(&phPen, cmd.x, render_y, cmd.width, cmd.height);
+                    }
                 } else if (cmd.cmd_type == 3) { // DrawInput
                     Color borderC = cmd.is_focused ? Color(255, 26, 115, 232) : Color(255, 223, 225, 229);
                     Color fillC = cmd.is_focused ? Color(255, 255, 255, 255) : Color(255, 248, 249, 250);

@@ -171,7 +171,31 @@ impl URL {
         format!("{}://{}{}{}", self.scheme, self.host, port_suffix, full_path)
     }
 
+    pub fn request_url(&self) -> String {
+        let port_suffix = if (self.scheme == "http" && self.port == 80)
+            || (self.scheme == "https" && self.port == 443)
+            || self.port == 0
+        {
+            String::new()
+        } else {
+            format!(":{}", self.port)
+        };
+        let q = self
+            .query
+            .as_ref()
+            .map(|q| format!("?{}", q))
+            .unwrap_or_default();
+        format!("{}://{}{}{}{}", self.scheme, self.host, port_suffix, self.path, q)
+    }
+
     pub fn request(&self) -> (HashMap<String, String>, String) {
+        if self.scheme == "about" {
+            return (
+                HashMap::new(),
+                "<html><head><title>About</title></head><body></body></html>".to_string(),
+            );
+        }
+
         if self.scheme == "file" {
             match fs::read_to_string(&self.path) {
                 Ok(content) => return (HashMap::new(), content),
@@ -198,9 +222,7 @@ impl URL {
             return (HashMap::new(), self.path.clone());
         }
 
-        let target_url = format!("{}://{}{}{}", self.scheme, self.host, 
-            if self.port != 80 && self.port != 443 { format!(":{}", self.port) } else { String::new() }, 
-            self.path);
+        let target_url = self.request_url();
 
         match ureq::get(&target_url)
             .set("User-Agent", "AxomaiBrowser/1.0 (Rust Engine)")

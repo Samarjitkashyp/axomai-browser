@@ -47,14 +47,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if msg.starts_with("navigate:") {
                     let nav_url = &msg[9..];
                     let _ = eng.load_url(nav_url, 1380.0, 860.0);
+                } else if msg.starts_with("click:") {
+                    let coords = &msg[6..];
+                    if let Some(comma) = coords.find(',') {
+                        if let (Ok(x), Ok(y)) = (coords[..comma].parse::<f32>(), coords[comma + 1..].parse::<f32>()) {
+                            let _ = eng.handle_click(x, y, 0.0);
+                        }
+                    }
                 }
             }
         });
 
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-    let _webview = builder.build(&window)?;
+    let webview = builder.build(&window)?;
 
-    // 6. Run Event Loop with 60 FPS Engine Tick
+    // 6. Run Event Loop with 60 FPS Engine Tick & Display List Bridge
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
             std::time::Instant::now() + std::time::Duration::from_millis(16),
@@ -68,9 +75,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 *control_flow = ControlFlow::Exit;
             }
             Event::MainEventsCleared => {
-                // Tick the Axomai Rust Engine Event Loop for async fetch, navigations, and timers
+                // Tick the Axomai Rust Engine Event Loop for async fetch, navigations, timers, and scripts
                 if let Ok(mut eng) = engine.lock() {
-                    eng.process_event_loop(1380.0, 860.0);
+                    let updated = eng.process_event_loop(1380.0, 860.0);
+                    if updated {
+                        let json = eng.get_display_list_json();
+                        let script = format!(
+                            "if (window.__axomai_render_display_list) {{ window.__axomai_render_display_list({}); }}",
+                            json
+                        );
+                        let _ = webview.evaluate_script(&script);
+                    }
                 }
             }
             _ => {}

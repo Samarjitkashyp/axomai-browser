@@ -4,8 +4,8 @@ use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
 use crate::network::URL;
 use crate::painter::{build_display_list, DisplayCommand};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -18,32 +18,10 @@ pub struct NavigationResponse {
     pub error: Option<String>,
 }
 
-static NAVIGATION_QUEUE: Mutex<Option<Vec<NavigationResponse>>> = Mutex::new(None);
-static HAS_PENDING_NAVIGATION: AtomicBool = AtomicBool::new(false);
-
-fn push_navigation_response(resp: NavigationResponse) {
-    let mut lock = NAVIGATION_QUEUE.lock().unwrap();
-    if lock.is_none() {
-        *lock = Some(Vec::new());
-    }
-    if let Some(ref mut q) = *lock {
-        q.push(resp);
-    }
-    HAS_PENDING_NAVIGATION.store(true, Ordering::SeqCst);
-}
-
-fn drain_navigation_responses_for_engine(engine_id: usize) -> Vec<NavigationResponse> {
-    let mut lock = NAVIGATION_QUEUE.lock().unwrap();
-    if let Some(ref mut q) = *lock {
-        let (matching, remaining): (Vec<_>, Vec<_>) = q.drain(..).partition(|r| r.engine_id == engine_id);
-        *q = remaining;
-        if q.is_empty() {
-            HAS_PENDING_NAVIGATION.store(false, Ordering::SeqCst);
-        }
-        matching
-    } else {
-        Vec::new()
-    }
+pub struct PendingScript {
+    pub order: usize,
+    pub url: String,
+    pub code: String,
 }
 
 pub struct AxomaiEngine {
@@ -57,6 +35,11 @@ pub struct AxomaiEngine {
     pub status_message: String,
     pub js_engine: V8JSEngine,
     pub active_css_rules: Vec<Rule>,
+    nav_tx: Sender<NavigationResponse>,
+    nav_rx: Receiver<NavigationResponse>,
+    script_tx: Sender<PendingScript>,
+    script_rx: Receiver<PendingScript>,
+    pub pending_scripts: usize,
 }
 
 impl AxomaiEngine {
@@ -64,6 +47,9 @@ impl AxomaiEngine {
         let engine_id = NEXT_ENGINE_ID.fetch_add(1, Ordering::SeqCst);
         let mut js_engine = V8JSEngine::new();
         js_engine.engine_id = engine_id;
+
+        let (nav_tx, nav_rx) = channel();
+        let (script_tx, script_rx) = channel();
 
         AxomaiEngine {
             engine_id,
@@ -76,6 +62,11 @@ impl AxomaiEngine {
             status_message: "Ready".to_string(),
             js_engine,
             active_css_rules: Vec::new(),
+            nav_tx,
+            nav_rx,
+            script_tx,
+            script_rx,
+            pending_scripts: 0,
         }
     }
 
@@ -90,13 +81,14 @@ impl AxomaiEngine {
             return self.load_html(&body, viewport_w, viewport_h);
         }
 
-        // Network schemes (http/https): execute non-blocking in background worker thread with engine_id
+        // Network schemes (http/https): execute non-blocking in background worker thread with per-engine channel
         self.status_message = format!("Connecting to {}...", url.host);
         let url_clone = url.clone();
         let engine_id = self.engine_id;
+        let nav_tx = self.nav_tx.clone();
         thread::spawn(move || {
             let (_headers, body) = url_clone.request();
-            push_navigation_response(NavigationResponse {
+            let _ = nav_tx.send(NavigationResponse {
                 engine_id,
                 url: url_clone,
                 body,
@@ -115,14 +107,15 @@ impl AxomaiEngine {
         let url_str = self
             .current_url
             .as_ref()
-            .map(|u| u.raw.as_str())
-            .unwrap_or("about:blank");
+            .map(|u| u.as_string())
+            .unwrap_or_else(|| "about:blank".to_string());
 
         // Establish ONE persistent V8 Context for the page
-        self.js_engine.reset_page_context(Some(&dom_root), url_str);
+        self.js_engine.reset_page_context(Some(&dom_root), &url_str);
 
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
+        let mut script_order = 0;
         for entry in scripts {
             match entry {
                 ScriptEntry::Inline(code) => {
@@ -134,7 +127,6 @@ impl AxomaiEngine {
                     } else {
                         src.clone()
                     };
-                    println!("[Axomai Engine] Fetching external script: {}", resolved_url);
                     if let Ok(url_obj) = URL::parse(&resolved_url) {
                         if url_obj.scheme == "file" || url_obj.scheme == "data" {
                             let (_headers, js_code) = url_obj.request();
@@ -142,18 +134,27 @@ impl AxomaiEngine {
                                 let _ = self.js_engine.execute(&js_code);
                             }
                         } else {
-                            // Non-hanging script download: timeout-bounded network fetch
-                            let handle = thread::spawn(move || {
-                                match ureq::get(&resolved_url).timeout(Duration::from_secs(3)).call() {
+                            // Non-blocking async ScriptScheduler (never blocks HTML/CSS rendering pipeline)
+                            println!("[Axomai ScriptScheduler] Queued non-blocking external script: {}", resolved_url);
+                            let script_tx = self.script_tx.clone();
+                            let order = script_order;
+                            script_order += 1;
+                            self.pending_scripts += 1;
+                            let script_url = resolved_url.clone();
+                            thread::spawn(move || {
+                                let js_code = match ureq::get(&script_url).timeout(Duration::from_secs(5)).call() {
                                     Ok(resp) => resp.into_string().unwrap_or_default(),
-                                    Err(_) => String::new(),
-                                }
+                                    Err(e) => {
+                                        eprintln!("[Axomai ScriptScheduler] Script fetch failed for {}: {}", script_url, e);
+                                        String::new()
+                                    }
+                                };
+                                let _ = script_tx.send(PendingScript {
+                                    order,
+                                    url: script_url,
+                                    code: js_code,
+                                });
                             });
-                            if let Ok(js_code) = handle.join() {
-                                if !js_code.is_empty() {
-                                    let _ = self.js_engine.execute(&js_code);
-                                }
-                            }
                         }
                     }
                 }
@@ -343,9 +344,8 @@ impl AxomaiEngine {
     pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
         let mut executed = false;
 
-        // 1. Process completed non-blocking page navigations for THIS engine instance
-        let completed_navs = drain_navigation_responses_for_engine(self.engine_id);
-        for nav in completed_navs {
+        // 1. Process completed non-blocking page navigations via per-engine channel
+        while let Ok(nav) = self.nav_rx.try_recv() {
             self.current_url = Some(nav.url);
             let _ = self.load_html(&nav.body, viewport_w, viewport_h);
             self.status_message = "Page Loaded Successfully".to_string();
@@ -357,6 +357,34 @@ impl AxomaiEngine {
         if js_executed {
             // Reapply author + UA styles and recalculate layout
             self.restyle_and_relayout(viewport_w, viewport_h);
+            executed = true;
+        }
+
+        // 3. Process completed external scripts via async ScriptScheduler
+        let mut completed_scripts = Vec::new();
+        while let Ok(script) = self.script_rx.try_recv() {
+            if self.pending_scripts > 0 {
+                self.pending_scripts -= 1;
+            }
+            completed_scripts.push(script);
+        }
+
+        if !completed_scripts.is_empty() {
+            completed_scripts.sort_by_key(|s| s.order);
+            let mut script_mutated = false;
+            for script in completed_scripts {
+                if !script.code.is_empty() {
+                    println!("[Axomai ScriptScheduler] Executing deferred script: {}", script.url);
+                    if let Ok(mutated) = self.js_engine.execute(&script.code) {
+                        if mutated {
+                            script_mutated = true;
+                        }
+                    }
+                }
+            }
+            if script_mutated {
+                self.restyle_and_relayout(viewport_w, viewport_h);
+            }
             executed = true;
         }
 
@@ -437,7 +465,7 @@ impl AxomaiEngine {
 
     /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
     pub fn has_pending_events(&self) -> bool {
-        HAS_PENDING_NAVIGATION.load(Ordering::SeqCst) || self.js_engine.has_pending_events()
+        self.pending_scripts > 0 || self.js_engine.has_pending_events()
     }
 }
 

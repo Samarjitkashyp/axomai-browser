@@ -1,6 +1,6 @@
 {
   "name": "axomai-browser",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Axomai Browser - Fast, Private, AI-Powered Native Web Browser",
   "main": "server.js",
   "scripts": {
