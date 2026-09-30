@@ -54,7 +54,7 @@ A modern web browser designed with high-performance Rust core, native windowing,
 | **HTML Parser** | Rust (`html_parser.rs`) | Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), and stack-based tree construction with auto-closing tag recovery. |
 | **CSS Engine** | Rust (`css_parser.rs`) | Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade, and style inheritance. |
 | **Layout Engine** | Rust (`layout.rs`) | Box model calculations, block vertical stacking, inline text word-wrapping, and pill geometry measurement. |
-| **JS Engine** | Rust (`js_engine.rs`) | Minimal JS execution engine evaluating `console.log`, `document.write`, `var`/`let`/`const`, string concatenation, and DOM tree mutation. |
+| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`) | Industry-standard Google V8 engine with full modern ECMAScript support, persistent Isolate lifecycle, Rust DOM bindings (`getElementById`, `querySelector`, `createElement`, `setInnerHTML`, `document.write`), and Web APIs (`window`, `location`, `navigator`, `console`, `setTimeout`). |
 | **Painter Engine** | Rust (`painter.rs`) | Walk layout tree in document order, emit `DrawRect`, `DrawText`, `DrawInput`, `DrawButton` display commands over C-FFI ABI. |
 | **Browser GUI** | C++ (`cpp_gui/main.cpp`) | Win32 Window, address bar navigation, Back/Forward browser history, status updates, GDI+ canvas rendering, and mouse/keyboard interaction. |
 
@@ -106,7 +106,9 @@ cargo test
 - [x] **Rust DOM Tree Construction** with stack error recovery.
 - [x] **CSS Cascade & Inheritance** (`color`, `font-size`, `font-weight`, `margin`, `display`).
 - [x] **Inline Text Wrapping & Block Box Model Layout**.
-- [x] **JS Engine** (`console.log`, `document.write` DOM tree mutations).
+- [x] **Google V8 JavaScript Runtime** (ECMAScript, persistent isolate, and garbage collection).
+- [x] **V8 ↔ Rust DOM Bridge** (`document.write`, `getElementById`, `querySelector`, `createElement`, `setInnerHTML`, `setAttribute`).
+- [x] **Browser Web APIs** (`window`, `location`, `navigator`, `console.log`, `setTimeout`).
 - [x] **C++ Win32 GDI+ Painter** with double buffering, scroll & mouse wheel support.
 - [x] **Navigation History** (Back / Forward).
 

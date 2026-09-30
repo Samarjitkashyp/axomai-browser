@@ -13,6 +13,7 @@ pub struct AxomaiEngine {
     pub max_scroll_y: f32,
     pub focused_input_idx: Option<usize>,
     pub status_message: String,
+    pub js_engine: V8JSEngine,
 }
 
 impl AxomaiEngine {
@@ -25,6 +26,7 @@ impl AxomaiEngine {
             max_scroll_y: 0.0,
             focused_input_idx: None,
             status_message: "Ready".to_string(),
+            js_engine: V8JSEngine::new(),
         }
     }
 
@@ -40,13 +42,17 @@ impl AxomaiEngine {
         // 1. HTML DOM Parse
         let dom_root = HTMLParser::new(html_content).parse();
 
-        // 2. Extract & Execute <script>
+        // 2. Extract & Execute <script> via persistent V8 Engine
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
         if !scripts.is_empty() {
-            let mut js_engine = V8JSEngine::new();
+            let url_str = self
+                .current_url
+                .as_ref()
+                .map(|u| u.raw.as_str())
+                .unwrap_or("about:blank");
             for js in scripts {
-                let _ = js_engine.execute(&js, Some(&dom_root));
+                let _ = self.js_engine.execute(&js, Some(&dom_root), url_str);
             }
         }
 

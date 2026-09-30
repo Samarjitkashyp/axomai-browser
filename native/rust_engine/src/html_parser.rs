@@ -285,3 +285,99 @@ impl<'a> HTMLParser<'a> {
         root
     }
 }
+
+pub fn find_element_by_id(node: &NodePtr, id: &str) -> Option<NodePtr> {
+    let node_borrow = node.borrow();
+    if let NodeType::Element { ref attributes, .. } = node_borrow.node_type {
+        if let Some(elem_id) = attributes.get("id") {
+            if elem_id == id {
+                return Some(Rc::clone(node));
+            }
+        }
+    }
+    for child in &node_borrow.children {
+        if let Some(found) = find_element_by_id(child, id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+pub fn query_selector(node: &NodePtr, selector: &str) -> Option<NodePtr> {
+    let sel = selector.trim();
+    if sel.starts_with('#') {
+        return find_element_by_id(node, &sel[1..]);
+    }
+
+    let node_borrow = node.borrow();
+    if let NodeType::Element { ref tag, ref attributes, .. } = node_borrow.node_type {
+        if sel.starts_with('.') {
+            let class_name = &sel[1..];
+            if let Some(classes) = attributes.get("class") {
+                if classes.split_whitespace().any(|c| c == class_name) {
+                    return Some(Rc::clone(node));
+                }
+            }
+        } else if tag == sel {
+            return Some(Rc::clone(node));
+        }
+    }
+
+    for child in &node_borrow.children {
+        if let Some(found) = query_selector(child, selector) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+pub fn find_body(node: &NodePtr) -> Option<NodePtr> {
+    let node_borrow = node.borrow();
+    if let NodeType::Element { ref tag, .. } = node_borrow.node_type {
+        if tag == "body" {
+            return Some(Rc::clone(node));
+        }
+    }
+    for child in &node_borrow.children {
+        if let Some(body) = find_body(child) {
+            return Some(body);
+        }
+    }
+    None
+}
+
+pub fn get_node_text_content(node: &NodePtr) -> String {
+    let node_borrow = node.borrow();
+    match &node_borrow.node_type {
+        NodeType::Text { text } => text.clone(),
+        NodeType::Element { .. } => {
+            let mut out = String::new();
+            for child in &node_borrow.children {
+                out.push_str(&get_node_text_content(child));
+            }
+            out
+        }
+    }
+}
+
+pub fn set_node_text_content(node: &NodePtr, new_text: &str) {
+    let mut node_mut = node.borrow_mut();
+    node_mut.children.clear();
+    let text_child = NodeData::new_text(new_text);
+    text_child.borrow_mut().parent = Some(Rc::downgrade(node));
+    node_mut.children.push(text_child);
+}
+
+pub fn set_node_inner_html(node: &NodePtr, html: &str) {
+    let parsed_tree = HTMLParser::new(html).parse();
+    let parsed_children = parsed_tree.borrow().children.clone();
+
+    let mut node_mut = node.borrow_mut();
+    node_mut.children.clear();
+
+    for child in parsed_children {
+        child.borrow_mut().parent = Some(Rc::downgrade(node));
+        node_mut.children.push(child);
+    }
+}
+
