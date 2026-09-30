@@ -1,9 +1,16 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub type NodePtr = Rc<RefCell<NodeData>>;
 pub type WeakNodePtr = Weak<RefCell<NodeData>>;
+
+static NEXT_NODE_ID: AtomicUsize = AtomicUsize::new(1);
+
+pub fn alloc_node_id() -> usize {
+    NEXT_NODE_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone)]
 pub enum NodeType {
@@ -28,6 +35,7 @@ pub enum NodeType {
 
 #[derive(Debug)]
 pub struct NodeData {
+    pub node_id: usize,
     pub node_type: NodeType,
     pub parent: Option<WeakNodePtr>,
     pub children: Vec<NodePtr>,
@@ -36,6 +44,7 @@ pub struct NodeData {
 impl NodeData {
     pub fn new_document() -> NodePtr {
         Rc::new(RefCell::new(NodeData {
+            node_id: alloc_node_id(),
             node_type: NodeType::Document,
             parent: None,
             children: Vec::new(),
@@ -44,6 +53,7 @@ impl NodeData {
 
     pub fn new_element(tag: &str, attributes: HashMap<String, String>) -> NodePtr {
         Rc::new(RefCell::new(NodeData {
+            node_id: alloc_node_id(),
             node_type: NodeType::Element {
                 tag: tag.to_lowercase(),
                 attributes,
@@ -56,6 +66,7 @@ impl NodeData {
 
     pub fn new_text(text: &str) -> NodePtr {
         Rc::new(RefCell::new(NodeData {
+            node_id: alloc_node_id(),
             node_type: NodeType::Text {
                 text: text.to_string(),
             },
@@ -66,6 +77,7 @@ impl NodeData {
 
     pub fn new_comment(comment: &str) -> NodePtr {
         Rc::new(RefCell::new(NodeData {
+            node_id: alloc_node_id(),
             node_type: NodeType::Comment {
                 comment: comment.to_string(),
             },
@@ -823,7 +835,7 @@ pub fn query_selector(node: &NodePtr, selector: &str) -> Option<NodePtr> {
                     return Some(Rc::clone(node));
                 }
             }
-        } else if tag == sel {
+        } else if tag == sel || sel == "*" {
             return Some(Rc::clone(node));
         }
     }
@@ -835,6 +847,38 @@ pub fn query_selector(node: &NodePtr, selector: &str) -> Option<NodePtr> {
     }
     None
 }
+
+pub fn query_selector_all(node: &NodePtr, selector: &str) -> Vec<NodePtr> {
+    let mut matches = Vec::new();
+    collect_matching_nodes(node, selector.trim(), &mut matches);
+    matches
+}
+
+fn collect_matching_nodes(node: &NodePtr, sel: &str, matches: &mut Vec<NodePtr>) {
+    let node_borrow = node.borrow();
+    if let NodeType::Element { ref tag, ref attributes, .. } = node_borrow.node_type {
+        if sel.starts_with('#') {
+            let id = &sel[1..];
+            if attributes.get("id").map(|s| s.as_str()) == Some(id) {
+                matches.push(Rc::clone(node));
+            }
+        } else if sel.starts_with('.') {
+            let class_name = &sel[1..];
+            if let Some(classes) = attributes.get("class") {
+                if classes.split_whitespace().any(|c| c == class_name) {
+                    matches.push(Rc::clone(node));
+                }
+            }
+        } else if tag == sel || sel == "*" {
+            matches.push(Rc::clone(node));
+        }
+    }
+
+    for child in &node_borrow.children {
+        collect_matching_nodes(child, sel, matches);
+    }
+}
+
 
 pub fn find_body(node: &NodePtr) -> Option<NodePtr> {
     let node_borrow = node.borrow();

@@ -193,6 +193,54 @@ pub fn parse_border_properties(style: &mut HashMap<String, String>, containing_w
     border_widths
 }
 
+pub fn parse_track_min_width(pattern: &str, available_space: f32) -> f32 {
+    let p = pattern.trim();
+    if p.starts_with("minmax(") && p.ends_with(')') {
+        let inner = &p[7..p.len() - 1];
+        let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();
+        if !parts.is_empty() {
+            return parse_length(parts[0], available_space, 100.0);
+        }
+    }
+    parse_length(p, available_space, 100.0)
+}
+
+pub fn parse_grid_line_span(val: &str) -> (Option<usize>, usize) {
+    let s = val.trim();
+    if s.is_empty() || s == "auto" {
+        return (None, 1);
+    }
+    if s.starts_with("span") {
+        let count = s[4..].trim().parse::<usize>().unwrap_or(1).max(1);
+        return (None, count);
+    }
+    if s.contains('/') {
+        let parts: Vec<&str> = s.split('/').map(|p| p.trim()).collect();
+        let start_opt = parts[0].parse::<usize>().ok();
+        let span = if parts.len() > 1 {
+            let p2 = parts[1];
+            if p2.starts_with("span") {
+                p2[4..].trim().parse::<usize>().unwrap_or(1).max(1)
+            } else if let Ok(end) = p2.parse::<usize>() {
+                if let Some(st) = start_opt {
+                    end.saturating_sub(st).max(1)
+                } else {
+                    1
+                }
+            } else {
+                1
+            }
+        } else {
+            1
+        };
+        return (start_opt, span);
+    }
+    if let Ok(st) = s.parse::<usize>() {
+        return (Some(st), 1);
+    }
+    (None, 1)
+}
+
 pub fn parse_grid_tracks(track_str: &str, available_space: f32, gap: f32) -> Vec<f32> {
     let mut tokens: Vec<String> = Vec::new();
     let trimmed = track_str.trim();
@@ -210,11 +258,21 @@ pub fn parse_grid_tracks(track_str: &str, available_space: f32, gap: f32) -> Vec
         }
         if let Some(close_idx) = s[rep_idx..].find(')') {
             let inner = &s[rep_idx + 7..rep_idx + close_idx];
-            let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+            let parts: Vec<&str> = inner.splitn(2, ',').map(|p| p.trim()).collect();
             if parts.len() >= 2 {
-                let count = parts[0].parse::<usize>().unwrap_or(1);
+                let count_str = parts[0];
                 let pattern = parts[1];
-                for _ in 0..count {
+                if count_str == "auto-fit" || count_str == "auto-fill" {
+                    let min_w = parse_track_min_width(pattern, available_space).max(20.0);
+                    let count = ((available_space + gap) / (min_w + gap)).floor().max(1.0) as usize;
+                    for _ in 0..count {
+                        tokens.push(pattern.to_string());
+                    }
+                } else if let Ok(count) = count_str.parse::<usize>() {
+                    for _ in 0..count {
+                        tokens.push(pattern.to_string());
+                    }
+                } else {
                     tokens.push(pattern.to_string());
                 }
             }
@@ -242,7 +300,21 @@ pub fn parse_grid_tracks(track_str: &str, available_space: f32, gap: f32) -> Vec
     let mut track_kinds: Vec<(Option<f32>, f32)> = Vec::new();
 
     for tok in &tokens {
-        if tok.ends_with("fr") {
+        if tok.starts_with("minmax(") && tok.ends_with(')') {
+            let inner = &tok[7..tok.len() - 1];
+            let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+            let min_val = if !parts.is_empty() { parse_length(parts[0], net_space, 0.0) } else { 0.0 };
+            let max_val_str = if parts.len() > 1 { parts[1] } else { "1fr" };
+            if max_val_str.ends_with("fr") {
+                let fr = max_val_str[..max_val_str.len() - 2].trim().parse::<f32>().unwrap_or(1.0).max(0.1);
+                total_fr += fr;
+                track_kinds.push((None, fr));
+            } else {
+                let px = parse_length(max_val_str, net_space, min_val).max(min_val);
+                fixed_sum += px;
+                track_kinds.push((Some(px), 0.0));
+            }
+        } else if tok.ends_with("fr") {
             let fr_val = tok[..tok.len() - 2].trim().parse::<f32>().unwrap_or(1.0).max(0.1);
             total_fr += fr_val;
             track_kinds.push((None, fr_val));
@@ -316,6 +388,41 @@ pub fn invert_transform(m: [f32; 6]) -> Option<[f32; 6]> {
 pub fn transform_point(m: [f32; 6], x: f32, y: f32) -> (f32, f32) {
     let [a, b, c, d, tx, ty] = m;
     (a * x + c * y + tx, b * x + d * y + ty)
+}
+
+pub fn parse_transform_origin(origin_str: Option<&String>, width: f32, height: f32) -> (f32, f32) {
+    let s = origin_str.map(|s| s.as_str()).unwrap_or("50% 50%");
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    let ox = match parts.first().copied().unwrap_or("50%") {
+        "left" => 0.0,
+        "center" => width * 0.5,
+        "right" => width,
+        val => parse_length(val, width, width * 0.5),
+    };
+    let oy = match parts.get(1).copied().unwrap_or("50%") {
+        "top" => 0.0,
+        "center" => height * 0.5,
+        "bottom" => height,
+        val => parse_length(val, height, height * 0.5),
+    };
+    (ox, oy)
+}
+
+pub fn apply_transform_origin(matrix: [f32; 6], ox: f32, oy: f32) -> [f32; 6] {
+    let t_to_origin = [1.0, 0.0, 0.0, 1.0, -ox, -oy];
+    let t_from_origin = [1.0, 0.0, 0.0, 1.0, ox, oy];
+    multiply_transforms(t_from_origin, multiply_transforms(matrix, t_to_origin))
+}
+
+pub fn resolve_transform_matrix(
+    transform_str: &str,
+    origin_str: Option<&String>,
+    width: f32,
+    height: f32,
+) -> Option<[f32; 6]> {
+    let raw = parse_transform_matrix(transform_str, width, height)?;
+    let (ox, oy) = parse_transform_origin(origin_str, width, height);
+    Some(apply_transform_origin(raw, ox, oy))
 }
 
 pub fn parse_transform_matrix(transform_str: &str, width: f32, height: f32) -> Option<[f32; 6]> {
@@ -627,6 +734,16 @@ impl LayoutBox {
         }
     }
 
+    pub fn offset_box_and_descendants(&mut self, dx: f32, dy: f32) {
+        self.x += dx;
+        self.y += dy;
+        self.dimensions.content.x += dx;
+        self.dimensions.content.y += dy;
+        for child in &mut self.children {
+            child.offset_box_and_descendants(dx, dy);
+        }
+    }
+
     fn layout_grid(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
         let is_border_box = self.style.get("box-sizing").map(|s| s.as_str() == "border-box").unwrap_or(false);
         let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
@@ -666,61 +783,185 @@ impl LayoutBox {
         let col_widths = parse_grid_tracks(col_template, content_width, col_gap);
         let num_cols = col_widths.len().max(1);
 
+        let mut col_offsets: Vec<f32> = Vec::with_capacity(num_cols);
+        let mut acc_col_x = 0.0;
+        for (c, &cw) in col_widths.iter().enumerate() {
+            col_offsets.push(acc_col_x);
+            acc_col_x += cw + if c + 1 < num_cols { col_gap } else { 0.0 };
+        }
+
         let start_x = self.dimensions.content.x;
         let start_y = self.dimensions.content.y;
 
-        let mut cursor_row = 0;
-        let mut cursor_col = 0;
-        let mut row_heights: Vec<f32> = Vec::new();
-        let mut current_row_max_h: f32 = 0.0;
-        let mut item_placements: Vec<(usize, usize, usize)> = Vec::new();
+        let mut occupied: Vec<Vec<bool>> = Vec::new();
+        let mut placements: Vec<(usize, usize, usize, usize, usize)> = Vec::with_capacity(self.children.len());
 
-        for (idx, child) in self.children.iter_mut().enumerate() {
-            if cursor_col >= num_cols {
-                row_heights.push(current_row_max_h);
-                cursor_row += 1;
-                cursor_col = 0;
-                current_row_max_h = 0.0;
+        let mut auto_cursor_row = 0;
+        let mut auto_cursor_col = 0;
+
+        for (idx, child) in self.children.iter().enumerate() {
+            let col_prop = child.style.get("grid-column").or_else(|| child.style.get("grid-column-start")).map(|s| s.as_str()).unwrap_or("auto");
+            let (explicit_col_start_1, col_span_raw) = parse_grid_line_span(col_prop);
+            let col_span = col_span_raw.max(1).min(num_cols);
+
+            let row_prop = child.style.get("grid-row").or_else(|| child.style.get("grid-row-start")).map(|s| s.as_str()).unwrap_or("auto");
+            let (explicit_row_start_1, row_span_raw) = parse_grid_line_span(row_prop);
+            let row_span = row_span_raw.max(1);
+
+            let (col_start, row_start) = match (explicit_col_start_1, explicit_row_start_1) {
+                (Some(c1), Some(r1)) => {
+                    (c1.saturating_sub(1).min(num_cols.saturating_sub(1)), r1.saturating_sub(1))
+                }
+                (Some(c1), None) => {
+                    let c0 = c1.saturating_sub(1).min(num_cols.saturating_sub(1));
+                    let mut r0 = auto_cursor_row;
+                    loop {
+                        while occupied.len() <= r0 + row_span {
+                            occupied.push(vec![false; num_cols]);
+                        }
+                        let mut fits = true;
+                        if c0 + col_span > num_cols {
+                            fits = false;
+                        } else {
+                            for dr in 0..row_span {
+                                for dc in 0..col_span {
+                                    if occupied[r0 + dr][c0 + dc] {
+                                        fits = false;
+                                        break;
+                                    }
+                                }
+                                if !fits { break; }
+                            }
+                        }
+                        if fits { break; }
+                        r0 += 1;
+                    }
+                    (c0, r0)
+                }
+                (None, Some(r1)) => {
+                    let r0 = r1.saturating_sub(1);
+                    while occupied.len() <= r0 + row_span {
+                        occupied.push(vec![false; num_cols]);
+                    }
+                    let mut c0 = 0;
+                    loop {
+                        if c0 + col_span > num_cols {
+                            break;
+                        }
+                        let mut fits = true;
+                        for dr in 0..row_span {
+                            for dc in 0..col_span {
+                                if occupied[r0 + dr][c0 + dc] {
+                                    fits = false;
+                                    break;
+                                }
+                            }
+                            if !fits { break; }
+                        }
+                        if fits { break; }
+                        c0 += 1;
+                    }
+                    (c0.min(num_cols.saturating_sub(col_span)), r0)
+                }
+                (None, None) => {
+                    let mut r0 = auto_cursor_row;
+                    let mut c0 = auto_cursor_col;
+                    loop {
+                        if c0 + col_span > num_cols {
+                            r0 += 1;
+                            c0 = 0;
+                        }
+                        while occupied.len() <= r0 + row_span {
+                            occupied.push(vec![false; num_cols]);
+                        }
+                        let mut fits = true;
+                        for dr in 0..row_span {
+                            for dc in 0..col_span {
+                                if occupied[r0 + dr][c0 + dc] {
+                                    fits = false;
+                                    break;
+                                }
+                            }
+                            if !fits { break; }
+                        }
+                        if fits {
+                            auto_cursor_row = r0;
+                            auto_cursor_col = c0 + col_span;
+                            break;
+                        }
+                        c0 += 1;
+                    }
+                    (c0, r0)
+                }
+            };
+
+            while occupied.len() <= row_start + row_span {
+                occupied.push(vec![false; num_cols]);
+            }
+            for dr in 0..row_span {
+                for dc in 0..col_span {
+                    if col_start + dc < num_cols {
+                        occupied[row_start + dr][col_start + dc] = true;
+                    }
+                }
             }
 
-            let cell_w = col_widths.get(cursor_col).cloned().unwrap_or(100.0);
-            child.width = cell_w;
-            let child_h = child.layout(0.0, 0.0, cell_w);
-            current_row_max_h = current_row_max_h.max(child_h);
-
-            item_placements.push((idx, cursor_col, cursor_row));
-            cursor_col += 1;
-        }
-        if !self.children.is_empty() {
-            row_heights.push(current_row_max_h);
+            placements.push((idx, col_start, col_span, row_start, row_span));
         }
 
-        let mut row_offsets: Vec<f32> = Vec::new();
-        let mut acc_y = 0.0;
-        for (r, &rh) in row_heights.iter().enumerate() {
-            row_offsets.push(acc_y);
-            acc_y += rh + if r + 1 < row_heights.len() { row_gap } else { 0.0 };
+        let num_rows = occupied.len().max(1);
+
+        let row_template_opt = self.style.get("grid-template-rows").map(|s| s.as_str());
+        let explicit_row_heights = row_template_opt.map(|rt| parse_grid_tracks(rt, 0.0, row_gap));
+
+        let mut row_heights: Vec<f32> = vec![0.0; num_rows];
+        if let Some(ref erh) = explicit_row_heights {
+            for (r, &h) in erh.iter().enumerate().take(num_rows) {
+                row_heights[r] = h;
+            }
         }
 
-        let mut col_offsets: Vec<f32> = Vec::new();
-        let mut acc_x = 0.0;
-        for (c, &cw) in col_widths.iter().enumerate() {
-            col_offsets.push(acc_x);
-            acc_x += cw + if c + 1 < col_widths.len() { col_gap } else { 0.0 };
-        }
+        for &(idx, col_start, col_span, row_start, row_span) in &placements {
+            let cell_x = start_x + col_offsets.get(col_start).cloned().unwrap_or(0.0);
+            let cell_w = (0..col_span).fold(0.0, |acc, dc| {
+                acc + col_widths.get(col_start + dc).cloned().unwrap_or(0.0)
+            }) + (col_span.saturating_sub(1) as f32) * col_gap;
 
-        for (idx, col_idx, row_idx) in item_placements {
             let child = &mut self.children[idx];
-            let cell_x = start_x + col_offsets.get(col_idx).cloned().unwrap_or(0.0);
-            let cell_y = start_y + row_offsets.get(row_idx).cloned().unwrap_or(0.0);
-            let cell_w = col_widths.get(col_idx).cloned().unwrap_or(100.0);
+            child.width = cell_w;
+            let child_h = child.layout(cell_x, start_y, cell_w);
 
-            child.x = cell_x;
-            child.y = cell_y;
-            child.layout(cell_x, cell_y, cell_w);
+            if explicit_row_heights.is_none() || row_heights[row_start] < child_h {
+                if row_span == 1 {
+                    row_heights[row_start] = row_heights[row_start].max(child_h);
+                } else {
+                    let per_row = child_h / (row_span as f32);
+                    for dr in 0..row_span {
+                        if row_start + dr < num_rows {
+                            row_heights[row_start + dr] = row_heights[row_start + dr].max(per_row);
+                        }
+                    }
+                }
+            }
         }
 
-        let total_grid_height = acc_y;
+        let mut row_offsets: Vec<f32> = Vec::with_capacity(num_rows);
+        let mut acc_row_y = 0.0;
+        for (r, &rh) in row_heights.iter().enumerate() {
+            row_offsets.push(acc_row_y);
+            acc_row_y += rh + if r + 1 < num_rows { row_gap } else { 0.0 };
+        }
+
+        for &(idx, _col_start, _col_span, row_start, _row_span) in &placements {
+            let child = &mut self.children[idx];
+            let target_y = start_y + row_offsets.get(row_start).cloned().unwrap_or(0.0);
+            let dy = target_y - child.y;
+            if dy != 0.0 {
+                child.offset_box_and_descendants(0.0, dy);
+            }
+        }
+
+        let total_grid_height = acc_row_y;
         let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
         let final_content_height = if explicit_h >= 0.0 { explicit_h } else { total_grid_height };
         self.dimensions.content.height = final_content_height;
@@ -737,7 +978,7 @@ impl LayoutBox {
         self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
 
         if !self.transform.is_empty() {
-            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+            self.transform_matrix = resolve_transform_matrix(&self.transform, self.style.get("transform-origin"), self.width, self.height);
         }
 
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
@@ -863,7 +1104,7 @@ impl LayoutBox {
         self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
 
         if !self.transform.is_empty() {
-            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+            self.transform_matrix = resolve_transform_matrix(&self.transform, self.style.get("transform-origin"), self.width, self.height);
         }
 
         // Apply positioning offsets
@@ -1170,7 +1411,7 @@ impl LayoutBox {
         self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
 
         if !self.transform.is_empty() {
-            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+            self.transform_matrix = resolve_transform_matrix(&self.transform, self.style.get("transform-origin"), self.width, self.height);
         }
 
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
@@ -1443,6 +1684,7 @@ impl LayoutBox {
 
 pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::URL>) -> Option<LayoutBox> {
     let node_borrow = node.borrow();
+    let node_id = node_borrow.node_id;
 
     match node_borrow.node_type {
         NodeType::Element {
@@ -1465,6 +1707,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 img_box.id = id;
                 img_box.class_name = class_name;
                 img_box.tag_name = tag_name;
+                img_box.node_id = node_id;
                 let src = attributes.get("src").cloned().unwrap_or_default();
 
                 if !src.is_empty() {
@@ -1490,6 +1733,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 input_box.id = id;
                 input_box.class_name = class_name;
                 input_box.tag_name = tag_name;
+                input_box.node_id = node_id;
                 input_box.value = attributes.get("value").cloned().unwrap_or_default();
                 input_box.placeholder = attributes.get("placeholder").cloned().unwrap_or_default();
 
@@ -1506,6 +1750,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 btn_box.id = id;
                 btn_box.class_name = class_name;
                 btn_box.tag_name = tag_name;
+                btn_box.node_id = node_id;
                 let w_str = attributes.get("width").or_else(|| style.get("width")).map(|s| s.as_str()).unwrap_or("100px");
                 let h_str = attributes.get("height").or_else(|| style.get("height")).map(|s| s.as_str()).unwrap_or("32px");
 
@@ -1534,6 +1779,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
             root_box.id = id;
             root_box.class_name = class_name;
             root_box.tag_name = tag_name;
+            root_box.node_id = node_id;
             for child in &node_borrow.children {
                 if let Some(child_box) = build_layout_tree(child, current_url) {
                     root_box.children.push(child_box);
@@ -1566,6 +1812,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
             let href = get_href(node);
             let mut text_box = LayoutBox::new(BoxType::Text, parent_style, href);
             text_box.word = cleaned;
+            text_box.node_id = node_id;
             Some(text_box)
         }
     }

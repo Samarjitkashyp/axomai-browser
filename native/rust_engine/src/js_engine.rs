@@ -1,7 +1,7 @@
 use crate::html_parser::{
     find_body, find_element_by_id, get_node_inner_html, get_node_text_content, query_selector,
-    remove_node, set_node_inner_html, set_node_text_content, HTMLParser, NodeData, NodePtr,
-    NodeType,
+    query_selector_all, remove_node, set_node_inner_html, set_node_text_content, HTMLParser,
+    NodeData, NodePtr, NodeType,
 };
 use crate::network::URL;
 use std::cell::RefCell;
@@ -1561,6 +1561,41 @@ fn setup_document_api<'s>(
     .unwrap();
     doc_obj.set(scope, qs_key.into(), qs_fn.into());
 
+    // 3b. document.querySelectorAll(selector)
+    let qsa_key = v8::String::new(scope, "querySelectorAll").unwrap();
+    let qsa_fn = v8::Function::new(
+        scope,
+        |scope: &mut v8::HandleScope,
+         args: v8::FunctionCallbackArguments,
+         mut rv: v8::ReturnValue| {
+            if args.length() == 0 {
+                let arr = v8::Array::new(scope, 0);
+                rv.set(arr.into());
+                return;
+            }
+            let sel = args.get(0).to_rust_string_lossy(scope);
+
+            let matching_nodes = CURRENT_CONTEXT.with(|ctx| {
+                if let Some(ref c) = *ctx.borrow() {
+                    if let Some(ref root) = c.dom_root {
+                        return query_selector_all(root, &sel);
+                    }
+                }
+                Vec::new()
+            });
+
+            let arr = v8::Array::new(scope, matching_nodes.len() as i32);
+            for (i, node) in matching_nodes.iter().enumerate() {
+                let elem_obj = wrap_dom_element(scope, node);
+                let idx_val = v8::Integer::new(scope, i as i32);
+                arr.set(scope, idx_val.into(), elem_obj.into());
+            }
+            rv.set(arr.into());
+        },
+    )
+    .unwrap();
+    doc_obj.set(scope, qsa_key.into(), qsa_fn.into());
+
     // 4. document.createElement(tagName)
     let ce_key = v8::String::new(scope, "createElement").unwrap();
     let ce_fn = v8::Function::new(
@@ -1606,28 +1641,20 @@ fn wrap_dom_element<'s>(
     node: &NodePtr,
 ) -> v8::Local<'s, v8::Object> {
     let elem_obj = v8::Object::new(scope);
+    let node_id = node.borrow().node_id;
 
-    // Find or register node id
-    let node_id = CURRENT_CONTEXT.with(|ctx| {
+    CURRENT_CONTEXT.with(|ctx| {
         let mut opt = ctx.borrow_mut();
         if let Some(ref mut c) = *opt {
-            for (&id, existing_node) in &c.node_registry {
-                if Rc::ptr_eq(existing_node, node) {
-                    return id;
-                }
-            }
-            let id = c.next_node_id;
-            c.next_node_id += 1;
-            c.node_registry.insert(id, Rc::clone(node));
-            id
-        } else {
-            0
+            c.node_registry.insert(node_id, Rc::clone(node));
         }
     });
 
     let id_num = v8::Integer::new(scope, node_id as i32);
     let id_key = v8::String::new(scope, "__nodeId").unwrap();
     elem_obj.set(scope, id_key.into(), id_num.into());
+    let id_key2 = v8::String::new(scope, "__node_id").unwrap();
+    elem_obj.set(scope, id_key2.into(), id_num.into());
 
     // 1. appendChild(childElement)
     let append_key = v8::String::new(scope, "appendChild").unwrap();
@@ -2162,18 +2189,33 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 }
             };
 
-            // DOM Geometry Spec APIs
-            obj.getBoundingClientRect = function() {
-                let geom = null;
-                if (window.__layoutGeometryRegistry) {
-                    if (this.id && window.__layoutGeometryRegistry[this.id]) {
-                        geom = window.__layoutGeometryRegistry[this.id];
-                    } else if (this.className && window.__layoutGeometryRegistry['.' + this.className.split(' ')[0]]) {
-                        geom = window.__layoutGeometryRegistry['.' + this.className.split(' ')[0]];
-                    } else if (this.tagName && window.__layoutGeometryRegistry[this.tagName.toLowerCase()]) {
-                        geom = window.__layoutGeometryRegistry[this.tagName.toLowerCase()];
+            function getElementGeometry(elem) {
+                if (!window.__layoutGeometryRegistry || !elem) return null;
+                const nid = (elem.__node_id !== undefined && elem.__node_id !== null) ? elem.__node_id : elem.__nodeId;
+                if (nid !== undefined && nid !== null && window.__layoutGeometryRegistry['__node_' + nid]) {
+                    return window.__layoutGeometryRegistry['__node_' + nid];
+                }
+                if (elem.id && window.__layoutGeometryRegistry[elem.id]) {
+                    return window.__layoutGeometryRegistry[elem.id];
+                }
+                if (elem.id && window.__layoutGeometryRegistry['#' + elem.id]) {
+                    return window.__layoutGeometryRegistry['#' + elem.id];
+                }
+                if (elem.className && typeof elem.className === 'string') {
+                    const firstCls = elem.className.trim().split(/\s+/)[0];
+                    if (firstCls && window.__layoutGeometryRegistry['.' + firstCls]) {
+                        return window.__layoutGeometryRegistry['.' + firstCls];
                     }
                 }
+                if (elem.tagName && window.__layoutGeometryRegistry[elem.tagName.toLowerCase()]) {
+                    return window.__layoutGeometryRegistry[elem.tagName.toLowerCase()];
+                }
+                return null;
+            }
+
+            // DOM Geometry Spec APIs
+            obj.getBoundingClientRect = function() {
+                const geom = getElementGeometry(this);
                 const x = geom ? geom[0] : (this.offsetLeft || 0);
                 const y = geom ? geom[1] : (this.offsetTop || 0);
                 const w = geom ? geom[2] : (this.clientWidth || 0);
@@ -2197,9 +2239,8 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             Object.defineProperty(obj, 'offsetLeft', {
                 get: function() {
-                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
-                        return window.__layoutGeometryRegistry[this.id][0];
-                    }
+                    const geom = getElementGeometry(this);
+                    if (geom) return geom[0];
                     return this.__offsetLeft || 0;
                 },
                 configurable: true,
@@ -2208,9 +2249,8 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             Object.defineProperty(obj, 'offsetTop', {
                 get: function() {
-                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
-                        return window.__layoutGeometryRegistry[this.id][1];
-                    }
+                    const geom = getElementGeometry(this);
+                    if (geom) return geom[1];
                     return this.__offsetTop || 0;
                 },
                 configurable: true,
@@ -2219,9 +2259,8 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             Object.defineProperty(obj, 'offsetWidth', {
                 get: function() {
-                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
-                        return window.__layoutGeometryRegistry[this.id][2];
-                    }
+                    const geom = getElementGeometry(this);
+                    if (geom) return geom[2];
                     return this.__offsetWidth || 0;
                 },
                 configurable: true,
@@ -2230,9 +2269,8 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             Object.defineProperty(obj, 'offsetHeight', {
                 get: function() {
-                    if (window.__layoutGeometryRegistry && this.id && window.__layoutGeometryRegistry[this.id]) {
-                        return window.__layoutGeometryRegistry[this.id][3];
-                    }
+                    const geom = getElementGeometry(this);
+                    if (geom) return geom[3];
                     return this.__offsetHeight || 0;
                 },
                 configurable: true,
@@ -2283,8 +2321,9 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 get: function() { return this.__scrollTop || 0; },
                 set: function(val) {
                     this.__scrollTop = Math.max(0, Number(val) || 0);
-                    if (typeof window.__native_set_element_scroll === 'function' && this.id) {
-                        window.__native_set_element_scroll(this.id, this.__scrollLeft || 0, this.__scrollTop);
+                    const targetId = (this.__node_id !== undefined && this.__node_id !== null) ? ('__node_' + this.__node_id) : (this.id || '');
+                    if (typeof window.__native_set_element_scroll === 'function' && targetId) {
+                        window.__native_set_element_scroll(targetId, this.__scrollLeft || 0, this.__scrollTop);
                     }
                 },
                 configurable: true,
@@ -2295,8 +2334,9 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 get: function() { return this.__scrollLeft || 0; },
                 set: function(val) {
                     this.__scrollLeft = Math.max(0, Number(val) || 0);
-                    if (typeof window.__native_set_element_scroll === 'function' && this.id) {
-                        window.__native_set_element_scroll(this.id, this.__scrollLeft, this.__scrollTop || 0);
+                    const targetId = (this.__node_id !== undefined && this.__node_id !== null) ? ('__node_' + this.__node_id) : (this.id || '');
+                    if (typeof window.__native_set_element_scroll === 'function' && targetId) {
+                        window.__native_set_element_scroll(targetId, this.__scrollLeft, this.__scrollTop || 0);
                     }
                 },
                 configurable: true,
@@ -2304,14 +2344,22 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             });
 
             Object.defineProperty(obj, 'scrollHeight', {
-                get: function() { return this.__scrollHeight || this.clientHeight || 0; },
+                get: function() {
+                    const geom = getElementGeometry(this);
+                    if (geom && geom[5] > 0) return geom[5];
+                    return this.__scrollHeight || this.offsetHeight;
+                },
                 set: function(val) { this.__scrollHeight = Number(val) || 0; },
                 configurable: true,
                 enumerable: true
             });
 
             Object.defineProperty(obj, 'scrollWidth', {
-                get: function() { return this.__scrollWidth || this.clientWidth || 0; },
+                get: function() {
+                    const geom = getElementGeometry(this);
+                    if (geom && geom[4] > 0) return geom[4];
+                    return this.__scrollWidth || this.offsetWidth;
+                },
                 set: function(val) { this.__scrollWidth = Number(val) || 0; },
                 configurable: true,
                 enumerable: true
@@ -3017,6 +3065,17 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             const el = origQuery.call(document, sel);
             return el ? window.__setupElementProperties(el) : null;
         };
+
+        const origQueryAll = document.querySelectorAll;
+        if (origQueryAll) {
+            document.querySelectorAll = function(sel) {
+                const list = origQueryAll.call(document, sel);
+                if (Array.isArray(list)) {
+                    return list.map(function(el) { return window.__setupElementProperties(el); });
+                }
+                return list;
+            };
+        }
 
         if (document.body) {
             window.__setupElementProperties(document.body);
