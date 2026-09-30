@@ -76,6 +76,7 @@ struct ActiveContext {
     dom_root: Option<NodePtr>,
     current_url: String,
     dom_mutated: bool,
+    written_html_buffer: String,
     console_logs: Vec<String>,
     node_registry: HashMap<usize, NodePtr>,
     next_node_id: usize,
@@ -130,7 +131,7 @@ impl V8JSEngine {
         // 1. Clear old timers, cancelled timer lists, and pending fetch resolvers
         self.timers.clear();
         PENDING_TIMERS.with(|q| q.borrow_mut().clear());
-        CANCELLED_TIMERS.with(|q| q.borrow_mut().clear());
+        CANCELLED_TIMERS.with(|c| c.borrow_mut().clear());
         PENDING_FETCH_RESOLVERS.with(|map| map.borrow_mut().clear());
 
         // 2. Set up Thread-Local Node Registry
@@ -145,6 +146,7 @@ impl V8JSEngine {
                 dom_root: dom_root.map(Rc::clone),
                 current_url: url_str.to_string(),
                 dom_mutated: false,
+                written_html_buffer: String::new(),
                 console_logs: Vec::new(),
                 node_registry: reg,
                 next_node_id: next_id,
@@ -515,6 +517,17 @@ impl V8JSEngine {
             })();
         "#;
         self.execute(js).unwrap_or(false)
+    }
+
+    /// Drain any HTML string written via document.write() during script execution
+    pub fn take_written_html(&mut self) -> String {
+        CURRENT_CONTEXT.with(|ctx| {
+            if let Some(ref mut c) = *ctx.borrow_mut() {
+                std::mem::take(&mut c.written_html_buffer)
+            } else {
+                String::new()
+            }
+        })
     }
 }
 
@@ -950,6 +963,9 @@ fn setup_document_api<'s>(
 
                 CURRENT_CONTEXT.with(|ctx| {
                     if let Some(ref mut c) = *ctx.borrow_mut() {
+                        c.written_html_buffer.push_str(&snippet);
+                        c.dom_mutated = true;
+
                         if let Some(ref root) = c.dom_root {
                             let snippet_tree = HTMLParser::new(&snippet).parse();
                             let target = find_body(root).unwrap_or_else(|| Rc::clone(root));
@@ -964,7 +980,6 @@ fn setup_document_api<'s>(
                                 register_dom_tree(&snippet_tree, &mut c.node_registry, &mut c.next_node_id);
                                 NodeData::add_child(&target, &snippet_tree);
                             }
-                            c.dom_mutated = true;
                             prune_detached_nodes(c);
                         }
                     }
@@ -1678,6 +1693,25 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
         setupEventTarget(window);
         setupEventTarget(document);
         document.readyState = 'loading';
+
+        // W3C queueMicrotask & requestAnimationFrame
+        window.queueMicrotask = function(callback) {
+            if (typeof callback === 'function') {
+                Promise.resolve().then(callback).catch(function(e) { console.error(e); });
+            }
+        };
+
+        window.requestAnimationFrame = function(callback) {
+            return window.setTimeout(function() {
+                if (typeof callback === 'function') {
+                    try { callback(Date.now()); } catch(e) { console.error(e); }
+                }
+            }, 16);
+        };
+
+        window.cancelAnimationFrame = function(id) {
+            window.clearTimeout(id);
+        };
 
         // Standard getters/setters definition on Element objects
         window.__setupElementProperties = function(el) {

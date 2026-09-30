@@ -209,7 +209,7 @@ impl AxomaiEngine {
                         src.trim().to_string()
                     };
 
-                    if kind == ScriptKind::Defer {
+                    if kind == ScriptKind::Defer || kind == ScriptKind::Module {
                         let defer_order = defer_script_counter;
                         defer_script_counter += 1;
                         self.pending_defer_scripts += 1;
@@ -225,15 +225,15 @@ impl AxomaiEngine {
                                     PendingScript {
                                         document_id: doc_id,
                                         order: defer_order,
-                                        kind: ScriptKind::Defer,
+                                        kind,
                                         url: resolved_url,
                                         code: js_code,
                                     },
                                 );
                             } else {
                                 println!(
-                                    "[Axomai ScriptScheduler] Queued external DEFER script (doc_id {}, defer_order {}): {}",
-                                    doc_id, defer_order, resolved_url
+                                    "[Axomai ScriptScheduler] Queued external {:?} script (doc_id {}, defer_order {}): {}",
+                                    kind, doc_id, defer_order, resolved_url
                                 );
                                 let tx = script_tx.clone();
                                 let script_url = resolved_url.clone();
@@ -241,14 +241,14 @@ impl AxomaiEngine {
                                     let js_code = match ureq::get(&script_url).timeout(Duration::from_secs(5)).call() {
                                         Ok(resp) => resp.into_string().unwrap_or_default(),
                                         Err(e) => {
-                                            eprintln!("[Axomai ScriptScheduler] Defer script fetch failed for {}: {}", script_url, e);
+                                            eprintln!("[Axomai ScriptScheduler] Script fetch failed for {}: {}", script_url, e);
                                             String::new()
                                         }
                                     };
                                     let _ = tx.send(PendingScript {
                                         document_id: doc_id,
                                         order: defer_order,
-                                        kind: ScriptKind::Defer,
+                                        kind,
                                         url: script_url,
                                         code: js_code,
                                     });
@@ -298,6 +298,11 @@ impl AxomaiEngine {
                         if !js_code.is_empty() {
                             println!("[Axomai ParserController] Executing blocking classic script ({} bytes) -> live DOM mutation", js_code.len());
                             let _ = self.js_engine.execute(&js_code);
+                            let injected_html = self.js_engine.take_written_html();
+                            if !injected_html.is_empty() {
+                                println!("[Axomai ParserController] document.write injected {} bytes into tokenizer stream", injected_html.len());
+                                _tokenizer.insert_input(&injected_html);
+                            }
                             println!("[Axomai ParserController] Blocking classic script execution complete -> parser resumed");
                         }
                     }
@@ -307,7 +312,7 @@ impl AxomaiEngine {
 
             // Inline script handling
             if !body.trim().is_empty() {
-                if kind == ScriptKind::Defer {
+                if kind == ScriptKind::Defer || kind == ScriptKind::Module {
                     let defer_order = defer_script_counter;
                     defer_script_counter += 1;
                     self.ordered_defer_buffer.insert(
@@ -315,8 +320,8 @@ impl AxomaiEngine {
                         PendingScript {
                             document_id: doc_id,
                             order: defer_order,
-                            kind: ScriptKind::Defer,
-                            url: "inline-defer".to_string(),
+                            kind,
+                            url: if kind == ScriptKind::Module { "inline-module".to_string() } else { "inline-defer".to_string() },
                             code: body.to_string(),
                         },
                     );
@@ -324,6 +329,11 @@ impl AxomaiEngine {
                     // GENUINE SYNCHRONOUS PARSER PAUSE -> EXECUTE -> RESUME
                     println!("[Axomai ParserController] Synchronous parser pause -> executing inline classic script ({} bytes)", body.len());
                     let _ = self.js_engine.execute(body);
+                    let injected_html = self.js_engine.take_written_html();
+                    if !injected_html.is_empty() {
+                        println!("[Axomai ParserController] document.write injected {} bytes into tokenizer stream", injected_html.len());
+                        _tokenizer.insert_input(&injected_html);
+                    }
                     println!("[Axomai ParserController] Inline classic script execution complete -> parser resumed");
                 }
             }
@@ -332,26 +342,31 @@ impl AxomaiEngine {
         self.dom_root = Some(Rc::clone(&final_dom_root));
         self.dom_parsing_complete = true;
 
-        // 3. Drain all currently available defer scripts in strict document order
+        // 3. Drain all currently available defer/module scripts in strict document order
         while let Some(defer_script) = self.ordered_defer_buffer.remove(&self.next_ordered_defer_to_run) {
             if !defer_script.code.is_empty() {
                 println!(
-                    "[Axomai ScriptController] Executing deferred script (defer_order {}): {}",
+                    "[Axomai ScriptController] Executing deferred/module script (defer_order {}): {}",
                     self.next_ordered_defer_to_run, defer_script.url
                 );
-                let _ = self.js_engine.execute(&defer_script.code);
+                let code_to_run = if defer_script.kind == ScriptKind::Module {
+                    format!("(function() {{\n'use strict';\n{}\n}})();", defer_script.code)
+                } else {
+                    defer_script.code
+                };
+                let _ = self.js_engine.execute(&code_to_run);
             }
             self.next_ordered_defer_to_run += 1;
         }
 
-        // 4. Dispatch DOMContentLoaded IF AND ONLY IF all defer scripts have finished executing!
+        // 4. Dispatch DOMContentLoaded IF AND ONLY IF all defer/module scripts have finished executing!
         if self.pending_defer_scripts == 0 {
-            println!("[Axomai Lifecycle] All defer scripts finished -> Dispatching DOMContentLoaded");
+            println!("[Axomai Lifecycle] All defer/module scripts finished -> Dispatching DOMContentLoaded");
             self.js_engine.dispatch_dom_content_loaded();
             self.dom_content_loaded_dispatched = true;
         } else {
             println!(
-                "[Axomai Lifecycle] Parser complete but {} external defer script(s) still in-flight -> DOMContentLoaded gated",
+                "[Axomai Lifecycle] Parser complete but {} external defer/module script(s) still in-flight -> DOMContentLoaded gated",
                 self.pending_defer_scripts
             );
         }
@@ -701,7 +716,7 @@ impl AxomaiEngine {
             if self.pending_scripts > 0 {
                 self.pending_scripts -= 1;
             }
-            if script.kind == ScriptKind::Defer {
+            if script.kind == ScriptKind::Defer || script.kind == ScriptKind::Module {
                 if self.pending_defer_scripts > 0 {
                     self.pending_defer_scripts -= 1;
                 }
@@ -726,15 +741,20 @@ impl AxomaiEngine {
             executed = true;
         }
 
-        // If DOM parsing is complete, execute deferred scripts in strict document order
+        // If DOM parsing is complete, execute deferred/module scripts in strict document order
         if self.dom_parsing_complete {
             while let Some(defer_script) = self.ordered_defer_buffer.remove(&self.next_ordered_defer_to_run) {
                 if !defer_script.code.is_empty() {
                     println!(
-                        "[Axomai ScriptScheduler] Executing deferred script (defer_order {}): {}",
+                        "[Axomai ScriptScheduler] Executing deferred/module script (defer_order {}): {}",
                         self.next_ordered_defer_to_run, defer_script.url
                     );
-                    if let Ok(mutated) = self.js_engine.execute(&defer_script.code) {
+                    let code_to_run = if defer_script.kind == ScriptKind::Module {
+                        format!("(function() {{\n'use strict';\n{}\n}})();", defer_script.code)
+                    } else {
+                        defer_script.code
+                    };
+                    if let Ok(mutated) = self.js_engine.execute(&code_to_run) {
                         if mutated {
                             script_mutated = true;
                         }
@@ -744,9 +764,9 @@ impl AxomaiEngine {
                 executed = true;
             }
 
-            // Gated DOMContentLoaded dispatch: fires once ALL defer scripts have completed!
+            // Gated DOMContentLoaded dispatch: fires once ALL defer/module scripts have completed!
             if self.pending_defer_scripts == 0 && !self.dom_content_loaded_dispatched {
-                println!("[Axomai Lifecycle] In-flight defer scripts completed -> Dispatching DOMContentLoaded");
+                println!("[Axomai Lifecycle] In-flight defer/module scripts completed -> Dispatching DOMContentLoaded");
                 self.js_engine.dispatch_dom_content_loaded();
                 self.dom_content_loaded_dispatched = true;
                 script_mutated = true;
