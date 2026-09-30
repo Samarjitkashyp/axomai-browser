@@ -36,10 +36,18 @@ pub struct PendingScript {
     pub code: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct HistoryEntry {
+    pub url: String,
+    pub title: String,
+    pub scroll_y: f32,
+}
+
 pub struct AxomaiEngine {
     pub engine_id: usize,
     pub document_id: u64,
     pub current_url: Option<URL>,
+    pub current_title: String,
     pub dom_root: Option<NodePtr>,
     pub layout_root: Option<LayoutBox>,
     pub display_list: Vec<DisplayCommand>,
@@ -50,6 +58,8 @@ pub struct AxomaiEngine {
     pub js_engine: V8JSEngine,
     pub active_css_rules: Vec<Rule>,
     pub is_dirty: bool,
+    pub history: Vec<HistoryEntry>,
+    pub history_index: usize,
     nav_tx: Sender<NavigationResponse>,
     nav_rx: Receiver<NavigationResponse>,
     script_tx: Sender<PendingScript>,
@@ -72,6 +82,7 @@ impl AxomaiEngine {
             engine_id,
             document_id: 1,
             current_url: None,
+            current_title: "Axomai Browser".to_string(),
             dom_root: None,
             layout_root: None,
             display_list: Vec::new(),
@@ -82,6 +93,8 @@ impl AxomaiEngine {
             js_engine,
             active_css_rules: Vec::new(),
             is_dirty: true,
+            history: Vec::new(),
+            history_index: 0,
             nav_tx,
             nav_rx,
             script_tx,
@@ -248,7 +261,33 @@ impl AxomaiEngine {
             }
         }
 
-        // 3. Extract <style> & Style Tree
+        // 3. Extract <title> and update current_title & history stack
+        let mut title_buf = String::new();
+        extract_title_tag(&dom_root, &mut title_buf);
+        let extracted_title = if !title_buf.trim().is_empty() {
+            title_buf.trim().to_string()
+        } else if let Some(ref u) = self.current_url {
+            u.host.clone()
+        } else {
+            "Axomai Browser".to_string()
+        };
+        self.current_title = extracted_title.clone();
+
+        // Update history entry if not already matching current top of history
+        let current_url_str = self.current_url.as_ref().map(|u| u.as_string()).unwrap_or_else(|| "about:blank".to_string());
+        if self.history.is_empty() || self.history[self.history_index].url != current_url_str {
+            if self.history_index + 1 < self.history.len() {
+                self.history.truncate(self.history_index + 1);
+            }
+            self.history.push(HistoryEntry {
+                url: current_url_str,
+                title: extracted_title,
+                scroll_y: 0.0,
+            });
+            self.history_index = self.history.len() - 1;
+        }
+
+        // 4. Extract <style> & Style Tree
         let mut author_css_list = Vec::new();
         extract_style_tags(&dom_root, &mut author_css_list);
         let author_css = author_css_list.join("\n");
@@ -261,11 +300,48 @@ impl AxomaiEngine {
         self.active_css_rules = all_rules;
         self.dom_root = Some(dom_root);
 
-        // 4. Restyle, Layout & Display List
+        // 5. Restyle, Layout & Display List
         self.restyle_and_relayout(viewport_w, viewport_h);
 
         self.status_message = "Page Loaded Successfully".to_string();
         Ok(())
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.history_index > 0
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        !self.history.is_empty() && self.history_index + 1 < self.history.len()
+    }
+
+    pub fn go_back(&mut self, viewport_w: f32, viewport_h: f32) -> Option<String> {
+        if self.can_go_back() {
+            self.history_index -= 1;
+            let entry = self.history[self.history_index].clone();
+            let _ = self.load_url(&entry.url, viewport_w, viewport_h);
+            return Some(entry.url);
+        }
+        None
+    }
+
+    pub fn go_forward(&mut self, viewport_w: f32, viewport_h: f32) -> Option<String> {
+        if self.can_go_forward() {
+            self.history_index += 1;
+            let entry = self.history[self.history_index].clone();
+            let _ = self.load_url(&entry.url, viewport_w, viewport_h);
+            return Some(entry.url);
+        }
+        None
+    }
+
+    pub fn reload(&mut self, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
+        if let Some(ref u) = self.current_url {
+            let url_str = u.as_string();
+            self.load_url(&url_str, viewport_w, viewport_h)
+        } else {
+            Ok(())
+        }
     }
 
     /// Recalculates style using both UA and Author CSS rules, and reconstructs the layout and display list
@@ -695,5 +771,24 @@ fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
         extract_script_tags(child, script_list);
     }
 }
+
+fn extract_title_tag(node: &NodePtr, title: &mut String) {
+    let b = node.borrow();
+    if let NodeType::Element { ref tag, .. } = b.node_type {
+        if tag == "title" {
+            for child in &b.children {
+                let cb = child.borrow();
+                if let NodeType::Text { ref text } = cb.node_type {
+                    title.push_str(text);
+                }
+            }
+            return;
+        }
+    }
+    for child in &b.children {
+        extract_title_tag(child, title);
+    }
+}
+
 
 

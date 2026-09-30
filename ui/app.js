@@ -7,11 +7,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const newTabView = document.getElementById('newTabView');
   const engineViewport = document.getElementById('engineViewport');
   const omnibox = document.querySelector('.omnibox-input');
+  const btnBack = document.getElementById('btnBack');
+  const btnForward = document.getElementById('btnForward');
+  const btnReload = document.getElementById('btnReload');
 
   function showNewTab() {
     if (newTabView) newTabView.style.display = 'flex';
     if (engineViewport) engineViewport.style.display = 'none';
     if (omnibox) omnibox.value = '';
+    const activeTabTitle = document.querySelector('.tab.active .tab-title');
+    if (activeTabTitle) activeTabTitle.textContent = 'New Tab';
   }
 
   function showEngineViewport() {
@@ -91,7 +96,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 4. AI Sidebar Toggle
+  // 4. Navigation Controls (Back, Forward, Reload)
+  if (btnBack) {
+    btnBack.addEventListener('click', () => {
+      if (window.ipc) {
+        window.ipc.postMessage('back');
+      }
+    });
+  }
+
+  if (btnForward) {
+    btnForward.addEventListener('click', () => {
+      if (window.ipc) {
+        window.ipc.postMessage('forward');
+      }
+    });
+  }
+
+  if (btnReload) {
+    btnReload.addEventListener('click', () => {
+      btnReload.style.transform = 'rotate(360deg)';
+      btnReload.style.transition = 'transform 0.5s ease';
+      setTimeout(() => {
+        btnReload.style.transform = '';
+        btnReload.style.transition = '';
+      }, 500);
+      if (window.ipc) {
+        window.ipc.postMessage('reload');
+      } else if (omnibox && omnibox.value.trim()) {
+        navigateTo(omnibox.value.trim());
+      }
+    });
+  }
+
+  // 5. AI Sidebar Toggle
   const btnToggleAi = document.getElementById('btnToggleAi');
   const btnCloseAi = document.getElementById('btnCloseAi');
   const aiSidebar = document.getElementById('aiSidebar');
@@ -108,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 5. AI Sub-tabs (Chat, Summarize, Translate, Tools)
+  // 6. AI Sub-tabs (Chat, Summarize, Translate, Tools)
   const aiTabs = document.querySelectorAll('.ai-tab');
   aiTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -117,7 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 6. News Feed Card Tabs
+  // 7. News Feed Card Tabs
   const cardTabs = document.querySelectorAll('.card-tab');
   cardTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -125,22 +163,6 @@ document.addEventListener('DOMContentLoaded', () => {
       tab.classList.add('active');
     });
   });
-
-  // 7. Navigation Buttons Feedback
-  const btnReload = document.getElementById('btnReload');
-  if (btnReload) {
-    btnReload.addEventListener('click', () => {
-      btnReload.style.transform = 'rotate(360deg)';
-      btnReload.style.transition = 'transform 0.5s ease';
-      setTimeout(() => {
-        btnReload.style.transform = '';
-        btnReload.style.transition = '';
-      }, 500);
-      if (omnibox && omnibox.value.trim()) {
-        navigateTo(omnibox.value.trim());
-      }
-    });
-  }
 
   // Helper: Navigate via Native Rust Core IPC or fallback
   function navigateTo(url) {
@@ -225,7 +247,12 @@ window.__axomai_render_display_list = function(displayList) {
   }
 
   if (!canvas._clickBound) {
+    canvas.addEventListener('mousedown', () => {
+      canvas.focus();
+    });
+
     canvas.addEventListener('click', (e) => {
+      canvas.focus();
       const rect = canvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const clickY = e.clientY - rect.top;
@@ -252,7 +279,13 @@ window.__axomai_render_display_list = function(displayList) {
       if (active && (active.classList.contains('omnibox-input') || active.classList.contains('search-input') || active.classList.contains('ai-text-input'))) {
         return; // Don't intercept browser chrome inputs
       }
+      const isBrowserShortcut = (e.ctrlKey || e.metaKey || e.altKey) || e.key === 'F5' || e.key === 'F12' || e.key === 'F11';
       if (engineViewport && engineViewport.style.display !== 'none') {
+        if (!isBrowserShortcut) {
+          if (e.key === 'Backspace' || e.key === 'Enter' || e.key === 'Tab' || e.key === ' ' || e.key.length === 1 || e.key.startsWith('Arrow')) {
+            e.preventDefault();
+          }
+        }
         if (window.ipc) {
           window.ipc.postMessage(`key:${e.key}`);
         }
@@ -321,4 +354,34 @@ window.__axomai_render_display_list = function(displayList) {
     }
   }
 };
+
+// Navigation Synchronization Bridge from Native Engine
+window.__axomai_sync_navigation = function(url, title, canBack, canForward) {
+  const omnibox = document.querySelector('.omnibox-input');
+  if (omnibox && document.activeElement !== omnibox) {
+    omnibox.value = url || '';
+  }
+
+  const activeTabTitle = document.querySelector('.tab.active .tab-title');
+  if (activeTabTitle) {
+    activeTabTitle.textContent = title || url || 'New Tab';
+  }
+
+  if (title) {
+    document.title = `${title} - Axomai Browser`;
+  }
+
+  const btnBack = document.getElementById('btnBack');
+  if (btnBack) {
+    btnBack.style.opacity = canBack ? '1.0' : '0.4';
+    btnBack.style.cursor = canBack ? 'pointer' : 'default';
+  }
+
+  const btnForward = document.getElementById('btnForward');
+  if (btnForward) {
+    btnForward.style.opacity = canForward ? '1.0' : '0.4';
+    btnForward.style.cursor = canForward ? 'pointer' : 'default';
+  }
+};
+
 

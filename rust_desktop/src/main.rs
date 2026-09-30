@@ -68,6 +68,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Ok(dy) = delta.parse::<f32>() {
                         let _ = eng.handle_scroll(dy);
                     }
+                } else if msg == "back" {
+                    let _ = eng.go_back(1380.0, 860.0);
+                } else if msg == "forward" {
+                    let _ = eng.go_forward(1380.0, 860.0);
+                } else if msg == "reload" {
+                    let _ = eng.reload(1380.0, 860.0);
                 }
             }
         });
@@ -99,6 +105,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             json
                         );
                         let _ = webview.evaluate_script(&script);
+
+                        let url_str = eng.current_url.as_ref().map(|u| u.as_string()).unwrap_or_default();
+                        let title_str = eng.current_title.replace('\\', "\\\\").replace('"', "\\\"");
+                        let can_back = eng.can_go_back();
+                        let can_fwd = eng.can_go_forward();
+                        let sync_script = format!(
+                            "if (window.__axomai_sync_navigation) {{ window.__axomai_sync_navigation(\"{}\", \"{}\", {}, {}); }}",
+                            url_str, title_str, can_back, can_fwd
+                        );
+                        let _ = webview.evaluate_script(&sync_script);
                     }
                 }
             }
