@@ -76,6 +76,7 @@ struct ActiveContext {
     dom_root: Option<NodePtr>,
     current_url: String,
     dom_mutated: bool,
+    is_parsing: bool,
     written_html_buffer: String,
     console_logs: Vec<String>,
     node_registry: HashMap<usize, NodePtr>,
@@ -150,6 +151,7 @@ impl V8JSEngine {
                 dom_root: dom_root.map(Rc::clone),
                 current_url: url_str.to_string(),
                 dom_mutated: false,
+                is_parsing: false,
                 written_html_buffer: String::new(),
                 console_logs: Vec::new(),
                 node_registry: reg,
@@ -546,6 +548,15 @@ impl V8JSEngine {
                 String::new()
             }
         })
+    }
+
+    /// Set parser stream active state to prevent duplicate DOM mutations during initial parse
+    pub fn set_parsing(&mut self, parsing: bool) {
+        CURRENT_CONTEXT.with(|ctx| {
+            if let Some(ref mut c) = *ctx.borrow_mut() {
+                c.is_parsing = parsing;
+            }
+        });
     }
 }
 
@@ -971,6 +982,44 @@ fn get_origin_from_url(url_str: &str) -> String {
     }
 }
 
+fn get_storage_dir() -> std::path::PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push("axomai_browser");
+    dir.push("local_storage");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn save_local_storage_to_disk(origin: &str, map: &HashMap<String, String>) {
+    let safe_origin = origin.replace([':', '/', '\\', '?', '*', '<', '>', '|', '"'], "_");
+    let mut path = get_storage_dir();
+    path.push(format!("{}.txt", safe_origin));
+    let mut content = String::new();
+    for (k, v) in map {
+        let ek = k.replace('\\', "\\\\").replace('\n', "\\n").replace('=', "\\=");
+        let ev = v.replace('\\', "\\\\").replace('\n', "\\n");
+        content.push_str(&format!("{}={}\n", ek, ev));
+    }
+    let _ = std::fs::write(path, content);
+}
+
+fn load_local_storage_from_disk(origin: &str) -> HashMap<String, String> {
+    let safe_origin = origin.replace([':', '/', '\\', '?', '*', '<', '>', '|', '"'], "_");
+    let mut path = get_storage_dir();
+    path.push(format!("{}.txt", safe_origin));
+    let mut map = HashMap::new();
+    if let Ok(data) = std::fs::read_to_string(path) {
+        for line in data.lines() {
+            if let Some(idx) = line.find('=') {
+                let k = line[..idx].replace("\\=", "=").replace("\\n", "\n").replace("\\\\", "\\");
+                let v = line[idx + 1..].replace("\\n", "\n").replace("\\\\", "\\");
+                map.insert(k, v);
+            }
+        }
+    }
+    map
+}
+
 // ============================================================================
 // WEB STORAGE (localStorage / sessionStorage) & COOKIE SYSTEM
 // ============================================================================
@@ -999,7 +1048,14 @@ fn setup_storage_and_cookies_api<'s>(
                 let val_opt = if is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.get(&key).cloned()))
                 } else {
-                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.get(&key).cloned()))
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if !map.contains_key(&orig_c) {
+                            let disk_map = load_local_storage_from_disk(&orig_c);
+                            map.insert(orig_c.clone(), disk_map);
+                        }
+                        map.get(&orig_c).and_then(|m| m.get(&key).cloned())
+                    })
                 };
                 if let Some(val) = val_opt {
                     let v_str = v8::String::new(scope, &val).unwrap();
@@ -1028,7 +1084,14 @@ fn setup_storage_and_cookies_api<'s>(
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        map.entry(orig_c.clone()).or_insert_with(HashMap::new).insert(key, val);
+                        if !map.contains_key(&orig_c) {
+                            let disk_map = load_local_storage_from_disk(&orig_c);
+                            map.insert(orig_c.clone(), disk_map);
+                        }
+                        if let Some(m) = map.get_mut(&orig_c) {
+                            m.insert(key, val);
+                            save_local_storage_to_disk(&orig_c, m);
+                        }
                     });
                 }
             },
@@ -1053,8 +1116,13 @@ fn setup_storage_and_cookies_api<'s>(
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
+                        if !map.contains_key(&orig_c) {
+                            let disk_map = load_local_storage_from_disk(&orig_c);
+                            map.insert(orig_c.clone(), disk_map);
+                        }
                         if let Some(m) = map.get_mut(&orig_c) {
                             m.remove(&key);
+                            save_local_storage_to_disk(&orig_c, m);
                         }
                     });
                 }
@@ -1078,9 +1146,8 @@ fn setup_storage_and_cookies_api<'s>(
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if let Some(m) = map.get_mut(&orig_c) {
-                            m.clear();
-                        }
+                        map.insert(orig_c.clone(), HashMap::new());
+                        save_local_storage_to_disk(&orig_c, &HashMap::new());
                     });
                 }
             },
@@ -1098,7 +1165,14 @@ fn setup_storage_and_cookies_api<'s>(
                 let key_opt = if is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.keys().nth(idx).cloned()))
                 } else {
-                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.keys().nth(idx).cloned()))
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if !map.contains_key(&orig_c) {
+                            let disk_map = load_local_storage_from_disk(&orig_c);
+                            map.insert(orig_c.clone(), disk_map);
+                        }
+                        map.get(&orig_c).and_then(|m| m.keys().nth(idx).cloned())
+                    })
                 };
                 if let Some(k) = key_opt {
                     let k_str = v8::String::new(scope, &k).unwrap();
@@ -1119,7 +1193,14 @@ fn setup_storage_and_cookies_api<'s>(
                 let len = if is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).map(|m| m.len()).unwrap_or(0))
                 } else {
-                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).map(|m| m.len()).unwrap_or(0))
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if !map.contains_key(&orig_c) {
+                            let disk_map = load_local_storage_from_disk(&orig_c);
+                            map.insert(orig_c.clone(), disk_map);
+                        }
+                        map.get(&orig_c).map(|m| m.len()).unwrap_or(0)
+                    })
                 };
                 rv.set(v8::Integer::new(scope, len as i32).into());
             },
@@ -1137,7 +1218,7 @@ fn setup_storage_and_cookies_api<'s>(
     global.set(scope, ls_k.into(), local_storage.into());
     global.set(scope, ss_k.into(), session_storage.into());
 
-    // 2. Cookie native hooks
+    // 2. Cookie native hooks with attribute awareness
     let get_cookie_fn = v8::Function::new(
         scope,
         move |s: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
@@ -1170,7 +1251,14 @@ fn setup_storage_and_cookies_api<'s>(
                         let mut map = jar.borrow_mut();
                         let list = map.entry(orig_set.clone()).or_insert_with(Vec::new);
                         list.retain(|(item_k, _)| item_k != &k);
-                        list.push((k, v));
+                        // Check if deleted via max-age=0 or expires in past
+                        let is_deleted = parts.iter().skip(1).any(|p| {
+                            let p_lower = p.trim().to_lowercase();
+                            p_lower == "max-age=0" || p_lower.starts_with("expires=thu, 01 jan 1970")
+                        });
+                        if !is_deleted {
+                            list.push((k, v));
+                        }
                     });
                 }
             }
@@ -1210,21 +1298,24 @@ fn setup_document_api<'s>(
                         c.written_html_buffer.push_str(&snippet);
                         c.dom_mutated = true;
 
-                        if let Some(ref root) = c.dom_root {
-                            let snippet_tree = HTMLParser::new(&snippet).parse();
-                            let target = find_body(root).unwrap_or_else(|| Rc::clone(root));
+                        // Only mutate DOM directly if NOT during initial parser stream tokenization
+                        if !c.is_parsing {
+                            if let Some(ref root) = c.dom_root {
+                                let snippet_tree = HTMLParser::new(&snippet).parse();
+                                let target = find_body(root).unwrap_or_else(|| Rc::clone(root));
 
-                            let children = snippet_tree.borrow().children.clone();
-                            if !children.is_empty() {
-                                for child in children {
-                                    register_dom_tree(&child, &mut c.node_registry, &mut c.next_node_id);
-                                    NodeData::add_child(&target, &child);
+                                let children = snippet_tree.borrow().children.clone();
+                                if !children.is_empty() {
+                                    for child in children {
+                                        register_dom_tree(&child, &mut c.node_registry, &mut c.next_node_id);
+                                        NodeData::add_child(&target, &child);
+                                    }
+                                } else {
+                                    register_dom_tree(&snippet_tree, &mut c.node_registry, &mut c.next_node_id);
+                                    NodeData::add_child(&target, &snippet_tree);
                                 }
-                            } else {
-                                register_dom_tree(&snippet_tree, &mut c.node_registry, &mut c.next_node_id);
-                                NodeData::add_child(&target, &snippet_tree);
+                                prune_detached_nodes(c);
                             }
-                            prune_detached_nodes(c);
                         }
                     }
                 });
@@ -1988,7 +2079,7 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             return true;
         };
 
-        // Browser ES Module Loader & Dependency Graph Registry
+        // Browser ES Module Transpiler, Dependency Loader & Registry
         window.__moduleRegistry = new Map();
         window.__resolvingModules = new Map();
 
@@ -1998,6 +2089,113 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             } catch(e) {
                 return specifier;
             }
+        };
+
+        window.__transformESModule = function(source) {
+            let transformed = source;
+
+            // 1. import defaultExport from "specifier";
+            transformed = transformed.replace(
+                /^\s*import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
+                'const { default: $1 } = await importModule("$2");'
+            );
+
+            // 2. import * as name from "specifier";
+            transformed = transformed.replace(
+                /^\s*import\s+\*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
+                'const $1 = await importModule("$2");'
+            );
+
+            // 3. import { a, b as c } from "specifier";
+            transformed = transformed.replace(
+                /^\s*import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
+                function(match, bindings, specifier) {
+                    const normalized = bindings.replace(/\s+as\s+/g, ': ');
+                    return 'const { ' + normalized + ' } = await importModule("' + specifier + '");';
+                }
+            );
+
+            // 4. import "specifier";
+            transformed = transformed.replace(
+                /^\s*import\s+['"]([^'"]+)['"]\s*;?/gm,
+                'await importModule("$1");'
+            );
+
+            // 5. export default expression;
+            transformed = transformed.replace(
+                /^\s*export\s+default\s+([^;]+);?/gm,
+                'exports.default = $1;'
+            );
+
+            // 6. export const/let/var x = 1, y = 2;
+            transformed = transformed.replace(
+                /^\s*export\s+(const|let|var)\s+([^;]+);?/gm,
+                function(match, declType, decls) {
+                    let res = declType + ' ' + decls + ';\n';
+                    const parts = decls.split(',');
+                    for (let i = 0; i < parts.length; i++) {
+                        const name = parts[i].split('=')[0].trim();
+                        if (name) {
+                            res += 'exports.' + name + ' = ' + name + ';\n';
+                        }
+                    }
+                    return res;
+                }
+            );
+
+            // 7. export function name(...) { ... }
+            transformed = transformed.replace(
+                /^\s*export\s+function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/gm,
+                'exports.$1 = $1; function $1'
+            );
+
+            // 8. export class name { ... }
+            transformed = transformed.replace(
+                /^\s*export\s+class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/gm,
+                'exports.$1 = $1; class $1'
+            );
+
+            // 9. export { a, b as c };
+            transformed = transformed.replace(
+                /^\s*export\s+\{([^}]+)\}\s*;?/gm,
+                function(match, bindings) {
+                    const items = bindings.split(',');
+                    let res = '';
+                    for (let i = 0; i < items.length; i++) {
+                        const item = items[i].trim();
+                        if (!item) continue;
+                        if (item.indexOf(' as ') !== -1) {
+                            const pair = item.split(' as ');
+                            res += 'exports.' + pair[1].trim() + ' = ' + pair[0].trim() + ';\n';
+                        } else {
+                            res += 'exports.' + item + ' = ' + item + ';\n';
+                        }
+                    }
+                    return res;
+                }
+            );
+
+            return transformed;
+        };
+
+        window.__executeModule = function(source, moduleUrl) {
+            const resolvedUrl = window.__resolveModuleUrl(moduleUrl || 'inline-module', window.location.href);
+            const transformed = window.__transformESModule(source);
+
+            const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+            const moduleFn = new AsyncFunction('exports', 'importModule', 'moduleUrl',
+                "'use strict';\n" + transformed + "\n//# sourceURL=" + resolvedUrl
+            );
+
+            const moduleNamespace = Object.create(null);
+            window.__moduleRegistry.set(resolvedUrl, moduleNamespace);
+
+            return moduleFn(moduleNamespace, window.import, resolvedUrl).then(function() {
+                return moduleNamespace;
+            }).catch(function(e) {
+                console.error('[Axomai ESModule Error in ' + resolvedUrl + ']:', e);
+                return moduleNamespace;
+            });
         };
 
         window.import = function(specifier) {
@@ -2015,14 +2213,7 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                     return res.text();
                 })
                 .then(function(source) {
-                    const moduleNamespace = Object.create(null);
-                    // Module compilation scope with strict mode and synthetic export binder
-                    const moduleFn = new Function('exports', 'importModule', 'moduleUrl',
-                        "'use strict';\n" + source + "\n//# sourceURL=" + resolvedUrl
-                    );
-                    moduleFn(moduleNamespace, window.import, resolvedUrl);
-                    window.__moduleRegistry.set(resolvedUrl, moduleNamespace);
-                    return moduleNamespace;
+                    return window.__executeModule(source, resolvedUrl);
                 })
                 .finally(function() {
                     window.__resolvingModules.delete(resolvedUrl);

@@ -178,6 +178,7 @@ impl AxomaiEngine {
 
         // 1. Establish ONE persistent V8 Context bound to the root DOM BEFORE parsing begins
         self.js_engine.reset_page_context(Some(&dom_root), &url_str);
+        self.js_engine.set_parsing(true);
 
         let mut defer_script_counter = 0;
         let current_url = self.current_url.clone();
@@ -339,6 +340,7 @@ impl AxomaiEngine {
             }
         });
 
+        self.js_engine.set_parsing(false);
         self.dom_root = Some(Rc::clone(&final_dom_root));
         self.dom_parsing_complete = true;
 
@@ -350,7 +352,8 @@ impl AxomaiEngine {
                     self.next_ordered_defer_to_run, defer_script.url
                 );
                 let code_to_run = if defer_script.kind == ScriptKind::Module {
-                    format!("(function() {{\n'use strict';\n{}\n}})();", defer_script.code)
+                    let escaped = defer_script.code.replace('\\', "\\\\").replace('`', "\\`").replace('$', "\\$");
+                    format!("if (typeof window.__executeModule === 'function') {{ window.__executeModule(`{}`, `{}`); }}", escaped, defer_script.url)
                 } else {
                     defer_script.code
                 };
@@ -750,7 +753,8 @@ impl AxomaiEngine {
                         self.next_ordered_defer_to_run, defer_script.url
                     );
                     let code_to_run = if defer_script.kind == ScriptKind::Module {
-                        format!("(function() {{\n'use strict';\n{}\n}})();", defer_script.code)
+                        let escaped = defer_script.code.replace('\\', "\\\\").replace('`', "\\`").replace('$', "\\$");
+                        format!("if (typeof window.__executeModule === 'function') {{ window.__executeModule(`{}`, `{}`); }}", escaped, defer_script.url)
                     } else {
                         defer_script.code
                     };
