@@ -2195,19 +2195,39 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             let transformed = cleanSource;
 
+            let importIndex = 0;
+
             // 1. import defaultExport, { a, b as c } from "specifier";
             transformed = transformed.replace(
                 /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*,\s*\{([^}]+)\}\s+from\s*['"]([^'"]+)['"]\s*;?/g,
                 function(m, def, named, spec) {
-                    const norm = named.replace(/\s+as\s+/g, ': ');
-                    return 'const { default: ' + def + ', ' + norm + ' } = await importModule("' + spec + '");';
+                    const modVar = '__import_mod_' + (importIndex++);
+                    let decls = 'const ' + modVar + ' = await importModule("' + spec + '");\n';
+                    decls += 'const ' + def + ' = ' + modVar + '.default;\n';
+                    const items = named.split(',');
+                    for (let p = 0; p < items.length; p++) {
+                        const item = items[p].trim();
+                        if (!item) continue;
+                        if (item.indexOf(' as ') !== -1) {
+                            const pair = item.split(' as ');
+                            const src = pair[0].trim();
+                            const local = pair[1].trim();
+                            decls += 'let ' + local + '; Object.defineProperty(globalThis, "' + local + '", { get: () => ' + modVar + '["' + src + '"], configurable: true });\n';
+                        } else {
+                            decls += 'let ' + item + '; Object.defineProperty(globalThis, "' + item + '", { get: () => ' + modVar + '["' + item + '"], configurable: true });\n';
+                        }
+                    }
+                    return decls;
                 }
             );
 
             // 2. import defaultExport from "specifier";
             transformed = transformed.replace(
                 /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
-                'const { default: $1 } = await importModule("$2");'
+                function(m, def, spec) {
+                    const modVar = '__import_mod_' + (importIndex++);
+                    return 'const ' + modVar + ' = await importModule("' + spec + '");\nconst ' + def + ' = ' + modVar + '.default;\n';
+                }
             );
 
             // 3. import * as name from "specifier";
@@ -2216,12 +2236,26 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 'const $1 = await importModule("$2");'
             );
 
-            // 4. import { a, b as c } from "specifier";
+            // 4. import { a, b as c } from "specifier"; -> LIVE IMPORTER BINDINGS
             transformed = transformed.replace(
                 /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;?/g,
                 function(m, bindings, specifier) {
-                    const normalized = bindings.replace(/\s+as\s+/g, ': ');
-                    return 'const { ' + normalized + ' } = await importModule("' + specifier + '");';
+                    const modVar = '__import_mod_' + (importIndex++);
+                    let decls = 'const ' + modVar + ' = await importModule("' + specifier + '");\n';
+                    const items = bindings.split(',');
+                    for (let p = 0; p < items.length; p++) {
+                        const item = items[p].trim();
+                        if (!item) continue;
+                        if (item.indexOf(' as ') !== -1) {
+                            const pair = item.split(' as ');
+                            const src = pair[0].trim();
+                            const local = pair[1].trim();
+                            decls += 'let ' + local + '; Object.defineProperty(globalThis, "' + local + '", { get: () => ' + modVar + '["' + src + '"], configurable: true });\n';
+                        } else {
+                            decls += 'let ' + item + '; Object.defineProperty(globalThis, "' + item + '", { get: () => ' + modVar + '["' + item + '"], configurable: true });\n';
+                        }
+                    }
+                    return decls;
                 }
             );
 

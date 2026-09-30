@@ -63,6 +63,31 @@ impl Selector {
             }
         }
     }
+
+    pub fn specificity(&self) -> (usize, usize, usize) {
+        match self {
+            Selector::ID(_) => (1, 0, 0),
+            Selector::Class(_) => (0, 1, 0),
+            Selector::Tag(_) => (0, 0, 1),
+            Selector::Compound(list) => {
+                let mut ids = 0;
+                let mut classes = 0;
+                let mut tags = 0;
+                for s in list {
+                    let (i, c, t) = s.specificity();
+                    ids += i;
+                    classes += c;
+                    tags += t;
+                }
+                (ids, classes, tags)
+            }
+            Selector::Descendant(ancestor, descendant) => {
+                let (i1, c1, t1) = ancestor.specificity();
+                let (i2, c2, t2) = descendant.specificity();
+                (i1 + i2, c1 + c2, t1 + t2)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -238,13 +263,20 @@ pub const INHERITED_PROPERTIES: &[&str] = &[
 ];
 
 pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
-    // 1. Gather matching rules first without holding mutable borrow
-    let mut matched_declarations = HashMap::new();
-    for rule in rules {
+    // 1. Gather matching rules sorted by specificity (ID > Class > Tag > Source Order)
+    let mut matched_rules: Vec<(&Rule, (usize, usize, usize), usize)> = Vec::new();
+    for (idx, rule) in rules.iter().enumerate() {
         if rule.selector.matches(node) {
-            for (prop, val) in &rule.declarations {
-                matched_declarations.insert(prop.clone(), val.clone());
-            }
+            matched_rules.push((rule, rule.selector.specificity(), idx));
+        }
+    }
+    // Sort ascending so higher specificity rules overwrite lower specificity declarations
+    matched_rules.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(&b.2)));
+
+    let mut matched_declarations = HashMap::new();
+    for (rule, _, _) in matched_rules {
+        for (prop, val) in &rule.declarations {
+            matched_declarations.insert(prop.clone(), val.clone());
         }
     }
 
