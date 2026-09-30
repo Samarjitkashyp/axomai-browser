@@ -54,8 +54,26 @@ impl AxomaiEngine {
 
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
-        for js in scripts {
-            let _ = self.js_engine.execute(&js);
+        for entry in scripts {
+            match entry {
+                ScriptEntry::Inline(code) => {
+                    let _ = self.js_engine.execute(&code);
+                }
+                ScriptEntry::External(src) => {
+                    let resolved_url = if let Some(ref current) = self.current_url {
+                        current.resolve(&src)
+                    } else {
+                        src.clone()
+                    };
+                    println!("[Axomai Engine] Fetching external script: {}", resolved_url);
+                    if let Ok(url_obj) = URL::parse(&resolved_url) {
+                        let (_headers, js_code) = url_obj.request();
+                        if !js_code.is_empty() {
+                            let _ = self.js_engine.execute(&js_code);
+                        }
+                    }
+                }
+            }
         }
 
         // 3. Extract <style> & Style Tree
@@ -128,7 +146,7 @@ impl AxomaiEngine {
                     x, y, width, height, ..
                 } => {
                     if click_x >= *x && click_x <= *x + *width && abs_y >= *y && abs_y <= *y + *height {
-                        self.js_engine.dispatch_click_event("button");
+                        self.js_engine.dispatch_click_event("button", click_x, abs_y);
                         if !query.is_empty() {
                             return Some(format!("https://html.duckduckgo.com/html/?q={}", query));
                         }
@@ -263,15 +281,31 @@ fn extract_style_tags(node: &NodePtr, css_list: &mut Vec<String>) {
     }
 }
 
-fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<String>) {
+#[derive(Debug, Clone)]
+pub enum ScriptEntry {
+    Inline(String),
+    External(String),
+}
+
+fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
     let b = node.borrow();
-    if let NodeType::Element { ref tag, .. } = b.node_type {
+    if let NodeType::Element { ref tag, ref attributes, .. } = b.node_type {
         if tag == "script" {
+            if let Some(src) = attributes.get("src") {
+                if !src.trim().is_empty() {
+                    script_list.push(ScriptEntry::External(src.trim().to_string()));
+                    return;
+                }
+            }
+            let mut inline_code = String::new();
             for child in &b.children {
                 let cb = child.borrow();
                 if let NodeType::Text { ref text } = cb.node_type {
-                    script_list.push(text.clone());
+                    inline_code.push_str(text);
                 }
+            }
+            if !inline_code.trim().is_empty() {
+                script_list.push(ScriptEntry::Inline(inline_code));
             }
         }
     }
@@ -279,3 +313,4 @@ fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<String>) {
         extract_script_tags(child, script_list);
     }
 }
+

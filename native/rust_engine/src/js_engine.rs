@@ -3,6 +3,7 @@ use crate::html_parser::{
     remove_node, set_node_inner_html, set_node_text_content, HTMLParser, NodeData, NodePtr,
     NodeType,
 };
+use crate::network::URL;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -112,15 +113,16 @@ impl V8JSEngine {
         setup_navigator_api(scope, global);
         setup_document_api(scope, global);
         setup_timer_apis(scope, global);
+        setup_fetch_api(scope, global, url_str);
 
-        // 5. Inject DOM Element Prototype Helpers
+        // 5. Inject DOM & Window/Document Prototype Event Helpers
         inject_dom_prototype_bootstrap(scope);
 
         // 6. Store persistent Context reference
         self.page_context = Some(v8::Global::new(handle_scope, context));
     }
 
-    /// Execute a JavaScript snippet inside the CURRENT PERSISTENT PAGE CONTEXT
+    /// Execute a JavaScript snippet inside the CURRENT PERSISTENT PAGE CONTEXT with TryCatch exception reporting
     pub fn execute(&mut self, source: &str) -> Result<bool, String> {
         let isolate = self.isolate.as_mut().ok_or("V8 Isolate not available")?;
         let page_context_global = self
@@ -132,22 +134,50 @@ impl V8JSEngine {
         let context = v8::Local::new(handle_scope, page_context_global);
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
-        // Compile & Run JavaScript Script in the SAME PERSISTENT CONTEXT!
-        let code = v8::String::new(scope, source).ok_or("Failed to allocate JS source string")?;
+        // Setup TryCatch block to accurately capture JS exceptions (line, message, stack)
+        let try_catch = &mut v8::TryCatch::new(scope);
 
-        let script = match v8::Script::compile(scope, code, None) {
+        let code = v8::String::new(try_catch, source).ok_or("Failed to allocate JS source string")?;
+
+        let script = match v8::Script::compile(try_catch, code, None) {
             Some(s) => s,
-            None => return Err("V8 Compilation failed".to_string()),
+            None => {
+                if let Some(exception) = try_catch.exception() {
+                    let msg = exception.to_rust_string_lossy(try_catch);
+                    let line = try_catch
+                        .message()
+                        .and_then(|m| m.get_line_number(try_catch))
+                        .unwrap_or(0);
+                    eprintln!("[Axomai V8 Compile Error @ line {}]: {}", line, msg);
+                }
+                return Err("V8 Compilation failed".to_string());
+            }
         };
 
-        let _ = script.run(scope);
+        let result = script.run(try_catch);
+        if result.is_none() {
+            if let Some(exception) = try_catch.exception() {
+                let msg = exception.to_rust_string_lossy(try_catch);
+                let line = try_catch
+                    .message()
+                    .and_then(|m| m.get_line_number(try_catch))
+                    .unwrap_or(0);
+                eprintln!("[Axomai V8 Uncaught Exception @ line {}]: {}", line, msg);
+                if let Some(stack) = try_catch.stack_trace(try_catch) {
+                    eprintln!("Stack Trace:\n{}", stack.to_rust_string_lossy(try_catch));
+                }
+            }
+        }
 
-        // Harvest any timers registered during script execution
+        // 1. CRITICAL: Perform Microtask Checkpoint so Promises (Promise.resolve, .then, async/await) resolve!
+        try_catch.perform_microtask_checkpoint();
+
+        // 2. Harvest any timers registered during script execution
         PENDING_TIMERS.with(|q| {
             self.timers.append(&mut *q.borrow_mut());
         });
 
-        // Filter out any timers cancelled via clearTimeout/clearInterval
+        // 3. Filter out any cancelled timers
         CANCELLED_TIMERS.with(|c| {
             let cancelled = c.borrow();
             self.timers.retain(|t| !cancelled.contains(&t.id));
@@ -166,7 +196,7 @@ impl V8JSEngine {
         Ok(was_mutated)
     }
 
-    /// Process queued timers and microtasks (Real Browser Event Loop tick)
+    /// Process queued timers and run Microtask Checkpoint (Real Browser Event Loop tick)
     pub fn process_event_loop(&mut self) -> bool {
         let isolate = match self.isolate.as_mut() {
             Some(iso) => iso,
@@ -188,8 +218,7 @@ impl V8JSEngine {
 
         for timer in self.timers.drain(..) {
             // Check if timer was cancelled
-            let is_cancelled =
-                CANCELLED_TIMERS.with(|c| c.borrow().contains(&timer.id));
+            let is_cancelled = CANCELLED_TIMERS.with(|c| c.borrow().contains(&timer.id));
             if is_cancelled {
                 continue;
             }
@@ -198,7 +227,17 @@ impl V8JSEngine {
                 // ACTUALLY DELAYED: Executes only after the real elapsed time!
                 let func = timer.callback.open(scope);
                 let recv = context.global(scope).into();
-                let _ = func.call(scope, recv, &[]);
+
+                let try_catch = &mut v8::TryCatch::new(scope);
+                let _ = func.call(try_catch, recv, &[]);
+
+                if let Some(exception) = try_catch.exception() {
+                    let msg = exception.to_rust_string_lossy(try_catch);
+                    eprintln!("[Axomai V8 Timer Exception]: {}", msg);
+                }
+
+                // Run Microtask Checkpoint after each timer callback (Promises inside setTimeout)
+                try_catch.perform_microtask_checkpoint();
                 executed_any = true;
 
                 if timer.is_interval {
@@ -222,6 +261,9 @@ impl V8JSEngine {
             self.timers.append(&mut *q.borrow_mut());
         });
 
+        // Extra Microtask Checkpoint to drain any pending async jobs
+        scope.perform_microtask_checkpoint();
+
         let was_mutated = CURRENT_CONTEXT.with(|ctx| {
             if let Some(ref mut c) = *ctx.borrow_mut() {
                 let m = c.dom_mutated;
@@ -235,20 +277,34 @@ impl V8JSEngine {
         executed_any || was_mutated
     }
 
-    /// Dispatch a native click event to a DOM node in the persistent context
-    pub fn dispatch_click_event(&mut self, target_selector: &str) -> bool {
+    /// Dispatch a native click event with full Event object (type, target, bubbles)
+    pub fn dispatch_click_event(&mut self, target_selector: &str, click_x: f32, click_y: f32) -> bool {
         let js = format!(
             r#"
             (function() {{
                 const el = document.querySelector("{sel}") || document.getElementById("{sel}");
                 if (el) {{
-                    el.dispatchEvent(new Event('click'));
+                    const event = {{
+                        type: 'click',
+                        target: el,
+                        currentTarget: el,
+                        clientX: {x},
+                        clientY: {y},
+                        bubbles: true,
+                        cancelable: true,
+                        defaultPrevented: false,
+                        preventDefault: function() {{ this.defaultPrevented = true; }},
+                        stopPropagation: function() {{ this._stopped = true; }}
+                    }};
+                    el.dispatchEvent(event);
                     return true;
                 }}
                 return false;
             }})();
             "#,
-            sel = target_selector
+            sel = target_selector,
+            x = click_x,
+            y = click_y
         );
         self.execute(&js).unwrap_or(false)
     }
@@ -272,7 +328,7 @@ fn register_dom_tree(
 }
 
 // ============================================================================
-// GLOBAL SCOPE BOOTSTRAP (window, console, location, navigator, document)
+// GLOBAL SCOPE BOOTSTRAP (window, console, location, navigator, document, fetch)
 // ============================================================================
 
 fn setup_window_global<'s>(
@@ -488,7 +544,117 @@ fn setup_timer_apis<'s>(
 }
 
 // ============================================================================
-// DOCUMENT & ELEMENT DOM BINDINGS (appendChild, removeChild, innerHTML, textContent)
+// NATIVE FETCH() WEB API IMPLEMENTATION (Returns Promise<Response>)
+// ============================================================================
+
+fn setup_fetch_api<'s>(
+    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+    global: v8::Local<v8::Object>,
+    base_url_str: &str,
+) {
+    let base_url = base_url_str.to_string();
+    let fetch_key = v8::String::new(scope, "fetch").unwrap();
+
+    let fetch_fn = v8::Function::new(
+        scope,
+        move |scope: &mut v8::HandleScope,
+              args: v8::FunctionCallbackArguments,
+              mut rv: v8::ReturnValue| {
+            if args.length() == 0 {
+                return;
+            }
+            let target_url_raw = args.get(0).to_rust_string_lossy(scope);
+
+            // Resolve target URL relative to base URL
+            let resolved_url = if let Ok(base) = URL::parse(&base_url) {
+                base.resolve(&target_url_raw)
+            } else {
+                target_url_raw
+            };
+
+            let resolver = v8::PromiseResolver::new(scope).unwrap();
+            let promise = resolver.get_promise(scope);
+            rv.set(promise.into());
+
+            // Perform HTTP GET request via ureq networking layer
+            let fetch_result = ureq::get(&resolved_url).call();
+
+            match fetch_result {
+                Ok(response) => {
+                    let status_code = response.status();
+                    let ok_bool = status_code >= 200 && status_code < 300;
+                    let body_text = response.into_string().unwrap_or_default();
+
+                    let resp_obj = v8::Object::new(scope);
+
+                    // status & ok
+                    let status_k = v8::String::new(scope, "status").unwrap();
+                    let status_v = v8::Integer::new(scope, status_code as i32);
+                    resp_obj.set(scope, status_k.into(), status_v.into());
+
+                    let ok_k = v8::String::new(scope, "ok").unwrap();
+                    let ok_v = v8::Boolean::new(scope, ok_bool);
+                    resp_obj.set(scope, ok_k.into(), ok_v.into());
+
+                    // response.text() -> returns Promise resolving to body_text
+                    let text_k = v8::String::new(scope, "text").unwrap();
+                    let body_clone = body_text.clone();
+                    let text_fn = v8::Function::new(
+                        scope,
+                        move |s: &mut v8::HandleScope,
+                              _a: v8::FunctionCallbackArguments,
+                              mut r: v8::ReturnValue| {
+                            let text_res = v8::PromiseResolver::new(s).unwrap();
+                            let text_p = text_res.get_promise(s);
+                            let text_str = v8::String::new(s, &body_clone).unwrap();
+                            text_res.resolve(s, text_str.into());
+                            r.set(text_p.into());
+                        },
+                    )
+                    .unwrap();
+                    resp_obj.set(scope, text_k.into(), text_fn.into());
+
+                    // response.json() -> returns Promise resolving to parsed JSON
+                    let json_k = v8::String::new(scope, "json").unwrap();
+                    let body_json = body_text.clone();
+                    let json_fn = v8::Function::new(
+                        scope,
+                        move |s: &mut v8::HandleScope,
+                              _a: v8::FunctionCallbackArguments,
+                              mut r: v8::ReturnValue| {
+                            let json_res = v8::PromiseResolver::new(s).unwrap();
+                            let json_p = json_res.get_promise(s);
+
+                            let json_str = v8::String::new(s, &body_json).unwrap();
+                            if let Some(parsed) = v8::json::parse(s, json_str) {
+                                json_res.resolve(s, parsed);
+                            } else {
+                                let err = v8::String::new(s, "Invalid JSON").unwrap();
+                                json_res.reject(s, err.into());
+                            }
+                            r.set(json_p.into());
+                        },
+                    )
+                    .unwrap();
+                    resp_obj.set(scope, json_k.into(), json_fn.into());
+
+                    resolver.resolve(scope, resp_obj.into());
+                }
+                Err(err) => {
+                    let err_msg = format!("Network Error: {}", err);
+                    let err_v = v8::String::new(scope, &err_msg).unwrap();
+                    resolver.reject(scope, err_v.into());
+                }
+            }
+        },
+    )
+    .unwrap();
+
+    global.set(scope, fetch_key.into(), fetch_fn.into());
+}
+
+// ============================================================================
+// DOCUMENT & ELEMENT DOM BINDINGS
 // ============================================================================
 
 fn setup_document_api<'s>(
@@ -968,18 +1134,48 @@ fn bind_element_event_functions<'s>(
     elem_obj.set(scope, events_k.into(), events_map.into());
 }
 
-/// Inject JavaScript bootstrap code that configures standard W3C getters & setters:
-/// element.innerHTML = "..."
-/// element.textContent = "..."
-/// element.className = "..."
-/// element.id = "..."
+/// Inject JavaScript bootstrap code that configures:
+/// 1. window.addEventListener, document.addEventListener
+/// 2. element.innerHTML, textContent, className, id reactive property getters & setters
+/// 3. Event bubbling, preventDefault, stopPropagation
 fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::HandleScope>) {
     let bootstrap_js = r#"
     (function() {
+        // Universal EventTarget implementation
+        function setupEventTarget(obj) {
+            if (!obj) return obj;
+            obj.__events = {};
+            obj.addEventListener = function(type, listener) {
+                if (!this.__events[type]) this.__events[type] = [];
+                this.__events[type].push(listener);
+            };
+            obj.removeEventListener = function(type, listener) {
+                if (!this.__events || !this.__events[type]) return;
+                this.__events[type] = this.__events[type].filter(l => l !== listener);
+            };
+            obj.dispatchEvent = function(event) {
+                const evt = (typeof event === 'string') ? { type: event } : event;
+                if (!evt.target) evt.target = this;
+                if (typeof this['on' + evt.type] === 'function') {
+                    this['on' + evt.type].call(this, evt);
+                }
+                if (this.__events && this.__events[evt.type]) {
+                    this.__events[evt.type].forEach(l => l.call(this, evt));
+                }
+            };
+            return obj;
+        }
+
+        // Setup EventTarget on window and document
+        setupEventTarget(window);
+        setupEventTarget(document);
+
         // Standard getters/setters definition on Element objects
         window.__setupElementProperties = function(el) {
             if (!el || el.__protoHooked) return el;
             el.__protoHooked = true;
+
+            setupEventTarget(el);
 
             Object.defineProperty(el, 'innerHTML', {
                 get: function() { return this.__getInnerHTML ? this.__getInnerHTML() : ''; },
@@ -1008,28 +1204,6 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 configurable: true,
                 enumerable: true
             });
-
-            // Event target methods
-            el.addEventListener = function(type, listener) {
-                if (!this.__events) this.__events = {};
-                if (!this.__events[type]) this.__events[type] = [];
-                this.__events[type].push(listener);
-            };
-
-            el.removeEventListener = function(type, listener) {
-                if (!this.__events || !this.__events[type]) return;
-                this.__events[type] = this.__events[type].filter(l => l !== listener);
-            };
-
-            el.dispatchEvent = function(event) {
-                const type = (typeof event === 'string') ? event : (event && event.type ? event.type : 'click');
-                if (typeof this['on' + type] === 'function') {
-                    this['on' + type].call(this, event);
-                }
-                if (this.__events && this.__events[type]) {
-                    this.__events[type].forEach(l => l.call(this, event));
-                }
-            };
 
             return el;
         };

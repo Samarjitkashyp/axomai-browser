@@ -106,9 +106,11 @@ cargo test
 - [x] **Rust DOM Tree Construction** with stack error recovery.
 - [x] **CSS Cascade & Inheritance** (`color`, `font-size`, `font-weight`, `margin`, `display`).
 - [x] **Inline Text Wrapping & Block Box Model Layout**.
-- [x] **Google V8 JavaScript Runtime** (ECMAScript, persistent isolate, and garbage collection).
-- [x] **V8 ↔ Rust DOM Bridge** (`document.write`, `getElementById`, `querySelector`, `createElement`, `setInnerHTML`, `setAttribute`).
-- [x] **Browser Web APIs** (`window`, `location`, `navigator`, `console.log`, `setTimeout`).
+- [x] **Google V8 JavaScript Runtime** (ECMAScript, persistent isolate & page context, V8 microtasks checkpoint).
+- [x] **V8 ↔ Rust DOM Bridge** (`document.write`, `getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `remove`, `innerHTML`, `textContent`, `setAttribute`).
+- [x] **Browser Web APIs & Networking** (`fetch()` via Rust `ureq`, `window`, `location`, `navigator`, `console`, `setTimeout`, `setInterval`).
+- [x] **External Script Pipeline** (`<script src="...">` automatic URL resolution and HTTP fetching).
+- [x] **W3C EventTarget System** (`window.addEventListener`, `document.addEventListener`, element event bubbling, preventDefault, and native click dispatching).
 - [x] **C++ Win32 GDI+ Painter** with double buffering, scroll & mouse wheel support.
 - [x] **Navigation History** (Back / Forward).
 
