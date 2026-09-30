@@ -21,6 +21,8 @@ typedef bool (*fn_axomai_engine_get_display_command)(void*, size_t, FFIDisplayCo
 typedef float (*fn_axomai_engine_get_max_scroll)(void*);
 typedef bool (*fn_axomai_engine_handle_click)(void*, float, float, float, char*, size_t);
 typedef bool (*fn_axomai_engine_handle_key)(void*, const char*, char*, size_t);
+typedef bool (*fn_axomai_engine_process_event_loop)(void*, float, float);
+typedef bool (*fn_axomai_engine_has_pending_events)(void*);
 
 static fn_axomai_engine_create p_axomai_engine_create = NULL;
 static fn_axomai_engine_free p_axomai_engine_free = NULL;
@@ -31,6 +33,8 @@ static fn_axomai_engine_get_display_command p_axomai_engine_get_display_command 
 static fn_axomai_engine_get_max_scroll p_axomai_engine_get_max_scroll = NULL;
 static fn_axomai_engine_handle_click p_axomai_engine_handle_click = NULL;
 static fn_axomai_engine_handle_key p_axomai_engine_handle_key = NULL;
+static fn_axomai_engine_process_event_loop p_axomai_engine_process_event_loop = NULL;
+static fn_axomai_engine_has_pending_events p_axomai_engine_has_pending_events = NULL;
 
 static HMODULE g_hEngineDll = NULL;
 static void* g_engine = NULL;
@@ -131,6 +135,8 @@ bool LoadEngineDll() {
     p_axomai_engine_get_max_scroll = (fn_axomai_engine_get_max_scroll)GetProcAddress(g_hEngineDll, "axomai_engine_get_max_scroll");
     p_axomai_engine_handle_click = (fn_axomai_engine_handle_click)GetProcAddress(g_hEngineDll, "axomai_engine_handle_click");
     p_axomai_engine_handle_key = (fn_axomai_engine_handle_key)GetProcAddress(g_hEngineDll, "axomai_engine_handle_key");
+    p_axomai_engine_process_event_loop = (fn_axomai_engine_process_event_loop)GetProcAddress(g_hEngineDll, "axomai_engine_process_event_loop");
+    p_axomai_engine_has_pending_events = (fn_axomai_engine_has_pending_events)GetProcAddress(g_hEngineDll, "axomai_engine_has_pending_events");
 
     return p_axomai_engine_create && p_axomai_engine_load_url;
 }
@@ -272,6 +278,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         g_hAddrEntry = CreateWindowW(L"EDIT", L"", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 168, 8, 680, 28, hWnd, (HMENU)105, NULL, NULL);
         CreateWindowW(L"BUTTON", L"Go", WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON, 854, 6, 60, 32, hWnd, (HMENU)106, NULL, NULL);
+
+        // Start 60 FPS Event Loop timer for async fetch, microtasks, and JS timers
+        SetTimer(hWnd, 1, 16, NULL);
+        break;
+    }
+
+    case WM_TIMER: {
+        if (wParam == 1 && g_engine && p_axomai_engine_process_event_loop) {
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            float viewport_w = (float)(rc.right - rc.left);
+            float viewport_h = (float)(rc.bottom - rc.top - 50);
+            if (p_axomai_engine_process_event_loop(g_engine, viewport_w, viewport_h)) {
+                if (p_axomai_engine_get_max_scroll) {
+                    g_max_scroll_y = p_axomai_engine_get_max_scroll(g_engine);
+                }
+                InvalidateRect(hWnd, NULL, FALSE);
+            }
+        }
         break;
     }
 
@@ -337,6 +362,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_DESTROY:
+        KillTimer(hWnd, 1);
         PostQuitMessage(0);
         break;
 

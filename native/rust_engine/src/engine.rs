@@ -266,6 +266,11 @@ impl AxomaiEngine {
         }
         executed
     }
+
+    /// Check if there are pending async fetch responses or timers ready for event loop processing
+    pub fn has_pending_events(&self) -> bool {
+        self.js_engine.has_pending_events()
+    }
 }
 
 fn extract_style_tags(node: &NodePtr, css_list: &mut Vec<String>) {

@@ -286,3 +286,12 @@ pub extern "C" fn axomai_engine_process_event_loop(
     engine.process_event_loop(viewport_w, viewport_h)
 }
 
+#[no_mangle]
+pub extern "C" fn axomai_engine_has_pending_events(engine_ptr: *mut c_void) -> bool {
+    if engine_ptr.is_null() {
+        return false;
+    }
+    let engine = unsafe { &*(engine_ptr as *mut AxomaiEngine) };
+    engine.has_pending_events()
+}
+

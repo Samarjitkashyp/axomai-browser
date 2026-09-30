@@ -7,7 +7,8 @@ use crate::network::URL;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, Once};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, Once};
 use std::thread;
 use std::time::{Duration, Instant};
 use v8;
@@ -23,34 +24,42 @@ fn ensure_v8_initialized() {
 }
 
 // ============================================================================
-// ASYNC FETCH QUEUE & STRUCTS
+// ASYNC FETCH QUEUE & STRUCTS (PURE RUST DATA - NO V8 HANDLES ACROSS THREADS)
 // ============================================================================
 
-pub struct CompletedFetch {
-    pub resolver: v8::Global<v8::PromiseResolver>,
+static NEXT_FETCH_ID: AtomicU64 = AtomicU64::new(1);
+static HAS_PENDING_FETCH_RESULTS: AtomicBool = AtomicBool::new(false);
+static FETCH_RESULT_QUEUE: Mutex<Option<Vec<FetchResult>>> = Mutex::new(None);
+
+#[derive(Debug, Clone)]
+pub struct FetchResult {
+    pub request_id: u64,
     pub status: u16,
     pub body: String,
     pub error: Option<String>,
 }
 
-lazy_static_queue! {
-    static ref ASYNC_FETCH_QUEUE: Arc<Mutex<Vec<CompletedFetch>>> = Arc::new(Mutex::new(Vec::new()));
+fn push_fetch_result(result: FetchResult) {
+    let mut lock = FETCH_RESULT_QUEUE.lock().unwrap();
+    if lock.is_none() {
+        *lock = Some(Vec::new());
+    }
+    if let Some(ref mut q) = *lock {
+        q.push(result);
+    }
+    HAS_PENDING_FETCH_RESULTS.store(true, Ordering::SeqCst);
 }
 
-macro_rules! lazy_static_queue {
-    ($(#[$attr:meta])* static ref $N:ident : $T:ty = $e:expr;) => {
-        static mut $N: Option<$T> = None;
-        static INIT: Once = Once::new();
-
-        fn get_async_fetch_queue() -> &'static Arc<Mutex<Vec<CompletedFetch>>> {
-            unsafe {
-                INIT.call_once(|| {
-                    $N = Some($e);
-                });
-                $N.as_ref().unwrap()
-            }
-        }
-    };
+fn drain_fetch_results() -> Vec<FetchResult> {
+    if !HAS_PENDING_FETCH_RESULTS.swap(false, Ordering::SeqCst) {
+        return Vec::new();
+    }
+    let mut lock = FETCH_RESULT_QUEUE.lock().unwrap();
+    if let Some(ref mut q) = *lock {
+        std::mem::take(q)
+    } else {
+        Vec::new()
+    }
 }
 
 // ============================================================================
@@ -71,6 +80,8 @@ thread_local! {
     static PENDING_TIMERS: RefCell<Vec<TimerTask>> = RefCell::new(Vec::new());
     static CANCELLED_TIMERS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
     static NEXT_TIMER_ID: RefCell<u32> = RefCell::new(1);
+    // V8 PromiseResolvers strictly retained on V8 isolate thread!
+    static PENDING_FETCH_RESOLVERS: RefCell<HashMap<u64, v8::Global<v8::PromiseResolver>>> = RefCell::new(HashMap::new());
 }
 
 // Timer Task for the Browser Event Loop
@@ -108,10 +119,11 @@ impl V8JSEngine {
             None => return,
         };
 
-        // 1. Clear old timers and cancelled timer lists
+        // 1. Clear old timers, cancelled timer lists, and pending fetch resolvers
         self.timers.clear();
         PENDING_TIMERS.with(|q| q.borrow_mut().clear());
         CANCELLED_TIMERS.with(|q| q.borrow_mut().clear());
+        PENDING_FETCH_RESOLVERS.with(|map| map.borrow_mut().clear());
 
         // 2. Set up Thread-Local Node Registry
         CURRENT_CONTEXT.with(|ctx| {
@@ -247,75 +259,77 @@ impl V8JSEngine {
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
         // 1. Process Completed Async Fetch Requests (Non-blocking network thread)
-        let mut completed_fetches = Vec::new();
-        let queue = get_async_fetch_queue();
-        if let Ok(mut q) = queue.lock() {
-            completed_fetches.append(&mut *q);
-        }
+        let completed_fetches = drain_fetch_results();
 
         for fetch_res in completed_fetches {
-            let resolver = fetch_res.resolver.open(scope);
+            let resolver_opt = PENDING_FETCH_RESOLVERS.with(|map| {
+                map.borrow_mut().remove(&fetch_res.request_id)
+            });
 
-            if let Some(err_msg) = fetch_res.error {
-                let err_v = v8::String::new(scope, &err_msg).unwrap();
-                resolver.reject(scope, err_v.into());
-            } else {
-                let resp_obj = v8::Object::new(scope);
+            if let Some(resolver_global) = resolver_opt {
+                let resolver = resolver_global.open(scope);
 
-                let status_k = v8::String::new(scope, "status").unwrap();
-                let status_v = v8::Integer::new(scope, fetch_res.status as i32);
-                resp_obj.set(scope, status_k.into(), status_v.into());
+                if let Some(err_msg) = fetch_res.error {
+                    let err_v = v8::String::new(scope, &err_msg).unwrap();
+                    resolver.reject(scope, err_v.into());
+                } else {
+                    let resp_obj = v8::Object::new(scope);
 
-                let ok_k = v8::String::new(scope, "ok").unwrap();
-                let ok_v = v8::Boolean::new(scope, fetch_res.status >= 200 && fetch_res.status < 300);
-                resp_obj.set(scope, ok_k.into(), ok_v.into());
+                    let status_k = v8::String::new(scope, "status").unwrap();
+                    let status_v = v8::Integer::new(scope, fetch_res.status as i32);
+                    resp_obj.set(scope, status_k.into(), status_v.into());
 
-                // text() method
-                let text_k = v8::String::new(scope, "text").unwrap();
-                let body_clone = fetch_res.body.clone();
-                let text_fn = v8::Function::new(
-                    scope,
-                    move |s: &mut v8::HandleScope,
-                          _a: v8::FunctionCallbackArguments,
-                          mut r: v8::ReturnValue| {
-                        let text_res = v8::PromiseResolver::new(s).unwrap();
-                        let text_p = text_res.get_promise(s);
-                        let text_str = v8::String::new(s, &body_clone).unwrap();
-                        text_res.resolve(s, text_str.into());
-                        r.set(text_p.into());
-                    },
-                )
-                .unwrap();
-                resp_obj.set(scope, text_k.into(), text_fn.into());
+                    let ok_k = v8::String::new(scope, "ok").unwrap();
+                    let ok_v = v8::Boolean::new(scope, fetch_res.status >= 200 && fetch_res.status < 300);
+                    resp_obj.set(scope, ok_k.into(), ok_v.into());
 
-                // json() method
-                let json_k = v8::String::new(scope, "json").unwrap();
-                let body_json = fetch_res.body.clone();
-                let json_fn = v8::Function::new(
-                    scope,
-                    move |s: &mut v8::HandleScope,
-                          _a: v8::FunctionCallbackArguments,
-                          mut r: v8::ReturnValue| {
-                        let json_res = v8::PromiseResolver::new(s).unwrap();
-                        let json_p = json_res.get_promise(s);
-                        let json_str = v8::String::new(s, &body_json).unwrap();
-                        if let Some(parsed) = v8::json::parse(s, json_str) {
-                            json_res.resolve(s, parsed);
-                        } else {
-                            let err = v8::String::new(s, "Invalid JSON in response").unwrap();
-                            json_res.reject(s, err.into());
-                        }
-                        r.set(json_p.into());
-                    },
-                )
-                .unwrap();
-                resp_obj.set(scope, json_k.into(), json_fn.into());
+                    // text() method
+                    let text_k = v8::String::new(scope, "text").unwrap();
+                    let body_clone = fetch_res.body.clone();
+                    let text_fn = v8::Function::new(
+                        scope,
+                        move |s: &mut v8::HandleScope,
+                              _a: v8::FunctionCallbackArguments,
+                              mut r: v8::ReturnValue| {
+                            let text_res = v8::PromiseResolver::new(s).unwrap();
+                            let text_p = text_res.get_promise(s);
+                            let text_str = v8::String::new(s, &body_clone).unwrap();
+                            text_res.resolve(s, text_str.into());
+                            r.set(text_p.into());
+                        },
+                    )
+                    .unwrap();
+                    resp_obj.set(scope, text_k.into(), text_fn.into());
 
-                resolver.resolve(scope, resp_obj.into());
+                    // json() method
+                    let json_k = v8::String::new(scope, "json").unwrap();
+                    let body_json = fetch_res.body.clone();
+                    let json_fn = v8::Function::new(
+                        scope,
+                        move |s: &mut v8::HandleScope,
+                              _a: v8::FunctionCallbackArguments,
+                              mut r: v8::ReturnValue| {
+                            let json_res = v8::PromiseResolver::new(s).unwrap();
+                            let json_p = json_res.get_promise(s);
+                            let json_str = v8::String::new(s, &body_json).unwrap();
+                            if let Some(parsed) = v8::json::parse(s, json_str) {
+                                json_res.resolve(s, parsed);
+                            } else {
+                                let err = v8::String::new(s, "Invalid JSON in response").unwrap();
+                                json_res.reject(s, err.into());
+                            }
+                            r.set(json_p.into());
+                        },
+                    )
+                    .unwrap();
+                    resp_obj.set(scope, json_k.into(), json_fn.into());
+
+                    resolver.resolve(scope, resp_obj.into());
+                }
+
+                executed_any = true;
+                scope.perform_microtask_checkpoint();
             }
-
-            executed_any = true;
-            scope.perform_microtask_checkpoint();
         }
 
         // 2. Process Scheduled Async Timers
@@ -377,6 +391,13 @@ impl V8JSEngine {
         });
 
         executed_any || was_mutated
+    }
+
+    /// Check whether there are active background fetch results or pending timers needing processing
+    pub fn has_pending_events(&self) -> bool {
+        HAS_PENDING_FETCH_RESULTS.load(Ordering::SeqCst)
+            || PENDING_TIMERS.with(|t| !t.borrow().is_empty())
+            || !self.timers.is_empty()
     }
 
     /// Dispatch a native click event with full Event object and bubbling
@@ -689,38 +710,41 @@ fn setup_async_fetch_api<'s>(
                 target_url_raw
             };
 
+            // Allocate unique Request ID for this fetch
+            let request_id = NEXT_FETCH_ID.fetch_add(1, Ordering::SeqCst);
+
+            // Create Promise & Resolver on V8 Thread
             let resolver = v8::PromiseResolver::new(scope).unwrap();
             let promise = resolver.get_promise(scope);
             rv.set(promise.into());
 
+            // Store PromiseResolver strictly on V8 thread in thread-local map
             let resolver_global = v8::Global::new(scope, resolver);
+            PENDING_FETCH_RESOLVERS.with(|map| {
+                map.borrow_mut().insert(request_id, resolver_global);
+            });
 
             // Spawn background thread to perform non-blocking HTTP request
+            // ONLY plain Rust data (request_id, resolved_url) is moved to worker thread!
             thread::spawn(move || {
                 match ureq::get(&resolved_url).call() {
                     Ok(resp) => {
                         let status = resp.status();
                         let body = resp.into_string().unwrap_or_default();
-                        let q = get_async_fetch_queue();
-                        if let Ok(mut lock) = q.lock() {
-                            lock.push(CompletedFetch {
-                                resolver: resolver_global,
-                                status,
-                                body,
-                                error: None,
-                            });
-                        }
+                        push_fetch_result(FetchResult {
+                            request_id,
+                            status,
+                            body,
+                            error: None,
+                        });
                     }
                     Err(err) => {
-                        let q = get_async_fetch_queue();
-                        if let Ok(mut lock) = q.lock() {
-                            lock.push(CompletedFetch {
-                                resolver: resolver_global,
-                                status: 500,
-                                body: String::new(),
-                                error: Some(format!("Fetch Error: {}", err)),
-                            });
-                        }
+                        push_fetch_result(FetchResult {
+                            request_id,
+                            status: 500,
+                            body: String::new(),
+                            error: Some(format!("Fetch Error: {}", err)),
+                        });
                     }
                 }
             });
