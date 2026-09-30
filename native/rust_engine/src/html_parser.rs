@@ -51,6 +51,18 @@ impl NodeData {
         child.borrow_mut().parent = Some(Rc::downgrade(parent));
         parent.borrow_mut().children.push(Rc::clone(child));
     }
+
+    pub fn remove_child(parent: &NodePtr, child: &NodePtr) -> bool {
+        let mut p = parent.borrow_mut();
+        let init_len = p.children.len();
+        p.children.retain(|c| !Rc::ptr_eq(c, child));
+        if p.children.len() < init_len {
+            child.borrow_mut().parent = None;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 pub const SELF_CLOSING_TAGS: &[&str] = &[
@@ -380,4 +392,55 @@ pub fn set_node_inner_html(node: &NodePtr, html: &str) {
         node_mut.children.push(child);
     }
 }
+
+pub fn remove_node(node: &NodePtr) -> bool {
+    let parent_opt = {
+        let b = node.borrow();
+        b.parent.as_ref().and_then(|weak| weak.upgrade())
+    };
+    if let Some(parent) = parent_opt {
+        NodeData::remove_child(&parent, node)
+    } else {
+        false
+    }
+}
+
+pub fn get_node_inner_html(node: &NodePtr) -> String {
+    let b = node.borrow();
+    let mut out = String::new();
+    for child in &b.children {
+        serialize_node_html(child, &mut out);
+    }
+    out
+}
+
+fn serialize_node_html(node: &NodePtr, out: &mut String) {
+    let b = node.borrow();
+    match &b.node_type {
+        NodeType::Text { text } => {
+            out.push_str(&html_escape::encode_text(text));
+        }
+        NodeType::Element { tag, attributes, .. } => {
+            out.push('<');
+            out.push_str(tag);
+            for (k, v) in attributes {
+                out.push(' ');
+                out.push_str(k);
+                out.push_str("=\"");
+                out.push_str(&html_escape::encode_double_quoted_attribute(v));
+                out.push('"');
+            }
+            out.push('>');
+            for child in &b.children {
+                serialize_node_html(child, out);
+            }
+            if !SELF_CLOSING_TAGS.contains(&tag.as_str()) {
+                out.push_str("</");
+                out.push_str(tag);
+                out.push('>');
+            }
+        }
+    }
+}
+
 

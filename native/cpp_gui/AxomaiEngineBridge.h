@@ -34,6 +34,7 @@ bool axomai_engine_get_display_command(void* engine_ptr, size_t index, FFIDispla
 float axomai_engine_get_max_scroll(void* engine_ptr);
 bool axomai_engine_handle_click(void* engine_ptr, float click_x, float click_y, float scroll_y, char* out_url_buf, size_t max_len);
 bool axomai_engine_handle_key(void* engine_ptr, const char* key_c_str, char* out_url_buf, size_t max_len);
+bool axomai_engine_process_event_loop(void* engine_ptr, float viewport_w, float viewport_h);
 
 #ifdef __cplusplus
 }

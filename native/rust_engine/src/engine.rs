@@ -222,6 +222,25 @@ impl AxomaiEngine {
         }
         String::new()
     }
+
+    pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
+        let executed = self.js_engine.process_event_loop();
+        if executed {
+            if let Some(ref dom_root) = self.dom_root {
+                let ua_rules = CSSParser::new(DEFAULT_UA_STYLES).parse();
+                style_tree(dom_root, &ua_rules);
+                if let Some(mut layout_box) = build_layout_tree(dom_root, self.current_url.as_ref()) {
+                    let total_h = layout_box.layout(0.0, 0.0, viewport_w.max(800.0));
+                    self.max_scroll_y = (total_h - viewport_h).max(0.0);
+                    let mut list = Vec::new();
+                    build_display_list(&layout_box, &mut list);
+                    self.layout_root = Some(layout_box);
+                    self.display_list = list;
+                }
+            }
+        }
+        executed
+    }
 }
 
 fn extract_style_tags(node: &NodePtr, css_list: &mut Vec<String>) {

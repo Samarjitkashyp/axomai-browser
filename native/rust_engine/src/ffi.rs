@@ -272,3 +272,17 @@ pub extern "C" fn axomai_engine_handle_key(
     }
     false
 }
+
+#[no_mangle]
+pub extern "C" fn axomai_engine_process_event_loop(
+    engine_ptr: *mut c_void,
+    viewport_w: f32,
+    viewport_h: f32,
+) -> bool {
+    if engine_ptr.is_null() {
+        return false;
+    }
+    let engine = unsafe { &mut *(engine_ptr as *mut AxomaiEngine) };
+    engine.process_event_loop(viewport_w, viewport_h)
+}
+
