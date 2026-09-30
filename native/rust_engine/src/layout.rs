@@ -291,10 +291,20 @@ impl LayoutBox {
     }
 
     fn layout_block(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let is_border_box = self.style.get("box-sizing").map(|s| s.as_str() == "border-box").unwrap_or(false);
         let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
 
         let mut content_width = if explicit_w >= 0.0 {
-            explicit_w
+            if is_border_box {
+                (explicit_w
+                    - self.dimensions.padding.left
+                    - self.dimensions.padding.right
+                    - self.dimensions.border.left
+                    - self.dimensions.border.right)
+                    .max(0.0)
+            } else {
+                explicit_w
+            }
         } else {
             (max_width
                 - self.dimensions.margin.left
@@ -361,7 +371,20 @@ impl LayoutBox {
 
         let computed_content_height = (cursor_y - self.dimensions.content.y).max(0.0);
         let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
-        let mut final_content_height = if explicit_h >= 0.0 { explicit_h } else { computed_content_height };
+        let mut final_content_height = if explicit_h >= 0.0 {
+            if is_border_box {
+                (explicit_h
+                    - self.dimensions.padding.top
+                    - self.dimensions.padding.bottom
+                    - self.dimensions.border.top
+                    - self.dimensions.border.bottom)
+                    .max(0.0)
+            } else {
+                explicit_h
+            }
+        } else {
+            computed_content_height
+        };
 
         if let Some(min_h_str) = self.style.get("min-height") {
             let min_h = parse_length(min_h_str, 0.0, 0.0);
@@ -379,16 +402,26 @@ impl LayoutBox {
         self.width = border_box.width;
         self.height = border_box.height;
 
-        // Apply relative positioning offsets
-        self.apply_position_offsets(x, y, max_width);
+        // Apply positioning offsets
+        self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
 
         self.dimensions.margin_box().height
     }
 
     fn layout_flex(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let is_border_box = self.style.get("box-sizing").map(|s| s.as_str() == "border-box").unwrap_or(false);
         let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
         let mut content_width = if explicit_w >= 0.0 {
-            explicit_w
+            if is_border_box {
+                (explicit_w
+                    - self.dimensions.padding.left
+                    - self.dimensions.padding.right
+                    - self.dimensions.border.left
+                    - self.dimensions.border.right)
+                    .max(0.0)
+            } else {
+                explicit_w
+            }
         } else {
             (max_width - self.dimensions.margin.left - self.dimensions.margin.right - self.dimensions.padding.left - self.dimensions.padding.right - self.dimensions.border.left - self.dimensions.border.right).max(0.0)
         };
@@ -409,6 +442,7 @@ impl LayoutBox {
         let flex_dir = self.style.get("flex-direction").map(|s| s.as_str()).unwrap_or("row");
         let justify = self.style.get("justify-content").map(|s| s.as_str()).unwrap_or("flex-start");
         let align_items = self.style.get("align-items").map(|s| s.as_str()).unwrap_or("stretch");
+        let align_content = self.style.get("align-content").map(|s| s.as_str()).unwrap_or("stretch");
         let flex_wrap = self.style.get("flex-wrap").map(|s| s.as_str()).unwrap_or("nowrap");
         let gap = parse_px(self.style.get("gap").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
 
@@ -436,7 +470,7 @@ impl LayoutBox {
 
         let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
 
-        // Calculate hypothetical sizes and flex factors
+        // Pass 1: Measure hypothetical sizes and factors
         struct FlexItemInfo {
             child_idx: usize,
             base_main_size: f32,
@@ -505,9 +539,8 @@ impl LayoutBox {
             flex_lines.push(current_line);
         }
 
-        // Distribute flex-grow and flex-shrink for each line
-        let mut total_cross_dimension = 0.0;
-        let mut cur_cross_pos = if is_row { self.dimensions.content.y } else { self.dimensions.content.x };
+        // Pass 2: Distribute flex-grow and flex-shrink for each line
+        let mut line_cross_sizes: Vec<f32> = Vec::new();
 
         for line in &flex_lines {
             let line_base_main_sum: f32 = line.iter().map(|&i| item_infos[i].base_main_size).sum();
@@ -534,6 +567,33 @@ impl LayoutBox {
                 }
             }
 
+            let max_cross = line.iter().map(|&i| item_infos[i].measured_cross_size).fold(0.0, f32::max);
+            line_cross_sizes.push(max_cross);
+        }
+
+        let total_lines_cross: f32 = line_cross_sizes.iter().sum::<f32>() + if flex_lines.len() > 1 { gap * (flex_lines.len() - 1) as f32 } else { 0.0 };
+        let container_cross_limit = if explicit_h >= 0.0 { explicit_h } else { total_lines_cross };
+        let cross_free_space = (container_cross_limit - total_lines_cross).max(0.0);
+
+        let (cross_start_offset, cross_line_spacing) = match align_content {
+            "center" => (cross_free_space / 2.0, gap),
+            "flex-end" => (cross_free_space, gap),
+            "space-between" => {
+                let sp = if flex_lines.len() > 1 { cross_free_space / (flex_lines.len() - 1) as f32 } else { 0.0 };
+                (0.0, gap + sp)
+            }
+            "space-around" => {
+                let sp = if !flex_lines.is_empty() { cross_free_space / flex_lines.len() as f32 } else { 0.0 };
+                (sp / 2.0, gap + sp)
+            }
+            _ => (0.0, gap),
+        };
+
+        let mut cur_cross_pos = if is_row { self.dimensions.content.y + cross_start_offset } else { self.dimensions.content.x + cross_start_offset };
+
+        // Pass 3: Re-layout each child with definitive final_main_size
+        for (line_idx, line) in flex_lines.iter().enumerate() {
+            let line_gaps = if line.len() > 1 { gap * (line.len() - 1) as f32 } else { 0.0 };
             let line_final_main: f32 = line.iter().map(|&i| item_infos[i].final_main_size).sum::<f32>() + line_gaps;
             let line_free_main = (container_main_limit - line_final_main).max(0.0);
 
@@ -551,7 +611,7 @@ impl LayoutBox {
                 _ => (0.0, gap),
             };
 
-            let line_max_cross: f32 = line.iter().map(|&i| item_infos[i].measured_cross_size).fold(0.0, f32::max);
+            let line_max_cross = line_cross_sizes[line_idx];
 
             let mut cur_main_pos = if is_row {
                 self.dimensions.content.x + start_offset
@@ -564,14 +624,16 @@ impl LayoutBox {
                 let child = &mut self.children[info.child_idx];
 
                 if is_row {
+                    // Re-layout child with definitive final_main_size
+                    let ch_h = child.layout(cur_main_pos, cur_cross_pos, info.final_main_size);
                     child.x = cur_main_pos;
                     child.dimensions.content.x = cur_main_pos;
                     child.width = info.final_main_size;
                     child.dimensions.content.width = info.final_main_size;
 
                     let cross_y = match align_items {
-                        "center" => cur_cross_pos + (line_max_cross - info.measured_cross_size) / 2.0,
-                        "flex-end" => cur_cross_pos + (line_max_cross - info.measured_cross_size),
+                        "center" => cur_cross_pos + (line_max_cross - ch_h) / 2.0,
+                        "flex-end" => cur_cross_pos + (line_max_cross - ch_h),
                         "stretch" => {
                             if !child.style.contains_key("height") {
                                 child.height = line_max_cross;
@@ -586,14 +648,15 @@ impl LayoutBox {
 
                     cur_main_pos += info.final_main_size + item_spacing;
                 } else {
+                    let ch_h = child.layout(cur_cross_pos, cur_main_pos, content_width);
                     child.y = cur_main_pos;
                     child.dimensions.content.y = cur_main_pos;
                     child.height = info.final_main_size;
                     child.dimensions.content.height = info.final_main_size;
 
                     let cross_x = match align_items {
-                        "center" => cur_cross_pos + (content_width - info.measured_cross_size) / 2.0,
-                        "flex-end" => cur_cross_pos + (content_width - info.measured_cross_size),
+                        "center" => cur_cross_pos + (content_width - ch_h) / 2.0,
+                        "flex-end" => cur_cross_pos + (content_width - ch_h),
                         "stretch" => {
                             if !child.style.contains_key("width") {
                                 child.width = content_width;
@@ -610,18 +673,13 @@ impl LayoutBox {
                 }
             }
 
-            cur_cross_pos += line_max_cross + gap;
-            total_cross_dimension += line_max_cross;
-        }
-
-        if flex_lines.len() > 1 {
-            total_cross_dimension += gap * (flex_lines.len() - 1) as f32;
+            cur_cross_pos += line_max_cross + cross_line_spacing;
         }
 
         let mut computed_h = if explicit_h >= 0.0 {
             explicit_h
         } else if is_row {
-            total_cross_dimension
+            total_lines_cross
         } else {
             container_main_limit
         };
@@ -642,17 +700,17 @@ impl LayoutBox {
         self.width = border_box.width;
         self.height = border_box.height;
 
-        self.apply_position_offsets(x, y, max_width);
+        self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
 
         self.dimensions.margin_box().height
     }
 
-    fn apply_position_offsets(&mut self, _parent_x: f32, _parent_y: f32, containing_w: f32) {
+    fn apply_position_offsets(&mut self, parent_x: f32, parent_y: f32, containing_w: f32, containing_h: f32) {
         let pos = self.style.get("position").map(|s| s.as_str()).unwrap_or("static");
 
         if pos == "relative" {
-            let top = self.style.get("top").map(|v| parse_length(v, 0.0, 0.0)).unwrap_or(0.0);
-            let bottom = self.style.get("bottom").map(|v| parse_length(v, 0.0, 0.0)).unwrap_or(0.0);
+            let top = self.style.get("top").map(|v| parse_length(v, containing_h, 0.0)).unwrap_or(0.0);
+            let bottom = self.style.get("bottom").map(|v| parse_length(v, containing_h, 0.0)).unwrap_or(0.0);
             let left = self.style.get("left").map(|v| parse_length(v, containing_w, 0.0)).unwrap_or(0.0);
             let right = self.style.get("right").map(|v| parse_length(v, containing_w, 0.0)).unwrap_or(0.0);
 
@@ -663,6 +721,30 @@ impl LayoutBox {
             self.y += offset_y;
             self.dimensions.content.x += offset_x;
             self.dimensions.content.y += offset_y;
+        } else if pos == "absolute" || pos == "fixed" {
+            let top_opt = self.style.get("top").map(|v| parse_length(v, containing_h, 0.0));
+            let left_opt = self.style.get("left").map(|v| parse_length(v, containing_w, 0.0));
+            let right_opt = self.style.get("right").map(|v| parse_length(v, containing_w, 0.0));
+            let bottom_opt = self.style.get("bottom").map(|v| parse_length(v, containing_h, 0.0));
+
+            let base_x = if pos == "fixed" { 0.0 } else { parent_x };
+            let base_y = if pos == "fixed" { 0.0 } else { parent_y };
+
+            if let Some(left) = left_opt {
+                self.x = base_x + left;
+                self.dimensions.content.x = self.x;
+            } else if let Some(right) = right_opt {
+                self.x = base_x + containing_w - self.width - right;
+                self.dimensions.content.x = self.x;
+            }
+
+            if let Some(top) = top_opt {
+                self.y = base_y + top;
+                self.dimensions.content.y = self.y;
+            } else if let Some(bottom) = bottom_opt {
+                self.y = base_y + containing_h - self.height - bottom;
+                self.dimensions.content.y = self.y;
+            }
         }
     }
 
