@@ -146,6 +146,172 @@ pub struct Rule {
     pub declarations: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct KeyframeStep {
+    pub offset: f32, // 0.0 (from / 0%) to 1.0 (to / 100%)
+    pub declarations: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyframeAnimation {
+    pub name: String,
+    pub steps: Vec<KeyframeStep>,
+}
+
+impl KeyframeAnimation {
+    pub fn sample(&self, progress: f32) -> HashMap<String, String> {
+        if self.steps.is_empty() {
+            return HashMap::new();
+        }
+        if self.steps.len() == 1 {
+            return self.steps[0].declarations.clone();
+        }
+
+        let p = progress.clamp(0.0, 1.0);
+        let mut lower_idx = 0;
+        let mut upper_idx = self.steps.len() - 1;
+
+        for (i, step) in self.steps.iter().enumerate() {
+            if step.offset <= p {
+                lower_idx = i;
+            }
+            if step.offset >= p && i < upper_idx {
+                upper_idx = i;
+                break;
+            }
+        }
+
+        let step_a = &self.steps[lower_idx];
+        let step_b = &self.steps[upper_idx];
+
+        if lower_idx == upper_idx || (step_b.offset - step_a.offset).abs() < 1e-5 {
+            return step_a.declarations.clone();
+        }
+
+        let range = step_b.offset - step_a.offset;
+        let local_p = ((p - step_a.offset) / range).clamp(0.0, 1.0);
+
+        let mut result = step_a.declarations.clone();
+        for (k, v_b) in &step_b.declarations {
+            if let Some(v_a) = step_a.declarations.get(k) {
+                let interp = interpolate_style_value(k, v_a, v_b, local_p);
+                result.insert(k.clone(), interp);
+            } else {
+                result.insert(k.clone(), v_b.clone());
+            }
+        }
+        result
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TimingFunction {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+    StepStart,
+    StepEnd,
+    Steps(u32),
+    CubicBezier(f32, f32, f32, f32),
+}
+
+impl TimingFunction {
+    pub fn parse(s: &str) -> Self {
+        let trimmed = s.trim().to_lowercase();
+        if trimmed == "linear" {
+            TimingFunction::Linear
+        } else if trimmed == "ease" {
+            TimingFunction::Ease
+        } else if trimmed == "ease-in" {
+            TimingFunction::EaseIn
+        } else if trimmed == "ease-out" {
+            TimingFunction::EaseOut
+        } else if trimmed == "ease-in-out" {
+            TimingFunction::EaseInOut
+        } else if trimmed == "step-start" {
+            TimingFunction::StepStart
+        } else if trimmed == "step-end" {
+            TimingFunction::StepEnd
+        } else if trimmed.starts_with("steps(") && trimmed.ends_with(')') {
+            let inner = &trimmed[6..trimmed.len() - 1];
+            let n = inner.split(',').next().unwrap_or("1").trim().parse().unwrap_or(1);
+            TimingFunction::Steps(n)
+        } else if trimmed.starts_with("cubic-bezier(") && trimmed.ends_with(')') {
+            let inner = &trimmed[13..trimmed.len() - 1];
+            let parts: Vec<f32> = inner.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            if parts.len() == 4 {
+                TimingFunction::CubicBezier(parts[0], parts[1], parts[2], parts[3])
+            } else {
+                TimingFunction::Ease
+            }
+        } else {
+            TimingFunction::Ease
+        }
+    }
+
+    pub fn solve(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            TimingFunction::Linear => t,
+            TimingFunction::Ease => solve_cubic_bezier(0.25, 0.1, 0.25, 1.0, t),
+            TimingFunction::EaseIn => solve_cubic_bezier(0.42, 0.0, 1.0, 1.0, t),
+            TimingFunction::EaseOut => solve_cubic_bezier(0.0, 0.0, 0.58, 1.0, t),
+            TimingFunction::EaseInOut => solve_cubic_bezier(0.42, 0.0, 0.58, 1.0, t),
+            TimingFunction::StepStart => if t > 0.0 { 1.0 } else { 0.0 },
+            TimingFunction::StepEnd => if t >= 1.0 { 1.0 } else { 0.0 },
+            TimingFunction::Steps(n) => {
+                let n_f = (*n).max(1) as f32;
+                (t * n_f).floor() / n_f
+            }
+            TimingFunction::CubicBezier(x1, y1, x2, y2) => solve_cubic_bezier(*x1, *y1, *x2, *y2, t),
+        }
+    }
+}
+
+pub fn solve_cubic_bezier(x1: f32, y1: f32, x2: f32, y2: f32, x: f32) -> f32 {
+    let mut t = x;
+    for _ in 0..8 {
+        let current_x = 3.0 * (1.0 - t) * (1.0 - t) * t * x1 + 3.0 * (1.0 - t) * t * t * x2 + t * t * t;
+        let dx = current_x - x;
+        if dx.abs() < 1e-4 {
+            break;
+        }
+        let dxdt = 3.0 * (1.0 - t) * (1.0 - t) * x1 + 6.0 * (1.0 - t) * t * (x2 - x1) + 3.0 * t * t * (1.0 - x2);
+        if dxdt.abs() < 1e-5 {
+            break;
+        }
+        t -= dx / dxdt;
+        t = t.clamp(0.0, 1.0);
+    }
+    3.0 * (1.0 - t) * (1.0 - t) * t * y1 + 3.0 * (1.0 - t) * t * t * y2 + t * t * t
+}
+
+#[derive(Debug, Clone)]
+pub struct TransitionSpec {
+    pub property: String,
+    pub duration_sec: f32,
+    pub timing_fn: TimingFunction,
+    pub delay_sec: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnimationSpec {
+    pub name: String,
+    pub duration_sec: f32,
+    pub timing_fn: TimingFunction,
+    pub delay_sec: f32,
+    pub iteration_count: f32, // f32::INFINITY for "infinite"
+    pub direction: String,     // "normal", "reverse", "alternate", "alternate-reverse"
+    pub fill_mode: String,     // "none", "forwards", "backwards", "both"
+}
+
+pub struct StyleSheet {
+    pub rules: Vec<Rule>,
+    pub keyframes: HashMap<String, KeyframeAnimation>,
+}
+
 pub struct CSSParser<'a> {
     css_text: &'a str,
 }
@@ -156,7 +322,12 @@ impl<'a> CSSParser<'a> {
     }
 
     pub fn parse(&self) -> Vec<Rule> {
+        self.parse_stylesheet().rules
+    }
+
+    pub fn parse_stylesheet(&self) -> StyleSheet {
         let mut rules = Vec::new();
+        let mut keyframes = HashMap::new();
         let chars: Vec<char> = self.css_text.chars().collect();
         let n = chars.len();
         let mut i = 0;
@@ -194,6 +365,37 @@ impl<'a> CSSParser<'a> {
             let sel_text = sel_text.trim();
             i += 1; // consume '{'
 
+            if sel_text.starts_with("@keyframes") || sel_text.starts_with("@-webkit-keyframes") {
+                // Parse nested keyframe blocks until matching outer '}'
+                let mut brace_depth = 1;
+                let body_start = i;
+                while i < n && brace_depth > 0 {
+                    if chars[i] == '{' {
+                        brace_depth += 1;
+                    } else if chars[i] == '}' {
+                        brace_depth -= 1;
+                    }
+                    if brace_depth > 0 {
+                        i += 1;
+                    }
+                }
+                let kf_body: String = chars[body_start..i].iter().collect();
+                if i < n && chars[i] == '}' {
+                    i += 1; // consume outer '}'
+                }
+
+                let anim_name = sel_text
+                    .trim_start_matches("@keyframes")
+                    .trim_start_matches("@-webkit-keyframes")
+                    .trim();
+
+                if !anim_name.is_empty() {
+                    let kf_anim = parse_keyframe_blocks(anim_name, &kf_body);
+                    keyframes.insert(anim_name.to_string(), kf_anim);
+                }
+                continue;
+            }
+
             let body_start = i;
             while i < n && chars[i] != '}' {
                 i += 1;
@@ -226,7 +428,7 @@ impl<'a> CSSParser<'a> {
             }
         }
 
-        rules
+        StyleSheet { rules, keyframes }
     }
 }
 
@@ -452,3 +654,282 @@ pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
         style_tree(&child, rules);
     }
 }
+
+pub fn parse_keyframe_blocks(name: &str, body: &str) -> KeyframeAnimation {
+    let mut steps = Vec::new();
+    let chars: Vec<char> = body.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+
+    while i < n {
+        while i < n && (chars[i].is_whitespace() || chars[i] == ';') {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+
+        let sel_start = i;
+        while i < n && chars[i] != '{' {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+        let sel_str: String = chars[sel_start..i].iter().collect();
+        let sel_str = sel_str.trim();
+        i += 1; // consume '{'
+
+        let body_start = i;
+        while i < n && chars[i] != '}' {
+            i += 1;
+        }
+        let step_body: String = chars[body_start..i].iter().collect();
+        if i < n {
+            i += 1; // consume '}'
+        }
+
+        let decls = parse_declarations(&step_body);
+        for part in sel_str.split(',') {
+            let part = part.trim();
+            let offset_opt = if part == "from" || part == "0%" {
+                Some(0.0)
+            } else if part == "to" || part == "100%" {
+                Some(1.0)
+            } else if part.ends_with('%') {
+                part[..part.len() - 1].trim().parse::<f32>().ok().map(|p| (p / 100.0).clamp(0.0, 1.0))
+            } else {
+                part.parse::<f32>().ok().map(|p| p.clamp(0.0, 1.0))
+            };
+
+            if let Some(offset) = offset_opt {
+                steps.push(KeyframeStep {
+                    offset,
+                    declarations: decls.clone(),
+                });
+            }
+        }
+    }
+
+    steps.sort_by(|a, b| a.offset.partial_cmp(&b.offset).unwrap_or(std::cmp::Ordering::Equal));
+    KeyframeAnimation {
+        name: name.to_string(),
+        steps,
+    }
+}
+
+pub fn parse_time_seconds(s: &str) -> f32 {
+    let s = s.trim().to_lowercase();
+    if s.ends_with("ms") {
+        s[..s.len() - 2].trim().parse::<f32>().unwrap_or(0.0) / 1000.0
+    } else if s.ends_with('s') {
+        s[..s.len() - 1].trim().parse::<f32>().unwrap_or(0.0)
+    } else {
+        s.parse::<f32>().unwrap_or(0.0)
+    }
+}
+
+pub fn parse_transition_shorthand(val: &str) -> Vec<TransitionSpec> {
+    let mut specs = Vec::new();
+    for part in val.split(',') {
+        let tokens: Vec<&str> = part.split_whitespace().collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        let mut property = "all".to_string();
+        let mut duration = 0.0;
+        let mut timing_fn = TimingFunction::Ease;
+        let mut delay = 0.0;
+        let mut duration_found = false;
+
+        for tok in tokens {
+            let lower = tok.to_lowercase();
+            if lower.ends_with("ms") || (lower.ends_with('s') && lower.chars().next().map(|c| c.is_ascii_digit() || c == '.').unwrap_or(false)) {
+                let sec = parse_time_seconds(&lower);
+                if !duration_found {
+                    duration = sec;
+                    duration_found = true;
+                } else {
+                    delay = sec;
+                }
+            } else if lower == "linear" || lower == "ease" || lower == "ease-in" || lower == "ease-out" || lower == "ease-in-out" || lower.starts_with("cubic-bezier") || lower.starts_with("steps") {
+                timing_fn = TimingFunction::parse(&lower);
+            } else {
+                property = lower;
+            }
+        }
+
+        specs.push(TransitionSpec {
+            property,
+            duration_sec: duration,
+            timing_fn,
+            delay_sec: delay,
+        });
+    }
+    specs
+}
+
+pub fn parse_animation_shorthand(val: &str) -> Vec<AnimationSpec> {
+    let mut specs = Vec::new();
+    for part in val.split(',') {
+        let tokens: Vec<&str> = part.split_whitespace().collect();
+        if tokens.is_empty() {
+            continue;
+        }
+
+        let mut name = String::new();
+        let mut duration = 0.0;
+        let mut timing_fn = TimingFunction::Ease;
+        let mut delay = 0.0;
+        let mut iteration_count = 1.0;
+        let mut direction = "normal".to_string();
+        let mut fill_mode = "none".to_string();
+        let mut duration_found = false;
+
+        for tok in tokens {
+            let lower = tok.to_lowercase();
+            if lower.ends_with("ms") || (lower.ends_with('s') && lower.chars().next().map(|c| c.is_ascii_digit() || c == '.').unwrap_or(false)) {
+                let sec = parse_time_seconds(&lower);
+                if !duration_found {
+                    duration = sec;
+                    duration_found = true;
+                } else {
+                    delay = sec;
+                }
+            } else if lower == "infinite" {
+                iteration_count = f32::INFINITY;
+            } else if let Ok(num) = lower.parse::<f32>() {
+                iteration_count = num;
+            } else if lower == "linear" || lower == "ease" || lower == "ease-in" || lower == "ease-out" || lower == "ease-in-out" || lower.starts_with("cubic-bezier") || lower.starts_with("steps") {
+                timing_fn = TimingFunction::parse(&lower);
+            } else if lower == "normal" || lower == "reverse" || lower == "alternate" || lower == "alternate-reverse" {
+                direction = lower;
+            } else if lower == "forwards" || lower == "backwards" || lower == "both" || lower == "none" {
+                fill_mode = lower;
+            } else if name.is_empty() {
+                name = lower;
+            }
+        }
+
+        if !name.is_empty() {
+            specs.push(AnimationSpec {
+                name,
+                duration_sec: duration,
+                timing_fn,
+                delay_sec: delay,
+                iteration_count,
+                direction,
+                fill_mode,
+            });
+        }
+    }
+    specs
+}
+
+pub fn parse_color_rgba(s: &str) -> Option<(f32, f32, f32, f32)> {
+    let s = s.trim().to_lowercase();
+    if s == "transparent" {
+        return Some((0.0, 0.0, 0.0, 0.0));
+    }
+    if s == "black" { return Some((0.0, 0.0, 0.0, 1.0)); }
+    if s == "white" { return Some((255.0, 255.0, 255.0, 1.0)); }
+    if s == "red" { return Some((255.0, 0.0, 0.0, 1.0)); }
+    if s == "green" { return Some((0.0, 128.0, 0.0, 1.0)); }
+    if s == "blue" { return Some((0.0, 0.0, 255.0, 1.0)); }
+    if s == "yellow" { return Some((255.0, 255.0, 0.0, 1.0)); }
+
+    if s.starts_with('#') {
+        let hex = &s[1..];
+        if hex.len() == 3 {
+            let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()? as f32;
+            let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()? as f32;
+            let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()? as f32;
+            return Some((r, g, b, 1.0));
+        } else if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32;
+            return Some((r, g, b, 1.0));
+        } else if hex.len() == 8 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32;
+            let a = (u8::from_str_radix(&hex[6..8], 16).ok()? as f32) / 255.0;
+            return Some((r, g, b, a));
+        }
+    } else if s.starts_with("rgb(") && s.ends_with(')') {
+        let inner = &s[4..s.len() - 1];
+        let parts: Vec<f32> = inner.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        if parts.len() >= 3 {
+            return Some((parts[0], parts[1], parts[2], 1.0));
+        }
+    } else if s.starts_with("rgba(") && s.ends_with(')') {
+        let inner = &s[5..s.len() - 1];
+        let parts: Vec<f32> = inner.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        if parts.len() >= 4 {
+            return Some((parts[0], parts[1], parts[2], parts[3]));
+        }
+    }
+    None
+}
+
+pub fn interpolate_style_value(prop: &str, start_val: &str, end_val: &str, progress: f32) -> String {
+    let p = progress.clamp(0.0, 1.0);
+    let s_trim = start_val.trim();
+    let e_trim = end_val.trim();
+
+    // 1. Color properties
+    if prop.contains("color") || prop == "fill" || prop == "stroke" {
+        if let (Some(c1), Some(c2)) = (parse_color_rgba(s_trim), parse_color_rgba(e_trim)) {
+            let r = (c1.0 + (c2.0 - c1.0) * p).round().clamp(0.0, 255.0);
+            let g = (c1.1 + (c2.1 - c1.1) * p).round().clamp(0.0, 255.0);
+            let b = (c1.2 + (c2.2 - c1.2) * p).round().clamp(0.0, 255.0);
+            let a = (c1.3 + (c2.3 - c1.3) * p).clamp(0.0, 1.0);
+            if (a - 1.0).abs() < 1e-3 {
+                return format!("rgb({}, {}, {})", r as u32, g as u32, b as u32);
+            } else {
+                return format!("rgba({}, {}, {}, {:.3})", r as u32, g as u32, b as u32, a);
+            }
+        }
+    }
+
+    // 2. Opacity
+    if prop == "opacity" {
+        let o1 = s_trim.parse::<f32>().unwrap_or(1.0);
+        let o2 = e_trim.parse::<f32>().unwrap_or(1.0);
+        return format!("{:.4}", o1 + (o2 - o1) * p);
+    }
+
+    // 3. Lengths with units (e.g. px, %, em, rem)
+    if let (Some((v1, u1)), Some((v2, u2))) = (extract_num_unit(s_trim), extract_num_unit(e_trim)) {
+        if u1 == u2 {
+            let v = v1 + (v2 - v1) * p;
+            return format!("{:.2}{}", v, u1);
+        }
+    }
+
+    // 4. Raw numbers / z-index
+    if let (Ok(n1), Ok(n2)) = (s_trim.parse::<f32>(), e_trim.parse::<f32>()) {
+        let v = n1 + (n2 - n1) * p;
+        return format!("{:.2}", v);
+    }
+
+    // Fallback: discrete step at 50%
+    if p < 0.5 {
+        start_val.to_string()
+    } else {
+        end_val.to_string()
+    }
+}
+
+fn extract_num_unit(s: &str) -> Option<(f32, &str)> {
+    let s = s.trim();
+    let num_end = s.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').unwrap_or(s.len());
+    if num_end == 0 {
+        return None;
+    }
+    let num = s[..num_end].parse::<f32>().ok()?;
+    let unit = &s[num_end..];
+    Some((num, unit))
+}
+

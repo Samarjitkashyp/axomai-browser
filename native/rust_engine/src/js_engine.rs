@@ -1100,11 +1100,34 @@ fn setup_async_fetch_api<'s>(
                         let status = resp.status();
                         let status_text = resp.status_text().to_string();
                         let mut resp_headers = Vec::new();
+                        let mut allow_origin: Option<String> = None;
+
                         for header_name in resp.headers_names() {
                             if let Some(val) = resp.header(&header_name) {
+                                if header_name.eq_ignore_ascii_case("access-control-allow-origin") {
+                                    allow_origin = Some(val.to_string());
+                                }
                                 resp_headers.push((header_name, val.to_string()));
                             }
                         }
+
+                        // Same-Origin Policy & CORS Check
+                        let req_origin = get_origin_from_url(&url_for_worker);
+                        let doc_origin = get_origin_from_url(&url_str_owned);
+                        let is_cross_origin = !doc_origin.is_empty() && doc_origin != "null" && doc_origin != req_origin;
+
+                        let cors_error = if is_cross_origin {
+                            match allow_origin {
+                                Some(ref ao) if ao == "*" || ao == &doc_origin => None,
+                                _ => Some(format!(
+                                    "Cross-Origin Request Blocked (CORS): The Same Origin Policy disallows reading the remote resource at {} (Origin '{}' is not allowed by Access-Control-Allow-Origin)",
+                                    url_for_worker, doc_origin
+                                )),
+                            }
+                        } else {
+                            None
+                        };
+
                         let body = resp.into_string().unwrap_or_default();
                         push_fetch_result(FetchResult {
                             engine_id,
@@ -1114,7 +1137,7 @@ fn setup_async_fetch_api<'s>(
                             headers: resp_headers,
                             url: url_for_worker,
                             body,
-                            error: None,
+                            error: cors_error,
                         });
                     }
                     Err(err) => {
@@ -3076,6 +3099,126 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 return list;
             };
         }
+
+        // Performance APIs
+        if (!window.performance) {
+            window.performance = {
+                timeOrigin: Date.now(),
+                now: function() { return Date.now() - (this.timeOrigin || 0); }
+            };
+        }
+
+        // Animation Frame Clock: requestAnimationFrame & cancelAnimationFrame
+        window.__rafCallbacks = new Map();
+        window.__nextRafId = 1;
+        window.requestAnimationFrame = function(cb) {
+            const id = window.__nextRafId++;
+            window.__rafCallbacks.set(id, cb);
+            setTimeout(function() {
+                if (window.__rafCallbacks.has(id)) {
+                    window.__rafCallbacks.delete(id);
+                    try {
+                        cb(window.performance ? window.performance.now() : Date.now());
+                    } catch(e) {
+                        console.error('[Axomai rAF Callback Exception]:', e);
+                    }
+                }
+            }, 16);
+            return id;
+        };
+        window.cancelAnimationFrame = function(id) {
+            window.__rafCallbacks.delete(id);
+        };
+
+        // CSS Computed Style Proxy: window.getComputedStyle()
+        window.getComputedStyle = function(el) {
+            if (!el) return {};
+            const style = el.style || {};
+            const rect = (typeof el.getBoundingClientRect === 'function')
+                ? el.getBoundingClientRect()
+                : { width: 0, height: 0, top: 0, left: 0 };
+
+            return new Proxy(style, {
+                get(target, prop) {
+                    if (prop === 'width') return (rect.width || 0) + 'px';
+                    if (prop === 'height') return (rect.height || 0) + 'px';
+                    if (prop === 'top') return (rect.top || 0) + 'px';
+                    if (prop === 'left') return (rect.left || 0) + 'px';
+                    if (prop === 'opacity') return target.opacity !== undefined ? String(target.opacity) : '1';
+                    if (prop === 'display') return target.display || 'block';
+                    if (prop === 'position') return target.position || 'static';
+                    if (prop === 'transform') return target.transform || 'none';
+                    if (prop === 'color') return target.color || 'rgb(0, 0, 0)';
+                    if (prop === 'backgroundColor' || prop === 'background-color') return target.backgroundColor || target['background-color'] || 'rgba(0, 0, 0, 0)';
+                    if (typeof prop === 'string' && target[prop] !== undefined) {
+                        return target[prop];
+                    }
+                    return '';
+                }
+            });
+        };
+
+        // Web Workers Foundation
+        function MessageEvent(type, init) {
+            Event.call(this, type, { bubbles: false, cancelable: false });
+            this.data = init && init.data !== undefined ? init.data : null;
+            this.origin = init && init.origin ? init.origin : '';
+        }
+        MessageEvent.prototype = Object.create(Event.prototype);
+        window.MessageEvent = MessageEvent;
+
+        window.Worker = function(scriptUrl) {
+            this.scriptUrl = scriptUrl;
+            this.onmessage = null;
+            this.onerror = null;
+            this.__listeners = {};
+            setupEventTarget(this);
+
+            const selfWorker = this;
+            if (typeof fetch === 'function') {
+                fetch(scriptUrl)
+                    .then(function(r) { return r.text(); })
+                    .then(function(code) {
+                        try {
+                            const workerFn = new Function('self', 'postMessage', 'onmessage', code);
+                            const workerContext = {
+                                onmessage: null,
+                                postMessage: function(data) {
+                                    const evt = new MessageEvent('message', { data: data });
+                                    if (typeof selfWorker.onmessage === 'function') {
+                                        selfWorker.onmessage(evt);
+                                    }
+                                    selfWorker.dispatchEvent(evt);
+                                }
+                            };
+                            selfWorker.__workerContext = workerContext;
+                            workerFn(workerContext, workerContext.postMessage, workerContext.onmessage);
+                        } catch(err) {
+                            if (typeof selfWorker.onerror === 'function') {
+                                selfWorker.onerror(err);
+                            }
+                        }
+                    })
+                    .catch(function(err) {
+                        if (typeof selfWorker.onerror === 'function') {
+                            selfWorker.onerror(err);
+                        }
+                    });
+            }
+        };
+
+        Worker.prototype.postMessage = function(data) {
+            const selfWorker = this;
+            setTimeout(function() {
+                if (selfWorker.__workerContext && typeof selfWorker.__workerContext.onmessage === 'function') {
+                    selfWorker.__workerContext.onmessage(new MessageEvent('message', { data: data }));
+                }
+            }, 0);
+        };
+
+        Worker.prototype.terminate = function() {
+            this.__workerContext = null;
+        };
 
         if (document.body) {
             window.__setupElementProperties(document.body);

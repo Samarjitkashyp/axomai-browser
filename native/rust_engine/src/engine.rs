@@ -1,4 +1,7 @@
-use crate::css_parser::{style_tree, CSSParser, Rule, DEFAULT_UA_STYLES};
+use crate::css_parser::{
+    interpolate_style_value, parse_animation_shorthand, parse_transition_shorthand, style_tree,
+    CSSParser, KeyframeAnimation, Rule, DEFAULT_UA_STYLES,
+};
 use crate::html_parser::{HTMLParser, NodePtr, NodeType};
 use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
@@ -9,7 +12,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 static NEXT_ENGINE_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -58,6 +61,8 @@ pub struct AxomaiEngine {
     pub status_message: String,
     pub js_engine: V8JSEngine,
     pub active_css_rules: Vec<Rule>,
+    pub active_keyframes: HashMap<String, KeyframeAnimation>,
+    pub animation_start_time: Option<Instant>,
     pub is_dirty: bool,
     pub history: Vec<HistoryEntry>,
     pub history_index: usize,
@@ -106,6 +111,8 @@ impl AxomaiEngine {
             status_message: "Ready".to_string(),
             js_engine,
             active_css_rules: Vec::new(),
+            active_keyframes: HashMap::new(),
+            animation_start_time: Some(Instant::now()),
             is_dirty: true,
             history: Vec::new(),
             history_index: 0,
@@ -429,12 +436,14 @@ impl AxomaiEngine {
         extract_style_tags(&dom_root, &mut author_css_list);
         let author_css = author_css_list.join("\n");
 
-        let ua_rules = CSSParser::new(DEFAULT_UA_STYLES).parse();
-        let author_rules = CSSParser::new(&author_css).parse();
-        let mut all_rules = ua_rules;
-        all_rules.extend(author_rules);
+        let ua_sheet = CSSParser::new(DEFAULT_UA_STYLES).parse_stylesheet();
+        let author_sheet = CSSParser::new(&author_css).parse_stylesheet();
+        let mut all_rules = ua_sheet.rules;
+        all_rules.extend(author_sheet.rules);
 
         self.active_css_rules = all_rules;
+        self.active_keyframes = author_sheet.keyframes;
+        self.animation_start_time = Some(Instant::now());
         self.dom_root = Some(dom_root);
 
         // 5. Restyle, Layout & Display List
@@ -535,6 +544,28 @@ impl AxomaiEngine {
             }
             self.is_dirty = true;
         }
+    }
+
+    /// Advances active CSS @keyframes and transitions by elapsed time and triggers repainting
+    pub fn tick_animations(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
+        if self.active_keyframes.is_empty() {
+            return false;
+        }
+        let start = match self.animation_start_time {
+            Some(t) => t,
+            None => return false,
+        };
+        let elapsed_sec = start.elapsed().as_secs_f32();
+
+        let mut mutated = false;
+        if let Some(ref dom_root) = self.dom_root {
+            apply_node_animations(dom_root, elapsed_sec, &self.active_keyframes, &mut mutated);
+        }
+
+        if mutated {
+            self.restyle_and_relayout(viewport_w, viewport_h);
+        }
+        mutated
     }
 
     pub fn handle_scroll(&mut self, delta_y: f32) -> bool {
@@ -1284,6 +1315,54 @@ fn extract_title_tag(node: &NodePtr, title: &mut String) {
     }
     for child in &b.children {
         extract_title_tag(child, title);
+    }
+}
+
+fn apply_node_animations(
+    node: &NodePtr,
+    elapsed_sec: f32,
+    keyframes: &HashMap<String, KeyframeAnimation>,
+    mutated: &mut bool,
+) {
+    {
+        let mut b = node.borrow_mut();
+        if let NodeType::Element { ref mut style, .. } = b.node_type {
+            if let Some(anim_val) = style.get("animation").or_else(|| style.get("animation-name")).cloned() {
+                let specs = parse_animation_shorthand(&anim_val);
+                for spec in specs {
+                    if let Some(kf) = keyframes.get(&spec.name) {
+                        let duration = if spec.duration_sec > 0.0 { spec.duration_sec } else { 1.0 };
+                        let active_time = (elapsed_sec - spec.delay_sec).max(0.0);
+                        let cycle = active_time / duration;
+                        if cycle < spec.iteration_count {
+                            let progress_in_cycle = cycle.fract();
+                            let effective_progress = if spec.direction == "reverse" {
+                                1.0 - progress_in_cycle
+                            } else if spec.direction == "alternate" {
+                                if (cycle.floor() as u64) % 2 == 1 {
+                                    1.0 - progress_in_cycle
+                                } else {
+                                    progress_in_cycle
+                                }
+                            } else {
+                                progress_in_cycle
+                            };
+                            let solved_p = spec.timing_fn.solve(effective_progress);
+                            let sampled = kf.sample(solved_p);
+                            for (k, v) in sampled {
+                                style.insert(k, v);
+                            }
+                            *mutated = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let children = node.borrow().children.clone();
+    for child in children {
+        apply_node_animations(&child, elapsed_sec, keyframes, mutated);
     }
 }
 
