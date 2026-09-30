@@ -822,11 +822,37 @@ impl AxomaiEngine {
                 json.push(',');
             }
             match cmd {
-                DisplayCommand::DrawRect { x1, y1, x2, y2, color } => {
+                DisplayCommand::DrawRect { x1, y1, x2, y2, color, border_radius } => {
                     json.push_str(&format!(
-                        r#"{{"type":"rect","x1":{},"y1":{},"x2":{},"y2":{},"color":"{}"}}"#,
-                        x1, y1 - scroll_y, x2, y2 - scroll_y, color
+                        r#"{{"type":"rect","x1":{},"y1":{},"x2":{},"y2":{},"color":"{}","borderRadius":{}}}"#,
+                        x1, y1 - scroll_y, x2, y2 - scroll_y, color, border_radius
                     ));
+                }
+                DisplayCommand::DrawBoxShadow {
+                    x,
+                    y,
+                    width,
+                    height,
+                    offset_x,
+                    offset_y,
+                    blur_radius,
+                    spread_radius,
+                    color,
+                    border_radius,
+                } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"boxShadow","x":{},"y":{},"width":{},"height":{},"offsetX":{},"offsetY":{},"blur":{},"spread":{},"color":"{}","borderRadius":{}}}"#,
+                        x, y - scroll_y, width, height, offset_x, offset_y, blur_radius, spread_radius, color, border_radius
+                    ));
+                }
+                DisplayCommand::PushClip { x, y, width, height, border_radius } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"pushClip","x":{},"y":{},"width":{},"height":{},"borderRadius":{}}}"#,
+                        x, y - scroll_y, width, height, border_radius
+                    ));
+                }
+                DisplayCommand::PopClip => {
+                    json.push_str(r#"{"type":"popClip"}"#);
                 }
                 DisplayCommand::DrawText {
                     x,

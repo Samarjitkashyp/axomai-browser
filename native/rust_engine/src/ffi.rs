@@ -135,6 +135,7 @@ pub extern "C" fn axomai_engine_get_display_command(
             x2,
             y2,
             color,
+            ..
         } => {
             ffi_cmd.cmd_type = 0;
             ffi_cmd.x = *x1;
@@ -142,6 +143,25 @@ pub extern "C" fn axomai_engine_get_display_command(
             ffi_cmd.width = *x2 - *x1;
             ffi_cmd.height = *y2 - *y1;
             copy_to_c_buf(color, &mut ffi_cmd.color);
+        }
+        DisplayCommand::DrawBoxShadow {
+            x,
+            y,
+            width,
+            height,
+            color,
+            ..
+        } => {
+            ffi_cmd.cmd_type = 0; // fallback to background rect if using older FFI
+            ffi_cmd.x = *x;
+            ffi_cmd.y = *y;
+            ffi_cmd.width = *width;
+            ffi_cmd.height = *height;
+            copy_to_c_buf(color, &mut ffi_cmd.color);
+        }
+        DisplayCommand::PushClip { .. } | DisplayCommand::PopClip => {
+            // Non-rendering control commands
+            return false;
         }
         DisplayCommand::DrawText {
             x,

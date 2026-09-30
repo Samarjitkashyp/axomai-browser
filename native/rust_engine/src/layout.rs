@@ -246,6 +246,11 @@ pub struct LayoutBox {
     pub value: String,
     pub placeholder: String,
     pub is_focused: bool,
+    pub z_index: i32,
+    pub is_positioned: bool,
+    pub overflow: String,
+    pub border_radius: f32,
+    pub box_shadow: String,
 }
 
 impl LayoutBox {
@@ -254,6 +259,13 @@ impl LayoutBox {
         let font_weight = style.get("font-weight").cloned().unwrap_or_else(|| "normal".to_string());
         let font_style = style.get("font-style").cloned().unwrap_or_else(|| "normal".to_string());
         let font_family = style.get("font-family").cloned().unwrap_or_else(|| "sans-serif".to_string());
+
+        let z_index = style.get("z-index").and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
+        let pos = style.get("position").map(|s| s.as_str()).unwrap_or("static");
+        let is_positioned = pos == "relative" || pos == "absolute" || pos == "fixed" || pos == "sticky";
+        let overflow = style.get("overflow").cloned().unwrap_or_else(|| "visible".to_string());
+        let border_radius = parse_px(style.get("border-radius").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
+        let box_shadow = style.get("box-shadow").cloned().unwrap_or_default();
 
         LayoutBox {
             box_type,
@@ -274,6 +286,11 @@ impl LayoutBox {
             value: String::new(),
             placeholder: String::new(),
             is_focused: false,
+            z_index,
+            is_positioned,
+            overflow,
+            border_radius,
+            box_shadow,
         }
     }
 
