@@ -506,7 +506,7 @@ impl V8JSEngine {
         self.dispatch_pointer_event("click", target_selector, click_x, click_y, 0)
     }
 
-    /// Dispatch pointer/mouse events (pointerdown, pointerup, pointermove, mousedown, mouseup, mousemove, click) with true event bubbling
+    /// Dispatch pointer/mouse events (pointerdown, pointerup, pointermove, mousedown, mouseup, mousemove, click) with true event bubbling and capture routing
     pub fn dispatch_pointer_event(
         &mut self,
         event_type: &str,
@@ -518,27 +518,64 @@ impl V8JSEngine {
         let js = format!(
             r#"
             (function() {{
-                const el = document.querySelector("{sel}") || document.getElementById("{sel}") || document.body;
-                if (el) {{
-                    const opts = {{
-                        clientX: {x},
-                        clientY: {y},
-                        button: {btn},
-                        buttons: {btns},
-                        bubbles: true,
-                        cancelable: true
-                    }};
-                    if (typeof PointerEvent === 'function') {{
-                        const pe = new PointerEvent("{ev}", opts);
-                        el.dispatchEvent(pe);
-                    }}
-                    if (typeof MouseEvent === 'function') {{
-                        const me = new MouseEvent("{mev}", opts);
-                        el.dispatchEvent(me);
-                    }}
-                    return true;
+                let el = null;
+                const captured = (window.__capturedPointerElements && window.__capturedPointerElements.get(1));
+                if (captured) {{
+                    el = captured;
+                }} else {{
+                    el = document.querySelector("{sel}") || document.getElementById("{sel}") || document.body;
                 }}
-                return false;
+
+                if (!el) return false;
+
+                const opts = {{
+                    clientX: {x},
+                    clientY: {y},
+                    button: {btn},
+                    buttons: {btns},
+                    bubbles: true,
+                    cancelable: true,
+                    pointerId: 1,
+                    pointerType: 'mouse',
+                    isPrimary: true
+                }};
+
+                const evType = "{ev}";
+
+                if (evType === 'pointermove') {{
+                    const lastEl = window.__lastHoveredElement;
+                    if (lastEl !== el) {{
+                        if (lastEl) {{
+                            if (typeof PointerEvent === 'function') {{
+                                lastEl.dispatchEvent(new PointerEvent('pointerout', opts));
+                                lastEl.dispatchEvent(new PointerEvent('pointerleave', Object.assign({{}}, opts, {{ bubbles: false }})));
+                            }}
+                            if (typeof MouseEvent === 'function') {{
+                                lastEl.dispatchEvent(new MouseEvent('mouseout', opts));
+                                lastEl.dispatchEvent(new MouseEvent('mouseleave', Object.assign({{}}, opts, {{ bubbles: false }})));
+                            }}
+                        }}
+                        if (typeof PointerEvent === 'function') {{
+                            el.dispatchEvent(new PointerEvent('pointerover', opts));
+                            el.dispatchEvent(new PointerEvent('pointerenter', Object.assign({{}}, opts, {{ bubbles: false }})));
+                        }}
+                        if (typeof MouseEvent === 'function') {{
+                            el.dispatchEvent(new MouseEvent('mouseover', opts));
+                            el.dispatchEvent(new MouseEvent('mouseenter', Object.assign({{}}, opts, {{ bubbles: false }})));
+                        }}
+                        window.__lastHoveredElement = el;
+                    }}
+                }}
+
+                if (typeof PointerEvent === 'function') {{
+                    const pe = new PointerEvent(evType, opts);
+                    el.dispatchEvent(pe);
+                }}
+                if (typeof MouseEvent === 'function') {{
+                    const me = new MouseEvent("{mev}", opts);
+                    el.dispatchEvent(me);
+                }}
+                return true;
             }})();
             "#,
             sel = target_selector,
@@ -2002,6 +2039,96 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
         function setupEventTarget(obj) {
             if (!obj) return obj;
             obj.__listeners = {};
+            obj.__pointerCaptures = new Set();
+            obj.__scrollTop = 0;
+            obj.__scrollLeft = 0;
+            obj.__scrollHeight = 0;
+            obj.__scrollWidth = 0;
+
+            // Pointer Capture Spec APIs
+            obj.setPointerCapture = function(pointerId) {
+                const pid = Number(pointerId) || 1;
+                this.__pointerCaptures.add(pid);
+                window.__capturedPointerElements = window.__capturedPointerElements || new Map();
+                window.__capturedPointerElements.set(pid, this);
+            };
+
+            obj.releasePointerCapture = function(pointerId) {
+                const pid = Number(pointerId) || 1;
+                this.__pointerCaptures.delete(pid);
+                if (window.__capturedPointerElements) {
+                    window.__capturedPointerElements.delete(pid);
+                }
+            };
+
+            obj.hasPointerCapture = function(pointerId) {
+                return this.__pointerCaptures.has(Number(pointerId) || 1);
+            };
+
+            // Element Scrolling APIs
+            Object.defineProperty(obj, 'scrollTop', {
+                get: function() { return this.__scrollTop || 0; },
+                set: function(val) {
+                    this.__scrollTop = Math.max(0, Number(val) || 0);
+                    if (typeof window.__native_set_element_scroll === 'function' && this.id) {
+                        window.__native_set_element_scroll(this.id, this.__scrollLeft || 0, this.__scrollTop);
+                    }
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'scrollLeft', {
+                get: function() { return this.__scrollLeft || 0; },
+                set: function(val) {
+                    this.__scrollLeft = Math.max(0, Number(val) || 0);
+                    if (typeof window.__native_set_element_scroll === 'function' && this.id) {
+                        window.__native_set_element_scroll(this.id, this.__scrollLeft, this.__scrollTop || 0);
+                    }
+                },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'scrollHeight', {
+                get: function() { return this.__scrollHeight || this.clientHeight || 0; },
+                set: function(val) { this.__scrollHeight = Number(val) || 0; },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(obj, 'scrollWidth', {
+                get: function() { return this.__scrollWidth || this.clientWidth || 0; },
+                set: function(val) { this.__scrollWidth = Number(val) || 0; },
+                configurable: true,
+                enumerable: true
+            });
+
+            obj.scrollTo = function(x, y) {
+                let targetX = 0, targetY = 0;
+                if (typeof x === 'object' && x !== null) {
+                    targetX = x.left !== undefined ? x.left : this.scrollLeft;
+                    targetY = x.top !== undefined ? x.top : this.scrollTop;
+                } else {
+                    targetX = Number(x) || 0;
+                    targetY = Number(y) || 0;
+                }
+                this.scrollLeft = targetX;
+                this.scrollTop = targetY;
+            };
+            obj.scroll = obj.scrollTo;
+
+            obj.scrollBy = function(dx, dy) {
+                let targetX = 0, targetY = 0;
+                if (typeof dx === 'object' && dx !== null) {
+                    targetX = dx.left || 0;
+                    targetY = dx.top || 0;
+                } else {
+                    targetX = Number(dx) || 0;
+                    targetY = Number(dy) || 0;
+                }
+                this.scrollTo(this.scrollLeft + targetX, this.scrollTop + targetY);
+            };
 
             obj.addEventListener = function(type, listener, options) {
                 if (!listener) return;

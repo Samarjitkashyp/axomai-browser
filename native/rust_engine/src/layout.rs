@@ -193,92 +193,165 @@ pub fn parse_border_properties(style: &mut HashMap<String, String>, containing_w
     border_widths
 }
 
+/// Multiplies two 2D affine transform matrices [a, b, c, d, tx, ty]
+pub fn multiply_transforms(m1: [f32; 6], m2: [f32; 6]) -> [f32; 6] {
+    let [a1, b1, c1, d1, tx1, ty1] = m1;
+    let [a2, b2, c2, d2, tx2, ty2] = m2;
+
+    [
+        a1 * a2 + c1 * b2,
+        b1 * a2 + d1 * b2,
+        a1 * c2 + c1 * d2,
+        b1 * c2 + d1 * d2,
+        a1 * tx2 + c1 * ty2 + tx1,
+        b1 * tx2 + d1 * ty2 + ty1,
+    ]
+}
+
+/// Computes the inverse of a 2D affine transform matrix [a, b, c, d, tx, ty]
+pub fn invert_transform(m: [f32; 6]) -> Option<[f32; 6]> {
+    let [a, b, c, d, tx, ty] = m;
+    let det = a * d - b * c;
+    if det.abs() < 1e-6 {
+        return None;
+    }
+    let inv_det = 1.0 / det;
+    Some([
+        d * inv_det,
+        -b * inv_det,
+        -c * inv_det,
+        a * inv_det,
+        (c * ty - d * tx) * inv_det,
+        (b * tx - a * ty) * inv_det,
+    ])
+}
+
+/// Applies a 2D affine transform matrix to a point (x, y)
+pub fn transform_point(m: [f32; 6], x: f32, y: f32) -> (f32, f32) {
+    let [a, b, c, d, tx, ty] = m;
+    (a * x + c * y + tx, b * x + d * y + ty)
+}
+
 pub fn parse_transform_matrix(transform_str: &str, width: f32, height: f32) -> Option<[f32; 6]> {
     let trimmed = transform_str.trim();
     if trimmed.is_empty() || trimmed == "none" {
         return None;
     }
 
-    let mut a: f32 = 1.0;
-    let mut b: f32 = 0.0;
-    let mut c: f32 = 0.0;
-    let mut d: f32 = 1.0;
-    let mut tx: f32 = 0.0;
-    let mut ty: f32 = 0.0;
+    let mut current_matrix = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut has_transform = false;
 
-    if let Some(start) = trimmed.find("translate(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = &trimmed[start + 10..start + end];
-            let parts: Vec<&str> = inner.split(',').collect();
-            if !parts.is_empty() {
-                tx = parse_length(parts[0], width, 0.0);
-            }
-            if parts.len() > 1 {
-                ty = parse_length(parts[1], height, 0.0);
-            }
-        }
-    } else if let Some(start) = trimmed.find("translateX(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = &trimmed[start + 11..start + end];
-            tx = parse_length(inner, width, 0.0);
-        }
-    } else if let Some(start) = trimmed.find("translateY(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = &trimmed[start + 11..start + end];
-            ty = parse_length(inner, height, 0.0);
-        }
-    }
+    let mut remaining = trimmed;
+    while let Some(open_paren) = remaining.find('(') {
+        let func_name = remaining[..open_paren].trim();
+        if let Some(close_paren) = remaining[open_paren..].find(')') {
+            let actual_close = open_paren + close_paren;
+            let args_str = &remaining[open_paren + 1..actual_close];
+            let name = func_name.split_whitespace().last().unwrap_or(func_name);
 
-    if let Some(start) = trimmed.find("rotate(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = trimmed[start + 7..start + end].trim();
-            let rad = if inner.ends_with("deg") {
-                inner[..inner.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians()
-            } else if inner.ends_with("rad") {
-                inner[..inner.len() - 3].trim().parse::<f32>().unwrap_or(0.0)
-            } else {
-                inner.parse::<f32>().unwrap_or(0.0).to_radians()
-            };
-            a = rad.cos();
-            b = rad.sin();
-            c = -rad.sin();
-            d = rad.cos();
-        }
-    }
+            let mut m = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+            let mut valid_func = true;
 
-    if let Some(start) = trimmed.find("scale(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = &trimmed[start + 6..start + end];
-            let parts: Vec<&str> = inner.split(',').collect();
-            if !parts.is_empty() {
-                let sx = parts[0].trim().parse::<f32>().unwrap_or(1.0);
-                let sy = if parts.len() > 1 { parts[1].trim().parse::<f32>().unwrap_or(sx) } else { sx };
-                a *= sx;
-                d *= sy;
-            }
-        }
-    }
-
-    if let Some(start) = trimmed.find("matrix(") {
-        if let Some(end) = trimmed[start..].find(')') {
-            let inner = &trimmed[start + 7..start + end];
-            let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();
-            if parts.len() == 6 {
-                if let (Ok(m_a), Ok(m_b), Ok(m_c), Ok(m_d), Ok(m_tx), Ok(m_ty)) = (
-                    parts[0].parse::<f32>(),
-                    parts[1].parse::<f32>(),
-                    parts[2].parse::<f32>(),
-                    parts[3].parse::<f32>(),
-                    parts[4].parse::<f32>(),
-                    parts[5].parse::<f32>(),
-                ) {
-                    return Some([m_a, m_b, m_c, m_d, m_tx, m_ty]);
+            match name {
+                "translate" => {
+                    let parts: Vec<&str> = args_str.split(',').collect();
+                    let tx = if !parts.is_empty() { parse_length(parts[0], width, 0.0) } else { 0.0 };
+                    let ty = if parts.len() > 1 { parse_length(parts[1], height, 0.0) } else { 0.0 };
+                    m = [1.0, 0.0, 0.0, 1.0, tx, ty];
+                }
+                "translateX" => {
+                    let tx = parse_length(args_str, width, 0.0);
+                    m = [1.0, 0.0, 0.0, 1.0, tx, 0.0];
+                }
+                "translateY" => {
+                    let ty = parse_length(args_str, height, 0.0);
+                    m = [1.0, 0.0, 0.0, 1.0, 0.0, ty];
+                }
+                "rotate" => {
+                    let arg = args_str.trim();
+                    let rad = if arg.ends_with("deg") {
+                        arg[..arg.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians()
+                    } else if arg.ends_with("rad") {
+                        arg[..arg.len() - 3].trim().parse::<f32>().unwrap_or(0.0)
+                    } else if arg.ends_with("turn") {
+                        arg[..arg.len() - 4].trim().parse::<f32>().unwrap_or(0.0) * std::f32::consts::TAU
+                    } else {
+                        arg.parse::<f32>().unwrap_or(0.0).to_radians()
+                    };
+                    m = [rad.cos(), rad.sin(), -rad.sin(), rad.cos(), 0.0, 0.0];
+                }
+                "scale" => {
+                    let parts: Vec<&str> = args_str.split(',').collect();
+                    let sx = if !parts.is_empty() { parts[0].trim().parse::<f32>().unwrap_or(1.0) } else { 1.0 };
+                    let sy = if parts.len() > 1 { parts[1].trim().parse::<f32>().unwrap_or(sx) } else { sx };
+                    m = [sx, 0.0, 0.0, sy, 0.0, 0.0];
+                }
+                "scaleX" => {
+                    let sx = args_str.trim().parse::<f32>().unwrap_or(1.0);
+                    m = [sx, 0.0, 0.0, 1.0, 0.0, 0.0];
+                }
+                "scaleY" => {
+                    let sy = args_str.trim().parse::<f32>().unwrap_or(1.0);
+                    m = [1.0, 0.0, 0.0, sy, 0.0, 0.0];
+                }
+                "skew" => {
+                    let parts: Vec<&str> = args_str.split(',').collect();
+                    let ax = if !parts.is_empty() {
+                        let a = parts[0].trim();
+                        if a.ends_with("deg") { a[..a.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians() } else { a.parse::<f32>().unwrap_or(0.0).to_radians() }
+                    } else { 0.0 };
+                    let ay = if parts.len() > 1 {
+                        let a = parts[1].trim();
+                        if a.ends_with("deg") { a[..a.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians() } else { a.parse::<f32>().unwrap_or(0.0).to_radians() }
+                    } else { 0.0 };
+                    m = [1.0, ay.tan(), ax.tan(), 1.0, 0.0, 0.0];
+                }
+                "skewX" => {
+                    let a = args_str.trim();
+                    let rad = if a.ends_with("deg") { a[..a.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians() } else { a.parse::<f32>().unwrap_or(0.0).to_radians() };
+                    m = [1.0, 0.0, rad.tan(), 1.0, 0.0, 0.0];
+                }
+                "skewY" => {
+                    let a = args_str.trim();
+                    let rad = if a.ends_with("deg") { a[..a.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians() } else { a.parse::<f32>().unwrap_or(0.0).to_radians() };
+                    m = [1.0, rad.tan(), 0.0, 1.0, 0.0, 0.0];
+                }
+                "matrix" => {
+                    let parts: Vec<&str> = args_str.split(',').map(|s| s.trim()).collect();
+                    if parts.len() == 6 {
+                        if let (Ok(m_a), Ok(m_b), Ok(m_c), Ok(m_d), Ok(m_tx), Ok(m_ty)) = (
+                            parts[0].parse::<f32>(),
+                            parts[1].parse::<f32>(),
+                            parts[2].parse::<f32>(),
+                            parts[3].parse::<f32>(),
+                            parts[4].parse::<f32>(),
+                            parts[5].parse::<f32>(),
+                        ) {
+                            m = [m_a, m_b, m_c, m_d, m_tx, m_ty];
+                        }
+                    }
+                }
+                _ => {
+                    valid_func = false;
                 }
             }
+
+            if valid_func {
+                current_matrix = multiply_transforms(current_matrix, m);
+                has_transform = true;
+            }
+
+            remaining = &remaining[actual_close + 1..];
+        } else {
+            break;
         }
     }
 
-    Some([a, b, c, d, tx, ty])
+    if has_transform {
+        Some(current_matrix)
+    } else {
+        None
+    }
 }
 
 pub fn get_href(node: &NodePtr) -> String {
@@ -909,15 +982,26 @@ impl LayoutBox {
         }
     }
 
-    /// Accurate hit-testing traversing stacking contexts (highest z-index layer tested first) and accounting for nested scroll offsets
+    /// Accurate hit-testing traversing stacking contexts (highest z-index layer tested first),
+    /// accounting for 2D CSS transforms (via inverse matrix point mapping) and nested scroll offsets
     pub fn hit_test(&self, target_x: f32, target_y: f32) -> Option<&LayoutBox> {
-        let inside = target_x >= self.x && target_x <= self.x + self.width && target_y >= self.y && target_y <= self.y + self.height;
+        let (local_x, local_y) = if let Some(matrix) = self.transform_matrix {
+            if let Some(inv) = invert_transform(matrix) {
+                transform_point(inv, target_x, target_y)
+            } else {
+                (target_x, target_y)
+            }
+        } else {
+            (target_x, target_y)
+        };
+
+        let inside = local_x >= self.x && local_x <= self.x + self.width && local_y >= self.y && local_y <= self.y + self.height;
         if !inside && self.overflow == "hidden" {
             return None;
         }
 
-        let inner_target_x = target_x + self.scroll_left;
-        let inner_target_y = target_y + self.scroll_top;
+        let inner_target_x = local_x + self.scroll_left;
+        let inner_target_y = local_y + self.scroll_top;
 
         let mut sorted_children: Vec<&LayoutBox> = self.children.iter().collect();
         sorted_children.sort_by(|a, b| {
@@ -939,15 +1023,25 @@ impl LayoutBox {
         }
     }
 
-    /// Finds the deepest scroll container containing target point (x, y) that has scrollable content
+    /// Finds the deepest scroll container containing target point (x, y) that has scrollable content, accounting for transforms
     pub fn find_scroll_container_at_mut(&mut self, target_x: f32, target_y: f32) -> Option<&mut LayoutBox> {
-        let inside = target_x >= self.x && target_x <= self.x + self.width && target_y >= self.y && target_y <= self.y + self.height;
+        let (local_x, local_y) = if let Some(matrix) = self.transform_matrix {
+            if let Some(inv) = invert_transform(matrix) {
+                transform_point(inv, target_x, target_y)
+            } else {
+                (target_x, target_y)
+            }
+        } else {
+            (target_x, target_y)
+        };
+
+        let inside = local_x >= self.x && local_x <= self.x + self.width && local_y >= self.y && local_y <= self.y + self.height;
         if !inside {
             return None;
         }
 
-        let inner_x = target_x + self.scroll_left;
-        let inner_y = target_y + self.scroll_top;
+        let inner_x = local_x + self.scroll_left;
+        let inner_y = local_y + self.scroll_top;
 
         for child in self.children.iter_mut().rev() {
             if let Some(sc) = child.find_scroll_container_at_mut(inner_x, inner_y) {

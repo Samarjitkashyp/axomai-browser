@@ -397,14 +397,15 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
         display_list.push(DisplayCommand::PopClip);
     }
 
-    // 10. Native Scrollbar Rendering for scroll containers
-    if (box_tree.overflow == "auto" || box_tree.overflow == "scroll") && box_tree.scroll_height > box_tree.height && box_tree.height > 30.0 {
+    // 10. Native Scrollbar Rendering for scroll containers (Vertical & Horizontal)
+    let is_scrollable = box_tree.overflow == "auto" || box_tree.overflow == "scroll";
+    if is_scrollable && box_tree.scroll_height > box_tree.height && box_tree.height > 30.0 {
         let bar_width = 8.0;
         let track_x = cur_x + box_tree.width - bar_width - 1.0;
         let track_y = cur_y;
-        let track_h = box_tree.height;
+        let track_h = box_tree.height - if box_tree.scroll_width > box_tree.width { 8.0 } else { 0.0 };
 
-        // Track
+        // Vertical Track
         display_list.push(DisplayCommand::DrawRect {
             x1: track_x,
             y1: track_y,
@@ -414,7 +415,7 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
             border_radius: 4.0,
         });
 
-        // Thumb
+        // Vertical Thumb
         let thumb_ratio = (box_tree.height / box_tree.scroll_height).clamp(0.08, 1.0);
         let thumb_h = (track_h * thumb_ratio).max(18.0);
         let max_scroll = (box_tree.scroll_height - box_tree.height).max(1.0);
@@ -425,6 +426,38 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
             y1: track_y + thumb_top,
             x2: track_x + bar_width - 1.0,
             y2: track_y + thumb_top + thumb_h,
+            color: "rgba(0,0,0,0.32)".to_string(),
+            border_radius: 3.0,
+        });
+    }
+
+    if is_scrollable && box_tree.scroll_width > box_tree.width && box_tree.width > 30.0 {
+        let bar_height = 8.0;
+        let track_x = cur_x;
+        let track_y = cur_y + box_tree.height - bar_height - 1.0;
+        let track_w = box_tree.width - if box_tree.scroll_height > box_tree.height { 8.0 } else { 0.0 };
+
+        // Horizontal Track
+        display_list.push(DisplayCommand::DrawRect {
+            x1: track_x,
+            y1: track_y,
+            x2: track_x + track_w,
+            y2: track_y + bar_height,
+            color: "rgba(0,0,0,0.06)".to_string(),
+            border_radius: 4.0,
+        });
+
+        // Horizontal Thumb
+        let thumb_ratio = (box_tree.width / box_tree.scroll_width).clamp(0.08, 1.0);
+        let thumb_w = (track_w * thumb_ratio).max(18.0);
+        let max_scroll_x = (box_tree.scroll_width - box_tree.width).max(1.0);
+        let thumb_left = (box_tree.scroll_left / max_scroll_x) * (track_w - thumb_w);
+
+        display_list.push(DisplayCommand::DrawRect {
+            x1: track_x + thumb_left,
+            y1: track_y + 1.0,
+            x2: track_x + thumb_left + thumb_w,
+            y2: track_y + bar_height - 1.0,
             color: "rgba(0,0,0,0.32)".to_string(),
             border_radius: 3.0,
         });

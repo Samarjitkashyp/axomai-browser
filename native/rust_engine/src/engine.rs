@@ -75,8 +75,11 @@ pub struct AxomaiEngine {
     pub dom_content_loaded_dispatched: bool,
     pub load_dispatched: bool,
     pub is_dragging_scrollbar: bool,
+    pub drag_is_horizontal: bool,
+    pub drag_start_x: f32,
     pub drag_start_y: f32,
     pub drag_initial_scroll: f32,
+    pub drag_initial_scroll_x: f32,
     pub drag_container_pos: Option<(f32, f32)>,
 }
 
@@ -120,8 +123,11 @@ impl AxomaiEngine {
             dom_content_loaded_dispatched: false,
             load_dispatched: false,
             is_dragging_scrollbar: false,
+            drag_is_horizontal: false,
+            drag_start_x: 0.0,
             drag_start_y: 0.0,
             drag_initial_scroll: 0.0,
+            drag_initial_scroll_x: 0.0,
             drag_container_pos: None,
         }
     }
@@ -729,15 +735,28 @@ impl AxomaiEngine {
     pub fn handle_pointer_down(&mut self, x: f32, y: f32, button: i32) -> Option<String> {
         let abs_y = y + self.scroll_y;
 
-        // 1. Check if clicking scrollbar on an inner scroll container
+        // 1. Check if clicking vertical or horizontal scrollbar on an inner scroll container
         let mut clicked_scrollbar = false;
         if let Some(ref mut layout_box) = self.layout_root {
             if let Some(sc) = layout_box.find_scroll_container_at_mut(x, abs_y) {
-                let track_x = sc.x + sc.width - 9.0;
-                if x >= track_x && x <= track_x + 9.0 && abs_y >= sc.y && abs_y <= sc.y + sc.height {
+                let v_track_x = sc.x + sc.width - 9.0;
+                let h_track_y = sc.y + sc.height - 9.0;
+
+                // Vertical scrollbar click
+                if sc.scroll_height > sc.height && x >= v_track_x && x <= v_track_x + 9.0 && abs_y >= sc.y && abs_y <= sc.y + sc.height {
                     self.is_dragging_scrollbar = true;
+                    self.drag_is_horizontal = false;
                     self.drag_start_y = y;
                     self.drag_initial_scroll = sc.scroll_top;
+                    self.drag_container_pos = Some((x, abs_y));
+                    clicked_scrollbar = true;
+                }
+                // Horizontal scrollbar click
+                else if sc.scroll_width > sc.width && abs_y >= h_track_y && abs_y <= h_track_y + 9.0 && x >= sc.x && x <= sc.x + sc.width {
+                    self.is_dragging_scrollbar = true;
+                    self.drag_is_horizontal = true;
+                    self.drag_start_x = x;
+                    self.drag_initial_scroll_x = sc.scroll_left;
                     self.drag_container_pos = Some((x, abs_y));
                     clicked_scrollbar = true;
                 }
@@ -767,27 +786,46 @@ impl AxomaiEngine {
     pub fn handle_pointer_move(&mut self, x: f32, y: f32) -> Option<String> {
         let abs_y = y + self.scroll_y;
 
-        // 1. If dragging scrollbar, update scroll position
+        // 1. If dragging scrollbar, update scroll position along active drag axis
         if self.is_dragging_scrollbar {
-            let dy = y - self.drag_start_y;
-            if let Some((cx, cy)) = self.drag_container_pos {
-                if let Some(ref mut layout_box) = self.layout_root {
-                    if let Some(sc) = layout_box.find_scroll_container_at_mut(cx, cy) {
-                        let max_y = (sc.scroll_height - sc.height).max(1.0);
-                        let ratio = sc.scroll_height / sc.height.max(1.0);
-                        sc.scroll_top = (self.drag_initial_scroll + dy * ratio).clamp(0.0, max_y);
+            if self.drag_is_horizontal {
+                let dx = x - self.drag_start_x;
+                if let Some((cx, cy)) = self.drag_container_pos {
+                    if let Some(ref mut layout_box) = self.layout_root {
+                        if let Some(sc) = layout_box.find_scroll_container_at_mut(cx, cy) {
+                            let max_x = (sc.scroll_width - sc.width).max(1.0);
+                            let ratio = sc.scroll_width / sc.width.max(1.0);
+                            sc.scroll_left = (self.drag_initial_scroll_x + dx * ratio).clamp(0.0, max_x);
+                        }
+                    }
+                    if let Some(ref layout_box) = self.layout_root {
+                        let mut list = Vec::new();
+                        build_display_list(layout_box, &mut list);
+                        self.display_list = list;
+                        self.is_dirty = true;
                     }
                 }
-                if let Some(ref layout_box) = self.layout_root {
-                    let mut list = Vec::new();
-                    build_display_list(layout_box, &mut list);
-                    self.display_list = list;
+            } else {
+                let dy = y - self.drag_start_y;
+                if let Some((cx, cy)) = self.drag_container_pos {
+                    if let Some(ref mut layout_box) = self.layout_root {
+                        if let Some(sc) = layout_box.find_scroll_container_at_mut(cx, cy) {
+                            let max_y = (sc.scroll_height - sc.height).max(1.0);
+                            let ratio = sc.scroll_height / sc.height.max(1.0);
+                            sc.scroll_top = (self.drag_initial_scroll + dy * ratio).clamp(0.0, max_y);
+                        }
+                    }
+                    if let Some(ref layout_box) = self.layout_root {
+                        let mut list = Vec::new();
+                        build_display_list(layout_box, &mut list);
+                        self.display_list = list;
+                        self.is_dirty = true;
+                    }
+                } else {
+                    let ratio = (self.max_scroll_y + 800.0) / 800.0;
+                    self.scroll_y = (self.drag_initial_scroll + dy * ratio).clamp(0.0, self.max_scroll_y);
                     self.is_dirty = true;
                 }
-            } else {
-                let ratio = (self.max_scroll_y + 800.0) / 800.0;
-                self.scroll_y = (self.drag_initial_scroll + dy * ratio).clamp(0.0, self.max_scroll_y);
-                self.is_dirty = true;
             }
         }
 
@@ -811,6 +849,7 @@ impl AxomaiEngine {
 
     pub fn handle_pointer_up(&mut self, x: f32, y: f32, button: i32) -> Option<String> {
         self.is_dragging_scrollbar = false;
+        self.drag_is_horizontal = false;
         self.drag_container_pos = None;
 
         let abs_y = y + self.scroll_y;
