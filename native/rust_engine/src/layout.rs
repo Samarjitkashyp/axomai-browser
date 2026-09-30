@@ -134,6 +134,65 @@ pub fn parse_edges(style: &HashMap<String, String>, prefix: &str, containing_wid
     }
 }
 
+pub fn parse_border_properties(style: &mut HashMap<String, String>, containing_width: f32) -> EdgeSizes {
+    let mut border_widths = EdgeSizes::default();
+    let mut resolved_color = style.get("border-color").cloned();
+
+    // 1. Check border shorthand: e.g. "1px solid red" or "2px #333 solid"
+    if let Some(border_shorthand) = style.get("border").cloned() {
+        let parts: Vec<&str> = border_shorthand.split_whitespace().collect();
+        for p in &parts {
+            if p.ends_with("px") || p.ends_with('%') || p.ends_with("em") || p.ends_with("rem") || p.parse::<f32>().is_ok() {
+                let w = parse_length(p, containing_width, 0.0);
+                border_widths = EdgeSizes { top: w, right: w, bottom: w, left: w };
+            } else if *p != "solid" && *p != "dashed" && *p != "dotted" && *p != "none" && *p != "hidden" && *p != "double" {
+                if resolved_color.is_none() {
+                    resolved_color = Some(p.to_string());
+                }
+            }
+        }
+    }
+
+    // 2. Check individual side shorthands: border-top, border-right, border-bottom, border-left
+    for (prop, side) in &[
+        ("border-top", "top"),
+        ("border-right", "right"),
+        ("border-bottom", "bottom"),
+        ("border-left", "left"),
+    ] {
+        if let Some(val) = style.get(*prop) {
+            for p in val.split_whitespace() {
+                if p.ends_with("px") || p.ends_with('%') || p.ends_with("em") || p.ends_with("rem") || p.parse::<f32>().is_ok() {
+                    let w = parse_length(p, containing_width, 0.0);
+                    match *side {
+                        "top" => border_widths.top = w,
+                        "right" => border_widths.right = w,
+                        "bottom" => border_widths.bottom = w,
+                        "left" => border_widths.left = w,
+                        _ => {}
+                    }
+                } else if p != "solid" && p != "dashed" && p != "dotted" && p != "none" && p != "hidden" {
+                    if resolved_color.is_none() {
+                        resolved_color = Some(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check explicit border-width
+    let explicit_widths = parse_edges(style, "border-width", containing_width);
+    if explicit_widths.top > 0.0 || explicit_widths.right > 0.0 || explicit_widths.bottom > 0.0 || explicit_widths.left > 0.0 {
+        border_widths = explicit_widths;
+    }
+
+    if let Some(ref c) = resolved_color {
+        style.entry("border-color".to_string()).or_insert_with(|| c.clone());
+    }
+
+    border_widths
+}
+
 pub fn get_href(node: &NodePtr) -> String {
     let mut curr = Some(node.clone());
     while let Some(n) = curr {
@@ -221,7 +280,7 @@ impl LayoutBox {
     pub fn layout(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
         self.dimensions.padding = parse_edges(&self.style, "padding", max_width);
         self.dimensions.margin = parse_edges(&self.style, "margin", max_width);
-        self.dimensions.border = parse_edges(&self.style, "border-width", max_width);
+        self.dimensions.border = parse_border_properties(&mut self.style, max_width);
 
         match self.box_type {
             BoxType::Flex => self.layout_flex(x, y, max_width),
@@ -321,11 +380,15 @@ impl LayoutBox {
         let gap = parse_px(self.style.get("gap").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
 
         let is_row = flex_dir == "row" || flex_dir == "row-reverse";
+        let is_reverse = flex_dir == "row-reverse" || flex_dir == "column-reverse";
 
-        let mut child_sizes: Vec<(f32, f32)> = Vec::new();
         let num_children = self.children.len();
+        let mut child_sizes: Vec<(f32, f32)> = Vec::new();
 
-        let child_avail_w = if is_row {
+        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
+
+        // 1. Initial measurement pass
+        let default_child_w = if is_row {
             if num_children > 0 {
                 let total_gap = gap * (num_children.saturating_sub(1) as f32);
                 ((content_width - total_gap) / num_children as f32).max(0.0)
@@ -337,8 +400,11 @@ impl LayoutBox {
         };
 
         for child in &mut self.children {
-            let ch_h = child.layout(self.dimensions.content.x, self.dimensions.content.y, child_avail_w);
-            let ch_w = if child.width > 0.0 { child.width } else { child_avail_w };
+            let child_explicit_w = child.style.get("width").map(|w| parse_length(w, content_width, -1.0)).unwrap_or(-1.0);
+            let target_w = if child_explicit_w >= 0.0 { child_explicit_w } else { default_child_w };
+
+            let ch_h = child.layout(self.dimensions.content.x, self.dimensions.content.y, target_w);
+            let ch_w = if child.width > 0.0 { child.width } else { target_w };
             child_sizes.push((ch_w, ch_h));
         }
 
@@ -358,13 +424,17 @@ impl LayoutBox {
             total_main_size += gap * (num_children - 1) as f32;
         }
 
-        let main_free_space = if is_row {
-            (content_width - total_main_size).max(0.0)
+        let container_main_size = if is_row {
+            content_width
+        } else if explicit_h >= 0.0 {
+            explicit_h
         } else {
-            0.0
+            total_main_size
         };
 
-        let (mut start_offset, item_spacing) = match justify {
+        let main_free_space = (container_main_size - total_main_size).max(0.0);
+
+        let (start_offset, item_spacing) = match justify {
             "center" => (main_free_space / 2.0, gap),
             "flex-end" => (main_free_space, gap),
             "space-between" => {
@@ -378,10 +448,21 @@ impl LayoutBox {
             _ => (0.0, gap),
         };
 
-        let mut cur_main = if is_row { self.dimensions.content.x + start_offset } else { self.dimensions.content.y + start_offset };
+        let indices: Vec<usize> = if is_reverse {
+            (0..num_children).rev().collect()
+        } else {
+            (0..num_children).collect()
+        };
 
-        for (idx, child) in self.children.iter_mut().enumerate() {
+        let mut cur_main = if is_row {
+            self.dimensions.content.x + start_offset
+        } else {
+            self.dimensions.content.y + start_offset
+        };
+
+        for &idx in &indices {
             let (cw, ch) = child_sizes[idx];
+            let child = &mut self.children[idx];
 
             if is_row {
                 child.x = cur_main;
@@ -390,6 +471,14 @@ impl LayoutBox {
                 let cross_y = match align_items {
                     "center" => self.dimensions.content.y + (max_cross_size - ch) / 2.0,
                     "flex-end" => self.dimensions.content.y + (max_cross_size - ch),
+                    "stretch" => {
+                        let has_explicit_h = child.style.contains_key("height");
+                        if !has_explicit_h {
+                            child.height = max_cross_size;
+                            child.dimensions.content.height = max_cross_size;
+                        }
+                        self.dimensions.content.y
+                    }
                     _ => self.dimensions.content.y,
                 };
                 child.y = cross_y;
@@ -403,6 +492,14 @@ impl LayoutBox {
                 let cross_x = match align_items {
                     "center" => self.dimensions.content.x + (content_width - cw) / 2.0,
                     "flex-end" => self.dimensions.content.x + (content_width - cw),
+                    "stretch" => {
+                        let has_explicit_w = child.style.contains_key("width");
+                        if !has_explicit_w {
+                            child.width = content_width;
+                            child.dimensions.content.width = content_width;
+                        }
+                        self.dimensions.content.x
+                    }
                     _ => self.dimensions.content.x,
                 };
                 child.x = cross_x;
@@ -412,7 +509,6 @@ impl LayoutBox {
             }
         }
 
-        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
         self.dimensions.content.height = if explicit_h >= 0.0 {
             explicit_h
         } else if is_row {
@@ -453,6 +549,13 @@ impl LayoutBox {
         max_width: f32,
     ) -> f32 {
         let text_align = self.style.get("text-align").map(|s| s.as_str()).unwrap_or("left");
+
+        // Clear previous word_boxes on text children to prevent reflow duplication
+        for &idx in inline_indices {
+            if self.children[idx].box_type == BoxType::Text {
+                self.children[idx].children.clear();
+            }
+        }
 
         struct InlineItem {
             child_idx: usize,
