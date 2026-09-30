@@ -60,6 +60,49 @@ pub fn build_display_list(box_tree: &LayoutBox, display_list: &mut Vec<DisplayCo
         }
     }
 
+    // 1b. Paint CSS borders
+    if let Some(border_color) = box_tree.style.get("border-color").or_else(|| box_tree.style.get("border")) {
+        let b = &box_tree.dimensions.border;
+        if b.top > 0.0 || b.right > 0.0 || b.bottom > 0.0 || b.left > 0.0 {
+            if b.top > 0.0 {
+                display_list.push(DisplayCommand::DrawRect {
+                    x1: box_tree.x,
+                    y1: box_tree.y,
+                    x2: box_tree.x + box_tree.width,
+                    y2: box_tree.y + b.top,
+                    color: border_color.clone(),
+                });
+            }
+            if b.bottom > 0.0 {
+                display_list.push(DisplayCommand::DrawRect {
+                    x1: box_tree.x,
+                    y1: box_tree.y + box_tree.height - b.bottom,
+                    x2: box_tree.x + box_tree.width,
+                    y2: box_tree.y + box_tree.height,
+                    color: border_color.clone(),
+                });
+            }
+            if b.left > 0.0 {
+                display_list.push(DisplayCommand::DrawRect {
+                    x1: box_tree.x,
+                    y1: box_tree.y,
+                    x2: box_tree.x + b.left,
+                    y2: box_tree.y + box_tree.height,
+                    color: border_color.clone(),
+                });
+            }
+            if b.right > 0.0 {
+                display_list.push(DisplayCommand::DrawRect {
+                    x1: box_tree.x + box_tree.width - b.right,
+                    y1: box_tree.y,
+                    x2: box_tree.x + box_tree.width,
+                    y2: box_tree.y + box_tree.height,
+                    color: border_color.clone(),
+                });
+            }
+        }
+    }
+
     // 2. Leaf Text Node
     if box_tree.box_type == BoxType::Text && !box_tree.word.is_empty() && box_tree.children.is_empty() {
         let color = box_tree

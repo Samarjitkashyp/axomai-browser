@@ -1,17 +1,137 @@
 use crate::html_parser::{NodePtr, NodeType};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EdgeSizes {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Dimensions {
+    pub content: Rect,
+    pub padding: EdgeSizes,
+    pub border: EdgeSizes,
+    pub margin: EdgeSizes,
+}
+
+impl Dimensions {
+    pub fn padding_box(&self) -> Rect {
+        Rect {
+            x: self.content.x - self.padding.left,
+            y: self.content.y - self.padding.top,
+            width: self.content.width + self.padding.left + self.padding.right,
+            height: self.content.height + self.padding.top + self.padding.bottom,
+        }
+    }
+
+    pub fn border_box(&self) -> Rect {
+        let p = self.padding_box();
+        Rect {
+            x: p.x - self.border.left,
+            y: p.y - self.border.top,
+            width: p.width + self.border.left + self.border.right,
+            height: p.height + self.border.top + self.border.bottom,
+        }
+    }
+
+    pub fn margin_box(&self) -> Rect {
+        let b = self.border_box();
+        Rect {
+            x: b.x - self.margin.left,
+            y: b.y - self.margin.top,
+            width: b.width + self.margin.left + self.margin.right,
+            height: b.height + self.margin.top + self.margin.bottom,
+        }
+    }
+}
+
 pub fn parse_px(val: &str, default_val: f32) -> f32 {
+    parse_length(val, 0.0, default_val)
+}
+
+pub fn parse_length(val: &str, containing_len: f32, default_val: f32) -> f32 {
     let trimmed = val.trim().to_lowercase();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || trimmed == "auto" {
         return default_val;
     }
     if trimmed.ends_with("px") {
-        if let Ok(num) = trimmed[..trimmed.len() - 2].parse::<f32>() {
+        if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f32>() {
             return num;
         }
+    } else if trimmed.ends_with('%') {
+        if let Ok(pct) = trimmed[..trimmed.len() - 1].trim().parse::<f32>() {
+            return (pct / 100.0) * containing_len;
+        }
+    } else if trimmed.ends_with("em") || trimmed.ends_with("rem") {
+        let unit_len = if trimmed.ends_with("rem") { 3 } else { 2 };
+        if let Ok(mult) = trimmed[..trimmed.len() - unit_len].trim().parse::<f32>() {
+            return mult * 16.0;
+        }
+    } else if let Ok(num) = trimmed.parse::<f32>() {
+        return num;
     }
-    trimmed.parse::<f32>().unwrap_or(default_val)
+    default_val
+}
+
+pub fn parse_edges(style: &HashMap<String, String>, prefix: &str, containing_width: f32) -> EdgeSizes {
+    let base_val = style.get(prefix).map(|s| s.as_str()).unwrap_or("0px");
+    let parts: Vec<&str> = base_val.split_whitespace().collect();
+
+    let (mut top, mut right, mut bottom, mut left) = match parts.len() {
+        1 => {
+            let v = parse_length(parts[0], containing_width, 0.0);
+            (v, v, v, v)
+        }
+        2 => {
+            let v_tb = parse_length(parts[0], containing_width, 0.0);
+            let v_lr = parse_length(parts[1], containing_width, 0.0);
+            (v_tb, v_lr, v_tb, v_lr)
+        }
+        3 => {
+            let v_t = parse_length(parts[0], containing_width, 0.0);
+            let v_lr = parse_length(parts[1], containing_width, 0.0);
+            let v_b = parse_length(parts[2], containing_width, 0.0);
+            (v_t, v_lr, v_b, v_lr)
+        }
+        4 => (
+            parse_length(parts[0], containing_width, 0.0),
+            parse_length(parts[1], containing_width, 0.0),
+            parse_length(parts[2], containing_width, 0.0),
+            parse_length(parts[3], containing_width, 0.0),
+        ),
+        _ => (0.0, 0.0, 0.0, 0.0),
+    };
+
+    if let Some(v) = style.get(&format!("{}-top", prefix)) {
+        top = parse_length(v, containing_width, top);
+    }
+    if let Some(v) = style.get(&format!("{}-right", prefix)) {
+        right = parse_length(v, containing_width, right);
+    }
+    if let Some(v) = style.get(&format!("{}-bottom", prefix)) {
+        bottom = parse_length(v, containing_width, bottom);
+    }
+    if let Some(v) = style.get(&format!("{}-left", prefix)) {
+        left = parse_length(v, containing_width, left);
+    }
+
+    EdgeSizes {
+        top,
+        right,
+        bottom,
+        left,
+    }
 }
 
 pub fn get_href(node: &NodePtr) -> String {
@@ -39,15 +159,18 @@ pub fn get_href(node: &NodePtr) -> String {
 pub enum BoxType {
     Block,
     Inline,
+    Flex,
     Text,
     Image,
     Input,
     Button,
+    AnonymousBlock,
 }
 
 #[derive(Debug, Clone)]
 pub struct LayoutBox {
     pub box_type: BoxType,
+    pub dimensions: Dimensions,
     pub x: f32,
     pub y: f32,
     pub width: f32,
@@ -75,6 +198,7 @@ impl LayoutBox {
 
         LayoutBox {
             box_type,
+            dimensions: Dimensions::default(),
             x: 0.0,
             y: 0.0,
             width: 0.0,
@@ -95,50 +219,230 @@ impl LayoutBox {
     }
 
     pub fn layout(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
-        self.x = x;
-        self.y = y;
+        self.dimensions.padding = parse_edges(&self.style, "padding", max_width);
+        self.dimensions.margin = parse_edges(&self.style, "margin", max_width);
+        self.dimensions.border = parse_edges(&self.style, "border-width", max_width);
 
-        if self.box_type == BoxType::Block {
-            self.width = max_width;
+        match self.box_type {
+            BoxType::Flex => self.layout_flex(x, y, max_width),
+            BoxType::Block | BoxType::AnonymousBlock => self.layout_block(x, y, max_width),
+            BoxType::Image | BoxType::Input | BoxType::Button => self.layout_leaf(x, y),
+            _ => self.layout_block(x, y, max_width),
+        }
+    }
 
-            let margin_top = parse_px(self.style.get("margin-top").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
-            let margin_bottom = parse_px(self.style.get("margin-bottom").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
-            let padding_val = self.style.get("padding").map(|s| s.as_str()).unwrap_or("0px");
-            let padding_top = parse_px(self.style.get("padding-top").map(|s| s.as_str()).unwrap_or(padding_val), 0.0);
-            let padding_bottom = parse_px(self.style.get("padding-bottom").map(|s| s.as_str()).unwrap_or(padding_val), 0.0);
-            let padding_left = parse_px(self.style.get("padding-left").map(|s| s.as_str()).unwrap_or(padding_val), 0.0);
-            let padding_right = parse_px(self.style.get("padding-right").map(|s| s.as_str()).unwrap_or(padding_val), 0.0);
+    fn layout_block(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
 
-            let content_width = (self.width - padding_left - padding_right).max(0.0);
-            let mut cursor_y = y + margin_top + padding_top;
-            let child_x = x + padding_left;
+        let content_width = if explicit_w >= 0.0 {
+            explicit_w
+        } else {
+            (max_width
+                - self.dimensions.margin.left
+                - self.dimensions.margin.right
+                - self.dimensions.padding.left
+                - self.dimensions.padding.right
+                - self.dimensions.border.left
+                - self.dimensions.border.right)
+                .max(0.0)
+        };
 
-            let mut line_boxes = Vec::new();
-            let mut i = 0;
+        let is_margin_left_auto = self.style.get("margin-left").map(|s| s.trim() == "auto").unwrap_or(false);
+        let is_margin_right_auto = self.style.get("margin-right").map(|s| s.trim() == "auto").unwrap_or(false);
 
-            while i < self.children.len() {
-                if self.children[i].box_type == BoxType::Block {
-                    if !line_boxes.is_empty() {
-                        cursor_y += self.layout_inline_lines(&line_boxes, child_x, cursor_y, content_width);
-                        line_boxes.clear();
-                    }
-                    let child_height = self.children[i].layout(child_x, cursor_y, content_width);
-                    cursor_y += child_height;
-                } else {
-                    line_boxes.push(i);
-                }
-                i += 1;
-            }
-
-            if !line_boxes.is_empty() {
-                cursor_y += self.layout_inline_lines(&line_boxes, child_x, cursor_y, content_width);
-            }
-
-            self.height = (cursor_y - y) + margin_bottom + padding_bottom;
-            return self.height;
+        if is_margin_left_auto && is_margin_right_auto && explicit_w >= 0.0 {
+            let total_box_w = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
+            let auto_margin = ((max_width - total_box_w) / 2.0).max(0.0);
+            self.dimensions.margin.left = auto_margin;
+            self.dimensions.margin.right = auto_margin;
         }
 
-        0.0
+        self.dimensions.content.x = x + self.dimensions.margin.left + self.dimensions.border.left + self.dimensions.padding.left;
+        self.dimensions.content.y = y + self.dimensions.margin.top + self.dimensions.border.top + self.dimensions.padding.top;
+        self.dimensions.content.width = content_width;
+
+        let child_x = self.dimensions.content.x;
+        let mut cursor_y = self.dimensions.content.y;
+
+        let mut line_boxes = Vec::new();
+        let mut i = 0;
+
+        while i < self.children.len() {
+            let is_block_child = matches!(
+                self.children[i].box_type,
+                BoxType::Block | BoxType::Flex | BoxType::AnonymousBlock
+            );
+
+            if is_block_child {
+                if !line_boxes.is_empty() {
+                    cursor_y += self.layout_inline_lines(&line_boxes, child_x, cursor_y, content_width);
+                    line_boxes.clear();
+                }
+                let child_height = self.children[i].layout(child_x, cursor_y, content_width);
+                cursor_y += child_height;
+            } else {
+                line_boxes.push(i);
+            }
+            i += 1;
+        }
+
+        if !line_boxes.is_empty() {
+            cursor_y += self.layout_inline_lines(&line_boxes, child_x, cursor_y, content_width);
+        }
+
+        let computed_content_height = (cursor_y - self.dimensions.content.y).max(0.0);
+        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
+        self.dimensions.content.height = if explicit_h >= 0.0 { explicit_h } else { computed_content_height };
+
+        let border_box = self.dimensions.border_box();
+        self.x = border_box.x;
+        self.y = border_box.y;
+        self.width = border_box.width;
+        self.height = border_box.height;
+
+        self.dimensions.margin_box().height
+    }
+
+    fn layout_flex(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let explicit_w = self.style.get("width").map(|w| parse_length(w, max_width, -1.0)).unwrap_or(-1.0);
+        let content_width = if explicit_w >= 0.0 {
+            explicit_w
+        } else {
+            (max_width - self.dimensions.margin.left - self.dimensions.margin.right - self.dimensions.padding.left - self.dimensions.padding.right - self.dimensions.border.left - self.dimensions.border.right).max(0.0)
+        };
+
+        self.dimensions.content.x = x + self.dimensions.margin.left + self.dimensions.border.left + self.dimensions.padding.left;
+        self.dimensions.content.y = y + self.dimensions.margin.top + self.dimensions.border.top + self.dimensions.padding.top;
+        self.dimensions.content.width = content_width;
+
+        let flex_dir = self.style.get("flex-direction").map(|s| s.as_str()).unwrap_or("row");
+        let justify = self.style.get("justify-content").map(|s| s.as_str()).unwrap_or("flex-start");
+        let align_items = self.style.get("align-items").map(|s| s.as_str()).unwrap_or("stretch");
+        let gap = parse_px(self.style.get("gap").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
+
+        let is_row = flex_dir == "row" || flex_dir == "row-reverse";
+
+        let mut child_sizes: Vec<(f32, f32)> = Vec::new();
+        let num_children = self.children.len();
+
+        let child_avail_w = if is_row {
+            if num_children > 0 {
+                let total_gap = gap * (num_children.saturating_sub(1) as f32);
+                ((content_width - total_gap) / num_children as f32).max(0.0)
+            } else {
+                content_width
+            }
+        } else {
+            content_width
+        };
+
+        for child in &mut self.children {
+            let ch_h = child.layout(self.dimensions.content.x, self.dimensions.content.y, child_avail_w);
+            let ch_w = if child.width > 0.0 { child.width } else { child_avail_w };
+            child_sizes.push((ch_w, ch_h));
+        }
+
+        let mut max_cross_size: f32 = 0.0;
+        let mut total_main_size: f32 = 0.0;
+
+        for &(cw, ch) in &child_sizes {
+            if is_row {
+                total_main_size += cw;
+                max_cross_size = max_cross_size.max(ch);
+            } else {
+                total_main_size += ch;
+                max_cross_size = max_cross_size.max(cw);
+            }
+        }
+        if num_children > 1 {
+            total_main_size += gap * (num_children - 1) as f32;
+        }
+
+        let main_free_space = if is_row {
+            (content_width - total_main_size).max(0.0)
+        } else {
+            0.0
+        };
+
+        let (mut start_offset, item_spacing) = match justify {
+            "center" => (main_free_space / 2.0, gap),
+            "flex-end" => (main_free_space, gap),
+            "space-between" => {
+                let space = if num_children > 1 { main_free_space / (num_children - 1) as f32 } else { 0.0 };
+                (0.0, gap + space)
+            }
+            "space-around" => {
+                let space = if num_children > 0 { main_free_space / num_children as f32 } else { 0.0 };
+                (space / 2.0, gap + space)
+            }
+            _ => (0.0, gap),
+        };
+
+        let mut cur_main = if is_row { self.dimensions.content.x + start_offset } else { self.dimensions.content.y + start_offset };
+
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let (cw, ch) = child_sizes[idx];
+
+            if is_row {
+                child.x = cur_main;
+                child.dimensions.content.x = cur_main;
+
+                let cross_y = match align_items {
+                    "center" => self.dimensions.content.y + (max_cross_size - ch) / 2.0,
+                    "flex-end" => self.dimensions.content.y + (max_cross_size - ch),
+                    _ => self.dimensions.content.y,
+                };
+                child.y = cross_y;
+                child.dimensions.content.y = cross_y;
+
+                cur_main += cw + item_spacing;
+            } else {
+                child.y = cur_main;
+                child.dimensions.content.y = cur_main;
+
+                let cross_x = match align_items {
+                    "center" => self.dimensions.content.x + (content_width - cw) / 2.0,
+                    "flex-end" => self.dimensions.content.x + (content_width - cw),
+                    _ => self.dimensions.content.x,
+                };
+                child.x = cross_x;
+                child.dimensions.content.x = cross_x;
+
+                cur_main += ch + item_spacing;
+            }
+        }
+
+        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
+        self.dimensions.content.height = if explicit_h >= 0.0 {
+            explicit_h
+        } else if is_row {
+            max_cross_size
+        } else {
+            total_main_size
+        };
+
+        let border_box = self.dimensions.border_box();
+        self.x = border_box.x;
+        self.y = border_box.y;
+        self.width = border_box.width;
+        self.height = border_box.height;
+
+        self.dimensions.margin_box().height
+    }
+
+    fn layout_leaf(&mut self, x: f32, y: f32) -> f32 {
+        self.dimensions.content.x = x + self.dimensions.margin.left + self.dimensions.border.left + self.dimensions.padding.left;
+        self.dimensions.content.y = y + self.dimensions.margin.top + self.dimensions.border.top + self.dimensions.padding.top;
+        self.dimensions.content.width = self.width;
+        self.dimensions.content.height = self.height;
+
+        let border_box = self.dimensions.border_box();
+        self.x = border_box.x;
+        self.y = border_box.y;
+        self.width = border_box.width;
+        self.height = border_box.height;
+
+        self.dimensions.margin_box().height
     }
 
     fn layout_inline_lines(
@@ -148,18 +452,27 @@ impl LayoutBox {
         y: f32,
         max_width: f32,
     ) -> f32 {
-        let mut cursor_x = x;
-        let mut cursor_y = y;
+        let text_align = self.style.get("text-align").map(|s| s.as_str()).unwrap_or("left");
+
+        struct InlineItem {
+            child_idx: usize,
+            word_str: String,
+            width: f32,
+        }
+
+        let mut lines: Vec<Vec<InlineItem>> = Vec::new();
+        let mut current_line: Vec<InlineItem> = Vec::new();
+        let mut current_line_w: f32 = 0.0;
         let mut line_height: f32 = 20.0;
 
         for &idx in inline_indices {
-            let child = &mut self.children[idx];
+            let child = &self.children[idx];
 
             if child.box_type == BoxType::Text {
                 let char_w = child.font_size * 0.6;
-                line_height = line_height.max(child.font_size * 1.3);
+                line_height = line_height.max(child.font_size * 1.35);
 
-                let words: Vec<&str> = child.word.split(' ').collect();
+                let words: Vec<&str> = child.word.split_whitespace().collect();
                 let n_words = words.len();
 
                 for (w_idx, word) in words.iter().enumerate() {
@@ -167,16 +480,63 @@ impl LayoutBox {
                     let word_str = format!("{}{}", word, space);
                     let w = word_str.len() as f32 * char_w;
 
-                    if cursor_x + w > x + max_width && cursor_x > x {
-                        cursor_x = x;
-                        cursor_y += line_height;
+                    if current_line_w + w > max_width && !current_line.is_empty() {
+                        lines.push(current_line);
+                        current_line = Vec::new();
+                        current_line_w = 0.0;
                     }
 
+                    current_line_w += w;
+                    current_line.push(InlineItem {
+                        child_idx: idx,
+                        word_str,
+                        width: w,
+                    });
+                }
+            } else {
+                let w = if child.width > 0.0 { child.width } else { 50.0 };
+                let h = if child.height > 0.0 { child.height } else { 20.0 };
+                line_height = line_height.max(h);
+
+                if current_line_w + w > max_width && !current_line.is_empty() {
+                    lines.push(current_line);
+                    current_line = Vec::new();
+                    current_line_w = 0.0;
+                }
+
+                current_line_w += w;
+                current_line.push(InlineItem {
+                    child_idx: idx,
+                    word_str: String::new(),
+                    width: w,
+                });
+            }
+        }
+
+        if !current_line.is_empty() {
+            lines.push(current_line);
+        }
+
+        let mut cursor_y = y;
+
+        for line in lines {
+            let line_w: f32 = line.iter().map(|item| item.width).sum();
+            let start_x = match text_align {
+                "center" => x + ((max_width - line_w) / 2.0).max(0.0),
+                "right" => x + (max_width - line_w).max(0.0),
+                _ => x,
+            };
+
+            let mut cursor_x = start_x;
+
+            for item in line {
+                let child = &mut self.children[item.child_idx];
+                if child.box_type == BoxType::Text {
                     let mut word_box = LayoutBox::new(BoxType::Text, child.style.clone(), child.href.clone());
-                    word_box.word = word_str;
+                    word_box.word = item.word_str;
                     word_box.x = cursor_x;
                     word_box.y = cursor_y;
-                    word_box.width = w;
+                    word_box.width = item.width;
                     word_box.height = line_height;
                     word_box.font_size = child.font_size;
                     word_box.font_weight = child.font_weight.clone();
@@ -184,12 +544,16 @@ impl LayoutBox {
                     word_box.font_family = child.font_family.clone();
 
                     child.children.push(word_box);
-                    cursor_x += w;
+                } else {
+                    child.x = cursor_x;
+                    child.y = cursor_y;
                 }
+                cursor_x += item.width;
             }
+            cursor_y += line_height;
         }
 
-        (cursor_y - y) + line_height
+        (cursor_y - y).max(line_height)
     }
 }
 
@@ -260,7 +624,9 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 return Some(btn_box);
             }
 
-            let box_type = if display == "block" || display == "flex" || display == "table" {
+            let box_type = if display == "flex" {
+                BoxType::Flex
+            } else if display == "block" || display == "table" {
                 BoxType::Block
             } else {
                 BoxType::Inline
