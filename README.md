@@ -1,4 +1,4 @@
-# 🚀 Axomai Browser `v0.6.0`
+# 🚀 Axomai Browser `v0.7.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
@@ -35,6 +35,7 @@ A modern, high-performance web browser designed with an independent Rust engine 
                                                 - Multi-pass Flexbox Engine
                                                 - 2D CSS Grid & Named Areas
                                                 - Table & Cell Auto-sizing
+                                                - Form Controls (Input, Select, Textarea)
                                                                 │
                                                                 ▼
                                                     [ Layout Box Tree ]
@@ -53,7 +54,7 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v0.6.0`)
+## 📊 Subsystem Status Overview (`v0.7.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
@@ -67,6 +68,10 @@ A modern, high-performance web browser designed with an independent Rust engine 
 | **Flexbox Engine** | 🟢 | Multi-pass measurement, flex-grow/shrink distribution, flex-wrap, align-content |
 | **CSS Grid Layout** | 🟢 | `grid-template-columns/rows`, `grid-template-areas`, `auto-fit`/`auto-fill`, `minmax()`, alignments |
 | **Table Layout** | 🟢 | `<table>`, `<tr>`, `<td>`, `<th>`, `<thead>`, `<tbody>`, `<tfoot>`, border-spacing |
+| **Observers Subsystem** | 🟢 **NEW** | `ResizeObserver`, `IntersectionObserver`, `MutationObserver` with full DOM mutation hooks |
+| **Storage Subsystem** | 🟢 **NEW** | `IndexedDB` (`open`, `IDBDatabase`, `IDBObjectStore`, `IDBTransaction`), `CacheStorage` (`window.caches`) |
+| **Advanced Form Controls** | 🟢 **NEW** | `<select>` + `<option>`, `<textarea>`, checkbox/radio groups mutual exclusion, `.click()` |
+| **DOM Parser & Serializer** | 🟢 **NEW** | `DOMParser` (`parseFromString`), `XMLSerializer` (`serializeToString`) |
 | **DOM Geometry APIs** | 🟢 | `getBoundingClientRect()`, `offsetWidth/Height`, `offsetLeft/Top`, `clientWidth/Height` |
 | **DOM Traversal & Mutation** | 🟢 | `matches()`, `closest()`, `contains()`, `cloneNode()`, `insertBefore()`, `replaceChild()`, `prepend()` |
 | **W3C Event System** | 🟢 | Capturing, At-Target, Bubbling phases, Pointer capture, `preventDefault()` lifecycle |
@@ -90,6 +95,7 @@ cargo test
 ```
 
 ### Test Coverage Suites:
+- **`observers_and_storage_tests.rs`**: Select & Option DOM parsing, Textarea layout, Form input pseudo-classes (`:checked`, `:disabled`), nested table forms.
 - **`html_parser_tests.rs`**: Entity decoding (`&amp;`, `&lt;`), implicit `<tbody>` insertion, void tag self-closing.
 - **`css_selector_tests.rs`**: Direct child (`>`), adjacent sibling (`+`), descendant combinators, attribute matching, `:first-child`, `:last-child`, `:disabled`.
 - **`css_variables_and_calc_tests.rs`**: `:root` `--var` cascading and `var()` fallback resolution, `calc()`, `clamp()` mathematical evaluations.
@@ -104,8 +110,8 @@ cargo test
 - [x] **v0.5.5**: CSS Selector engine integration in `querySelector`/`querySelectorAll`, CSS Grid named areas & alignments, GitHub Actions CI.
 - [x] **v0.5.6**: CSS transitions & `@keyframes` animation engine, `requestAnimationFrame`, `getComputedStyle`, Web Workers foundation, CORS enforcement.
 - [x] **v0.6.0**: CSS Custom Properties (`var(--*)`), `calc()`/`min()`/`max()`/`clamp()`, Table Layout subsystem, HTML5 implicit `<tbody>`, DOM traversal (`matches`, `closest`, `contains`, `cloneNode`), Form APIs, and comprehensive test suites.
-- [ ] **v0.7.0**: Form controls autofill, input types, observers (`ResizeObserver`, `IntersectionObserver`, `MutationObserver`).
-- [ ] **v0.8.0**: Advanced HTTP cache, connection pooling, full IndexedDB & CacheStorage subsystems.
+- [x] **v0.7.0**: Observers (`ResizeObserver`, `IntersectionObserver`, `MutationObserver`), Advanced Form Controls (`<select>`, `<option>`, `<textarea>`, radio group mutual exclusion), Storage foundation (`IndexedDB`, `CacheStorage`), `DOMParser` & `XMLSerializer`.
+- [ ] **v0.8.0**: Advanced HTTP cache, connection pooling, ServiceWorker lifecycles.
 - [ ] **v0.9.0**: GPU Compositor layer tree (`wgpu`), Indic/Assamese advanced HarfBuzz text shaping.
 - [ ] **v1.0.0**: Process-isolated sandbox architecture, DevTools inspector protocol, production browser UI.
 

@@ -1987,6 +1987,46 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 return Some(btn_box);
             }
 
+            if tag == "textarea" {
+                let mut ta_box = LayoutBox::new(BoxType::Block, style.clone(), href);
+                ta_box.id = id;
+                ta_box.class_name = class_name;
+                ta_box.tag_name = tag_name;
+                ta_box.node_id = node_id;
+                let w_str = attributes.get("width").or_else(|| style.get("width")).map(|s| s.as_str()).unwrap_or("220px");
+                let h_str = attributes.get("height").or_else(|| style.get("height")).map(|s| s.as_str()).unwrap_or("80px");
+
+                ta_box.width = parse_px(w_str, 220.0);
+                ta_box.height = parse_px(h_str, 80.0);
+
+                for child in &node_borrow.children {
+                    if let Some(child_box) = build_layout_tree(child, current_url) {
+                        ta_box.children.push(child_box);
+                    }
+                }
+                return Some(ta_box);
+            }
+
+            if tag == "select" {
+                let mut sel_box = LayoutBox::new(BoxType::Inline, style.clone(), href);
+                sel_box.id = id;
+                sel_box.class_name = class_name;
+                sel_box.tag_name = tag_name;
+                sel_box.node_id = node_id;
+                let w_str = attributes.get("width").or_else(|| style.get("width")).map(|s| s.as_str()).unwrap_or("150px");
+                let h_str = attributes.get("height").or_else(|| style.get("height")).map(|s| s.as_str()).unwrap_or("28px");
+
+                sel_box.width = parse_px(w_str, 150.0);
+                sel_box.height = parse_px(h_str, 28.0);
+
+                for child in &node_borrow.children {
+                    if let Some(child_box) = build_layout_tree(child, current_url) {
+                        sel_box.children.push(child_box);
+                    }
+                }
+                return Some(sel_box);
+            }
+
             let box_type = if display == "grid" || display == "inline-grid" {
                 BoxType::Grid
             } else if display == "flex" {

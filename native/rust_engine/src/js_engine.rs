@@ -3032,7 +3032,390 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             return loadPromise;
         };
 
-        // Standard getters/setters definition on Element objects
+        // ====================================================================
+        // W3C OBSERVERS SUBSYSTEM (ResizeObserver, IntersectionObserver, MutationObserver)
+        // ====================================================================
+        window.__activeResizeObservers = new Set();
+        window.__activeMutationObservers = new Set();
+
+        function __notifyMutation(record) {
+            if (!window.__activeMutationObservers) return;
+            for (const obs of window.__activeMutationObservers) {
+                for (const [target, options] of obs._observedNodes) {
+                    let matches = (target === record.target);
+                    if (!matches && options.subtree && target.contains && target.contains(record.target)) {
+                        matches = true;
+                    }
+                    if (matches) {
+                        if (record.type === 'childList' && options.childList) {
+                            obs._records.push(record);
+                        } else if (record.type === 'attributes' && options.attributes) {
+                            obs._records.push(record);
+                        } else if (record.type === 'characterData' && options.characterData) {
+                            obs._records.push(record);
+                        }
+                        obs._scheduleFlush();
+                    }
+                }
+            }
+        }
+
+        function ResizeObserver(callback) {
+            this._callback = callback;
+            this._targets = new Set();
+            this._previousRects = new Map();
+        }
+        ResizeObserver.prototype.observe = function(target, options) {
+            if (!target) return;
+            this._targets.add(target);
+            window.__activeResizeObservers.add(this);
+            const rect = (typeof target.getBoundingClientRect === 'function')
+                ? target.getBoundingClientRect()
+                : { width: 0, height: 0, top: 0, left: 0 };
+            this._previousRects.set(target, { width: rect.width, height: rect.height });
+            const entry = {
+                target: target,
+                contentRect: rect,
+                borderBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }],
+                contentBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }]
+            };
+            const cb = this._callback;
+            const self = this;
+            setTimeout(function() { cb([entry], self); }, 0);
+        };
+        ResizeObserver.prototype.unobserve = function(target) {
+            this._targets.delete(target);
+            this._previousRects.delete(target);
+        };
+        ResizeObserver.prototype.disconnect = function() {
+            this._targets.clear();
+            this._previousRects.clear();
+            window.__activeResizeObservers.delete(this);
+        };
+        window.ResizeObserver = ResizeObserver;
+
+        function IntersectionObserver(callback, options) {
+            this._callback = callback;
+            this._options = options || {};
+            this._root = this._options.root || null;
+            this._rootMargin = this._options.rootMargin || '0px';
+            this._thresholds = Array.isArray(this._options.threshold) ? this._options.threshold : [this._options.threshold || 0];
+            this._targets = new Set();
+        }
+        IntersectionObserver.prototype.observe = function(target) {
+            if (!target) return;
+            this._targets.add(target);
+            const targetRect = (typeof target.getBoundingClientRect === 'function')
+                ? target.getBoundingClientRect()
+                : { width: 100, height: 100, top: 0, left: 0, bottom: 100, right: 100 };
+            const rootRect = (this._root && typeof this._root.getBoundingClientRect === 'function')
+                ? this._root.getBoundingClientRect()
+                : { width: window.innerWidth || 1024, height: window.innerHeight || 768, top: 0, left: 0, bottom: window.innerHeight || 768, right: window.innerWidth || 1024 };
+
+            const isIntersecting = (
+                targetRect.top < rootRect.bottom &&
+                targetRect.bottom > rootRect.top &&
+                targetRect.left < rootRect.right &&
+                targetRect.right > rootRect.left
+            );
+            const entry = {
+                time: (window.performance ? window.performance.now() : Date.now()),
+                target: target,
+                rootBounds: rootRect,
+                boundingClientRect: targetRect,
+                intersectionRect: isIntersecting ? targetRect : { width: 0, height: 0, top: 0, bottom: 0, left: 0, right: 0 },
+                isIntersecting: isIntersecting,
+                intersectionRatio: isIntersecting ? 1.0 : 0.0
+            };
+            const cb = this._callback;
+            const self = this;
+            setTimeout(function() { cb([entry], self); }, 0);
+        };
+        IntersectionObserver.prototype.unobserve = function(target) {
+            this._targets.delete(target);
+        };
+        IntersectionObserver.prototype.disconnect = function() {
+            this._targets.clear();
+        };
+        IntersectionObserver.prototype.takeRecords = function() {
+            return [];
+        };
+        window.IntersectionObserver = IntersectionObserver;
+
+        function MutationObserver(callback) {
+            this._callback = callback;
+            this._records = [];
+            this._observedNodes = new Map();
+            this._flushScheduled = false;
+        }
+        MutationObserver.prototype.observe = function(target, options) {
+            if (!target) return;
+            this._observedNodes.set(target, Object.assign({ childList: true, attributes: true, characterData: true, subtree: true }, options));
+            window.__activeMutationObservers.add(this);
+        };
+        MutationObserver.prototype.disconnect = function() {
+            this._observedNodes.clear();
+            this._records = [];
+            window.__activeMutationObservers.delete(this);
+        };
+        MutationObserver.prototype.takeRecords = function() {
+            const copy = this._records.slice();
+            this._records = [];
+            return copy;
+        };
+        MutationObserver.prototype._scheduleFlush = function() {
+            if (this._flushScheduled) return;
+            this._flushScheduled = true;
+            const self = this;
+            setTimeout(function() {
+                self._flushScheduled = false;
+                if (self._records.length > 0) {
+                    const recs = self._records.slice();
+                    self._records = [];
+                    try {
+                        self._callback(recs, self);
+                    } catch(e) {
+                        console.error('[Axomai MutationObserver Callback Exception]:', e);
+                    }
+                }
+            }, 0);
+        };
+        window.MutationObserver = MutationObserver;
+
+        // ====================================================================
+        // STORAGE SUBSYSTEM (IndexedDB & CacheStorage)
+        // ====================================================================
+        (function() {
+            const _dbStorage = new Map();
+
+            function IDBRequest() {
+                this.result = null;
+                this.error = null;
+                this.onsuccess = null;
+                this.onerror = null;
+                this.readyState = 'pending';
+            }
+            IDBRequest.prototype._complete = function(result, isError) {
+                this.readyState = 'done';
+                if (isError) {
+                    this.error = result;
+                    if (typeof this.onerror === 'function') this.onerror({ target: this, type: 'error' });
+                } else {
+                    this.result = result;
+                    if (typeof this.onsuccess === 'function') this.onsuccess({ target: this, type: 'success' });
+                }
+            };
+
+            function IDBOpenDBRequest() {
+                IDBRequest.call(this);
+                this.onupgradeneeded = null;
+                this.onblocked = null;
+            }
+            IDBOpenDBRequest.prototype = Object.create(IDBRequest.prototype);
+
+            function IDBObjectStore(db, name) {
+                this.db = db;
+                this.name = name;
+            }
+            IDBObjectStore.prototype.put = function(value, key) {
+                const req = new IDBRequest();
+                const storeData = this.db._getStore(this.name);
+                const k = key !== undefined ? key : (value && value.id !== undefined ? value.id : ('key_' + Date.now() + '_' + Math.random()));
+                storeData.set(k, value);
+                setTimeout(function() { req._complete(k, false); }, 0);
+                return req;
+            };
+            IDBObjectStore.prototype.get = function(key) {
+                const req = new IDBRequest();
+                const storeData = this.db._getStore(this.name);
+                const val = storeData.get(key);
+                setTimeout(function() { req._complete(val !== undefined ? val : undefined, false); }, 0);
+                return req;
+            };
+            IDBObjectStore.prototype.getAll = function() {
+                const req = new IDBRequest();
+                const storeData = this.db._getStore(this.name);
+                const arr = Array.from(storeData.values());
+                setTimeout(function() { req._complete(arr, false); }, 0);
+                return req;
+            };
+            IDBObjectStore.prototype.delete = function(key) {
+                const req = new IDBRequest();
+                const storeData = this.db._getStore(this.name);
+                storeData.delete(key);
+                setTimeout(function() { req._complete(undefined, false); }, 0);
+                return req;
+            };
+            IDBObjectStore.prototype.clear = function() {
+                const req = new IDBRequest();
+                const storeData = this.db._getStore(this.name);
+                storeData.clear();
+                setTimeout(function() { req._complete(undefined, false); }, 0);
+                return req;
+            };
+
+            function IDBTransaction(db, storeNames, mode) {
+                this.db = db;
+                this.storeNames = Array.isArray(storeNames) ? storeNames : [storeNames];
+                this.mode = mode || 'readonly';
+                this.oncomplete = null;
+                this.onerror = null;
+            }
+            IDBTransaction.prototype.objectStore = function(name) {
+                return new IDBObjectStore(this.db, name);
+            };
+
+            function IDBDatabase(name, version) {
+                this.name = name;
+                this.version = version;
+                this.objectStoreNames = [];
+                this._stores = new Map();
+            }
+            IDBDatabase.prototype._getStore = function(name) {
+                if (!this._stores.has(name)) this._stores.set(name, new Map());
+                return this._stores.get(name);
+            };
+            IDBDatabase.prototype.createObjectStore = function(name, options) {
+                if (!this.objectStoreNames.includes(name)) {
+                    this.objectStoreNames.push(name);
+                }
+                return new IDBObjectStore(this, name);
+            };
+            IDBDatabase.prototype.transaction = function(storeNames, mode) {
+                return new IDBTransaction(this, storeNames, mode);
+            };
+            IDBDatabase.prototype.close = function() {};
+
+            window.IDBRequest = IDBRequest;
+            window.IDBOpenDBRequest = IDBOpenDBRequest;
+            window.IDBDatabase = IDBDatabase;
+            window.IDBObjectStore = IDBObjectStore;
+            window.IDBTransaction = IDBTransaction;
+
+            window.indexedDB = {
+                open: function(name, version) {
+                    const v = version || 1;
+                    const req = new IDBOpenDBRequest();
+                    setTimeout(function() {
+                        let existing = _dbStorage.get(name);
+                        let db;
+                        let needUpgrade = false;
+                        if (!existing) {
+                            db = new IDBDatabase(name, v);
+                            _dbStorage.set(name, db);
+                            needUpgrade = true;
+                        } else {
+                            db = existing;
+                            if (db.version < v) {
+                                db.version = v;
+                                needUpgrade = true;
+                            }
+                        }
+                        req.result = db;
+                        if (needUpgrade && typeof req.onupgradeneeded === 'function') {
+                            req.onupgradeneeded({ target: req, oldVersion: 0, newVersion: v });
+                        }
+                        req._complete(db, false);
+                    }, 0);
+                    return req;
+                },
+                deleteDatabase: function(name) {
+                    const req = new IDBRequest();
+                    _dbStorage.delete(name);
+                    setTimeout(function() { req._complete(undefined, false); }, 0);
+                    return req;
+                }
+            };
+        })();
+
+        // CacheStorage API
+        (function() {
+            const _cachesMap = new Map();
+
+            function Cache(name) {
+                this.name = name;
+                this._entries = new Map();
+            }
+            Cache.prototype.put = function(reqOrUrl, res) {
+                const url = typeof reqOrUrl === 'string' ? reqOrUrl : (reqOrUrl && reqOrUrl.url ? reqOrUrl.url : String(reqOrUrl));
+                this._entries.set(url, res);
+                return Promise.resolve();
+            };
+            Cache.prototype.match = function(reqOrUrl) {
+                const url = typeof reqOrUrl === 'string' ? reqOrUrl : (reqOrUrl && reqOrUrl.url ? reqOrUrl.url : String(reqOrUrl));
+                const res = this._entries.get(url);
+                return Promise.resolve(res);
+            };
+            Cache.prototype.delete = function(reqOrUrl) {
+                const url = typeof reqOrUrl === 'string' ? reqOrUrl : (reqOrUrl && reqOrUrl.url ? reqOrUrl.url : String(reqOrUrl));
+                const existed = this._entries.delete(url);
+                return Promise.resolve(existed);
+            };
+            Cache.prototype.keys = function() {
+                return Promise.resolve(Array.from(this._entries.keys()));
+            };
+            Cache.prototype.add = function(url) {
+                const self = this;
+                return fetch(url).then(function(res) {
+                    return self.put(url, res);
+                });
+            };
+            Cache.prototype.addAll = function(urls) {
+                const self = this;
+                return Promise.all(urls.map(function(u) { return self.add(u); })).then(function() {});
+            };
+
+            window.Cache = Cache;
+            window.caches = {
+                open: function(name) {
+                    if (!_cachesMap.has(name)) {
+                        _cachesMap.set(name, new Cache(name));
+                    }
+                    return Promise.resolve(_cachesMap.get(name));
+                },
+                has: function(name) {
+                    return Promise.resolve(_cachesMap.has(name));
+                },
+                delete: function(name) {
+                    return Promise.resolve(_cachesMap.delete(name));
+                },
+                keys: function() {
+                    return Promise.resolve(Array.from(_cachesMap.keys()));
+                }
+            };
+        })();
+
+        // DOMParser & XMLSerializer Foundation
+        (function() {
+            window.DOMParser = function() {};
+            window.DOMParser.prototype.parseFromString = function(str, mimeType) {
+                const doc = {
+                    documentElement: document.createElement('html'),
+                    body: document.createElement('body'),
+                    head: document.createElement('head'),
+                    createElement: document.createElement.bind(document),
+                    getElementById: document.getElementById.bind(document),
+                    querySelector: document.querySelector.bind(document),
+                    querySelectorAll: document.querySelectorAll.bind(document)
+                };
+                doc.documentElement.appendChild(doc.head);
+                doc.documentElement.appendChild(doc.body);
+                doc.body.innerHTML = str;
+                return doc;
+            };
+
+            window.XMLSerializer = function() {};
+            window.XMLSerializer.prototype.serializeToString = function(node) {
+                if (!node) return '';
+                if (node.outerHTML) return node.outerHTML;
+                if (node.innerHTML) return node.innerHTML;
+                return node.textContent || '';
+            };
+        })();
+
+        // ====================================================================
+        // COMPREHENSIVE DOM PROPERTIES, FORMS & TRAVERSAL BINDINGS
+        // ====================================================================
         window.__setupElementProperties = function(el) {
             if (!el || el.__protoHooked) return el;
             el.__protoHooked = true;
@@ -3041,14 +3424,36 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
 
             Object.defineProperty(el, 'innerHTML', {
                 get: function() { return this.__getInnerHTML ? this.__getInnerHTML() : ''; },
-                set: function(val) { if (this.__setInnerHTML) this.__setInnerHTML(String(val)); },
+                set: function(val) {
+                    const oldHtml = this.__getInnerHTML ? this.__getInnerHTML() : '';
+                    if (this.__setInnerHTML) this.__setInnerHTML(String(val));
+                    __notifyMutation({
+                        type: 'childList',
+                        target: this,
+                        addedNodes: this.children ? Array.from(this.children) : [],
+                        removedNodes: [],
+                        attributeName: null,
+                        oldValue: oldHtml
+                    });
+                },
                 configurable: true,
                 enumerable: true
             });
 
             Object.defineProperty(el, 'textContent', {
                 get: function() { return this.__getTextContent ? this.__getTextContent() : ''; },
-                set: function(val) { if (this.__setTextContent) this.__setTextContent(String(val)); },
+                set: function(val) {
+                    const oldText = this.__getTextContent ? this.__getTextContent() : '';
+                    if (this.__setTextContent) this.__setTextContent(String(val));
+                    __notifyMutation({
+                        type: 'characterData',
+                        target: this,
+                        addedNodes: [],
+                        removedNodes: [],
+                        attributeName: null,
+                        oldValue: oldText
+                    });
+                },
                 configurable: true,
                 enumerable: true
             });
@@ -3066,6 +3471,345 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 configurable: true,
                 enumerable: true
             });
+
+            const origSetAttr = el.setAttribute;
+            el.setAttribute = function(name, value) {
+                const old = el.getAttribute ? el.getAttribute(name) : null;
+                if (origSetAttr) origSetAttr.call(el, name, value);
+                __notifyMutation({
+                    type: 'attributes',
+                    target: el,
+                    addedNodes: [],
+                    removedNodes: [],
+                    attributeName: name,
+                    oldValue: old
+                });
+            };
+
+            const origRemoveAttr = el.removeAttribute;
+            el.removeAttribute = function(name) {
+                const old = el.getAttribute ? el.getAttribute(name) : null;
+                if (origRemoveAttr) origRemoveAttr.call(el, name);
+                __notifyMutation({
+                    type: 'attributes',
+                    target: el,
+                    addedNodes: [],
+                    removedNodes: [],
+                    attributeName: name,
+                    oldValue: old
+                });
+            };
+
+            // Element Traversal & Hierarchy APIs
+            el.matches = function(sel) {
+                if (!sel) return false;
+                if (document.querySelectorAll) {
+                    const all = document.querySelectorAll(sel);
+                    for (let i = 0; i < all.length; i++) {
+                        if (all[i] === this) return true;
+                    }
+                }
+                return false;
+            };
+
+            el.closest = function(sel) {
+                let curr = this;
+                while (curr && curr.nodeType === 1) {
+                    if (curr.matches && curr.matches(sel)) return curr;
+                    curr = curr.parentElement;
+                }
+                return null;
+            };
+
+            el.contains = function(other) {
+                let curr = other;
+                while (curr) {
+                    if (curr === this) return true;
+                    curr = curr.parentElement;
+                }
+                return false;
+            };
+
+            el.cloneNode = function(deep) {
+                const tag = this.tagName ? this.tagName.toLowerCase() : 'div';
+                const clone = document.createElement(tag);
+                if (this.className) clone.className = this.className;
+                if (this.id) clone.id = this.id + '_clone';
+                if (deep && this.innerHTML) {
+                    clone.innerHTML = this.innerHTML;
+                }
+                return clone;
+            };
+
+            const origAppend = el.appendChild;
+            el.appendChild = function(newChild) {
+                const res = origAppend ? origAppend.call(this, newChild) : newChild;
+                __notifyMutation({
+                    type: 'childList',
+                    target: this,
+                    addedNodes: [newChild],
+                    removedNodes: [],
+                    attributeName: null,
+                    oldValue: null
+                });
+                return res;
+            };
+
+            const origRemoveChild = el.removeChild;
+            el.removeChild = function(oldChild) {
+                const res = origRemoveChild ? origRemoveChild.call(this, oldChild) : oldChild;
+                __notifyMutation({
+                    type: 'childList',
+                    target: this,
+                    addedNodes: [],
+                    removedNodes: [oldChild],
+                    attributeName: null,
+                    oldValue: null
+                });
+                return res;
+            };
+
+            el.insertBefore = function(newChild, refChild) {
+                if (!refChild) return this.appendChild(newChild);
+                const res = this.appendChild(newChild);
+                return res;
+            };
+
+            el.replaceChild = function(newChild, oldChild) {
+                if (oldChild && typeof oldChild.remove === 'function') {
+                    oldChild.remove();
+                }
+                return this.appendChild(newChild);
+            };
+
+            el.prepend = function(...nodes) {
+                for (const n of nodes) {
+                    const nodeObj = typeof n === 'string' ? document.createTextNode(n) : n;
+                    this.appendChild(nodeObj);
+                }
+            };
+
+            // Form element validation & lifecycle APIs
+            const tagLower = (el.tagName || '').toLowerCase();
+
+            if (tagLower === 'form') {
+                el.submit = function() {
+                    const evt = new Event('submit', { bubbles: true, cancelable: true });
+                    this.dispatchEvent(evt);
+                };
+                el.requestSubmit = function() {
+                    this.submit();
+                };
+                el.reset = function() {
+                    const evt = new Event('reset', { bubbles: true, cancelable: true });
+                    this.dispatchEvent(evt);
+                };
+            }
+
+            if (tagLower === 'select') {
+                Object.defineProperty(el, 'options', {
+                    get: function() {
+                        const list = [];
+                        const walk = (n) => {
+                            for (let ch of (n.children || [])) {
+                                if (ch.tagName && ch.tagName.toLowerCase() === 'option') list.push(ch);
+                                walk(ch);
+                            }
+                        };
+                        walk(this);
+                        return list;
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'selectedIndex', {
+                    get: function() {
+                        const opts = this.options;
+                        for (let i = 0; i < opts.length; i++) {
+                            if (opts[i].selected) return i;
+                        }
+                        return opts.length > 0 ? 0 : -1;
+                    },
+                    set: function(val) {
+                        const idx = parseInt(val, 10);
+                        const opts = this.options;
+                        for (let i = 0; i < opts.length; i++) {
+                            opts[i].selected = (i === idx);
+                        }
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'value', {
+                    get: function() {
+                        const opts = this.options;
+                        const idx = this.selectedIndex;
+                        if (idx >= 0 && idx < opts.length) {
+                            return opts[idx].value;
+                        }
+                        return '';
+                    },
+                    set: function(val) {
+                        const strVal = String(val);
+                        const opts = this.options;
+                        for (let i = 0; i < opts.length; i++) {
+                            opts[i].selected = (opts[i].value === strVal);
+                        }
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                el.add = function(option, before) {
+                    if (!option) return;
+                    if (before) {
+                        this.insertBefore(option, before);
+                    } else {
+                        this.appendChild(option);
+                    }
+                };
+
+                el.remove = function(index) {
+                    const opts = this.options;
+                    if (index >= 0 && index < opts.length) {
+                        if (typeof opts[index].remove === 'function') {
+                            opts[index].remove();
+                        }
+                    }
+                };
+            }
+
+            if (tagLower === 'option') {
+                Object.defineProperty(el, 'selected', {
+                    get: function() {
+                        return this.getAttribute ? (this.getAttribute('selected') !== null) : false;
+                    },
+                    set: function(val) {
+                        if (val) {
+                            if (this.setAttribute) this.setAttribute('selected', 'selected');
+                        } else {
+                            if (this.removeAttribute) this.removeAttribute('selected');
+                        }
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'value', {
+                    get: function() {
+                        if (this.getAttribute && this.getAttribute('value') !== null) {
+                            return this.getAttribute('value');
+                        }
+                        return this.textContent || '';
+                    },
+                    set: function(val) {
+                        if (this.setAttribute) this.setAttribute('value', String(val));
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'text', {
+                    get: function() { return this.textContent || ''; },
+                    set: function(val) { this.textContent = String(val); },
+                    configurable: true,
+                    enumerable: true
+                });
+            }
+
+            if (tagLower === 'textarea') {
+                Object.defineProperty(el, 'value', {
+                    get: function() {
+                        if (this.__textAreaValue !== undefined) return this.__textAreaValue;
+                        return this.textContent || '';
+                    },
+                    set: function(val) {
+                        this.__textAreaValue = String(val);
+                        this.textContent = String(val);
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'rows', {
+                    get: function() { return parseInt(this.getAttribute('rows') || '2', 10); },
+                    set: function(val) { this.setAttribute('rows', String(val)); },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                Object.defineProperty(el, 'cols', {
+                    get: function() { return parseInt(this.getAttribute('cols') || '20', 10); },
+                    set: function(val) { this.setAttribute('cols', String(val)); },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                el.select = function() {};
+                el.setSelectionRange = function(st, en) {};
+            }
+
+            if (tagLower === 'input') {
+                Object.defineProperty(el, 'checked', {
+                    get: function() {
+                        return this.getAttribute ? (this.getAttribute('checked') !== null) : false;
+                    },
+                    set: function(val) {
+                        const isRadio = (this.getAttribute && (this.getAttribute('type') || '').toLowerCase() === 'radio');
+                        if (val) {
+                            if (this.setAttribute) this.setAttribute('checked', 'checked');
+                            if (isRadio) {
+                                const name = this.getAttribute('name');
+                                if (name && document.querySelectorAll) {
+                                    const allRadios = document.querySelectorAll('input[type="radio"]');
+                                    for (let r of allRadios) {
+                                        if (r !== this && r.getAttribute && r.getAttribute('name') === name) {
+                                            if (r.removeAttribute) r.removeAttribute('checked');
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            if (this.removeAttribute) this.removeAttribute('checked');
+                        }
+                    },
+                    configurable: true,
+                    enumerable: true
+                });
+
+                el.click = function() {
+                    const type = (this.getAttribute ? (this.getAttribute('type') || '') : '').toLowerCase();
+                    if (type === 'checkbox') {
+                        this.checked = !this.checked;
+                        this.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                        this.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                    } else if (type === 'radio') {
+                        if (!this.checked) {
+                            this.checked = true;
+                            this.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                            this.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+                        }
+                    }
+                    this.dispatchEvent(new Event('click', { bubbles: true, cancelable: true }));
+                };
+            }
+
+            if (tagLower === 'input' || tagLower === 'select' || tagLower === 'textarea') {
+                el.checkValidity = function() {
+                    if (this.getAttribute && this.getAttribute('required')) {
+                        return (this.value && this.value.length > 0);
+                    }
+                    return true;
+                };
+                el.reportValidity = function() {
+                    return this.checkValidity();
+                };
+                el.setCustomValidity = function(msg) {
+                    this.__customValidity = msg;
+                };
+            }
 
             return el;
         };
@@ -3254,134 +3998,6 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             this._data.delete(String(name));
         };
         window.FormData = FormData;
-
-        // Standard getters/setters and DOM methods definition on Element objects
-        window.__setupElementProperties = function(el) {
-            if (!el || el.__protoHooked) return el;
-            el.__protoHooked = true;
-
-            setupEventTarget(el);
-
-            Object.defineProperty(el, 'innerHTML', {
-                get: function() { return this.__getInnerHTML ? this.__getInnerHTML() : ''; },
-                set: function(val) { if (this.__setInnerHTML) this.__setInnerHTML(String(val)); },
-                configurable: true,
-                enumerable: true
-            });
-
-            Object.defineProperty(el, 'textContent', {
-                get: function() { return this.__getTextContent ? this.__getTextContent() : ''; },
-                set: function(val) { if (this.__setTextContent) this.__setTextContent(String(val)); },
-                configurable: true,
-                enumerable: true
-            });
-
-            Object.defineProperty(el, 'className', {
-                get: function() { return this.getAttribute ? (this.getAttribute('class') || '') : ''; },
-                set: function(val) { if (this.setAttribute) this.setAttribute('class', String(val)); },
-                configurable: true,
-                enumerable: true
-            });
-
-            Object.defineProperty(el, 'id', {
-                get: function() { return this.getAttribute ? (this.getAttribute('id') || '') : ''; },
-                set: function(val) { if (this.setAttribute) this.setAttribute('id', String(val)); },
-                configurable: true,
-                enumerable: true
-            });
-
-            // Element Traversal & Hierarchy APIs
-            el.matches = function(sel) {
-                if (!sel) return false;
-                if (document.querySelectorAll) {
-                    const all = document.querySelectorAll(sel);
-                    for (let i = 0; i < all.length; i++) {
-                        if (all[i] === this) return true;
-                    }
-                }
-                return false;
-            };
-
-            el.closest = function(sel) {
-                let curr = this;
-                while (curr && curr.nodeType === 1) {
-                    if (curr.matches && curr.matches(sel)) return curr;
-                    curr = curr.parentElement;
-                }
-                return null;
-            };
-
-            el.contains = function(other) {
-                let curr = other;
-                while (curr) {
-                    if (curr === this) return true;
-                    curr = curr.parentElement;
-                }
-                return false;
-            };
-
-            el.cloneNode = function(deep) {
-                const tag = this.tagName ? this.tagName.toLowerCase() : 'div';
-                const clone = document.createElement(tag);
-                if (this.className) clone.className = this.className;
-                if (this.id) clone.id = this.id + '_clone';
-                if (deep && this.innerHTML) {
-                    clone.innerHTML = this.innerHTML;
-                }
-                return clone;
-            };
-
-            el.insertBefore = function(newChild, refChild) {
-                if (!refChild) return this.appendChild(newChild);
-                return this.appendChild(newChild);
-            };
-
-            el.replaceChild = function(newChild, oldChild) {
-                if (oldChild && typeof oldChild.remove === 'function') {
-                    oldChild.remove();
-                }
-                return this.appendChild(newChild);
-            };
-
-            el.prepend = function(...nodes) {
-                for (const n of nodes) {
-                    const nodeObj = typeof n === 'string' ? document.createTextNode(n) : n;
-                    this.appendChild(nodeObj);
-                }
-            };
-
-            // Form element validation & lifecycle APIs
-            if (el.tagName && el.tagName.toLowerCase() === 'form') {
-                el.submit = function() {
-                    const evt = new Event('submit', { bubbles: true, cancelable: true });
-                    this.dispatchEvent(evt);
-                };
-                el.requestSubmit = function() {
-                    this.submit();
-                };
-                el.reset = function() {
-                    const evt = new Event('reset', { bubbles: true, cancelable: true });
-                    this.dispatchEvent(evt);
-                };
-            }
-
-            if (el.tagName && (el.tagName.toLowerCase() === 'input' || el.tagName.toLowerCase() === 'select' || el.tagName.toLowerCase() === 'textarea')) {
-                el.checkValidity = function() {
-                    if (this.getAttribute && this.getAttribute('required')) {
-                        return (this.value && this.value.length > 0);
-                    }
-                    return true;
-                };
-                el.reportValidity = function() {
-                    return this.checkValidity();
-                };
-                el.setCustomValidity = function(msg) {
-                    this.__customValidity = msg;
-                };
-            }
-
-            return el;
-        };
 
         if (document.body) {
             window.__setupElementProperties(document.body);
