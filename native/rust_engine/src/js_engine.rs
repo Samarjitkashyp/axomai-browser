@@ -89,6 +89,10 @@ thread_local! {
     static NEXT_TIMER_ID: RefCell<u32> = RefCell::new(1);
     // V8 PromiseResolvers strictly retained on V8 isolate thread!
     static PENDING_FETCH_RESOLVERS: RefCell<HashMap<u64, v8::Global<v8::PromiseResolver>>> = RefCell::new(HashMap::new());
+    // Origin-scoped persistent web storage and cookie jars
+    static LOCAL_STORAGE: RefCell<HashMap<String, HashMap<String, String>>> = RefCell::new(HashMap::new());
+    static SESSION_STORAGE: RefCell<HashMap<String, HashMap<String, String>>> = RefCell::new(HashMap::new());
+    static COOKIE_JAR: RefCell<HashMap<String, Vec<(String, String)>>> = RefCell::new(HashMap::new());
 }
 
 // Timer Task for the Browser Event Loop
@@ -168,6 +172,7 @@ impl V8JSEngine {
         setup_document_api(scope, global);
         setup_timer_apis(scope, global);
         setup_async_fetch_api(scope, global, url_str, self.engine_id);
+        setup_storage_and_cookies_api(scope, global, url_str);
 
         // 5. Inject DOM & EventTarget Prototype Helpers
         inject_dom_prototype_bootstrap(scope);
@@ -267,6 +272,19 @@ impl V8JSEngine {
         let handle_scope = &mut v8::HandleScope::new(isolate);
         let context = v8::Local::new(handle_scope, page_context_global);
         let scope = &mut v8::ContextScope::new(handle_scope, context);
+
+        // 0. Process Compositor Animation Frame Callbacks (requestAnimationFrame)
+        let flush_raf_js = "if (typeof window !== 'undefined' && typeof window.__flushAnimationFrameCallbacks === 'function') { window.__flushAnimationFrameCallbacks(performance.now()); } else { false; }";
+        if let Some(code) = v8::String::new(scope, flush_raf_js) {
+            if let Some(script) = v8::Script::compile(scope, code, None) {
+                if let Some(val) = script.run(scope) {
+                    if val.is_true() {
+                        executed_any = true;
+                    }
+                }
+                scope.perform_microtask_checkpoint();
+            }
+        }
 
         // 1. Process Completed Async Fetch Requests (Non-blocking network thread)
         let completed_fetches = drain_fetch_results_for_engine(self.engine_id);
@@ -937,6 +955,232 @@ fn setup_async_fetch_api<'s>(
     .unwrap();
 
     global.set(scope, fetch_key.into(), fetch_fn.into());
+}
+
+fn get_origin_from_url(url_str: &str) -> String {
+    if let Ok(url) = URL::parse(url_str) {
+        if url.scheme == "http" || url.scheme == "https" {
+            format!("{}://{}:{}", url.scheme, url.host, url.port)
+        } else if url.scheme == "file" {
+            "file://".to_string()
+        } else {
+            "null".to_string()
+        }
+    } else {
+        "null".to_string()
+    }
+}
+
+// ============================================================================
+// WEB STORAGE (localStorage / sessionStorage) & COOKIE SYSTEM
+// ============================================================================
+
+fn setup_storage_and_cookies_api<'s>(
+    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+    global: v8::Local<v8::Object>,
+    url_str: &str,
+) {
+    let origin = get_origin_from_url(url_str);
+    let origin_local = origin.clone();
+
+    // 1. window.localStorage & window.sessionStorage bindings
+    let create_storage_obj = |s: &mut v8::ContextScope<'s, v8::HandleScope>, is_session: bool| -> v8::Local<'s, v8::Object> {
+        let storage = v8::Object::new(s);
+        let orig = origin.clone();
+
+        // getItem(key)
+        let get_item_k = v8::String::new(s, "getItem").unwrap();
+        let orig_c = orig.clone();
+        let get_item_fn = v8::Function::new(
+            s,
+            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                if args.length() == 0 { return; }
+                let key = args.get(0).to_rust_string_lossy(scope);
+                let val_opt = if is_session {
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.get(&key).cloned()))
+                } else {
+                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.get(&key).cloned()))
+                };
+                if let Some(val) = val_opt {
+                    let v_str = v8::String::new(scope, &val).unwrap();
+                    rv.set(v_str.into());
+                } else {
+                    rv.set(v8::null(scope).into());
+                }
+            },
+        ).unwrap();
+        storage.set(s, get_item_k.into(), get_item_fn.into());
+
+        // setItem(key, val)
+        let set_item_k = v8::String::new(s, "setItem").unwrap();
+        let orig_c = orig.clone();
+        let set_item_fn = v8::Function::new(
+            s,
+            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                if args.length() < 2 { return; }
+                let key = args.get(0).to_rust_string_lossy(scope);
+                let val = args.get(1).to_rust_string_lossy(scope);
+                if is_session {
+                    SESSION_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        map.entry(orig_c.clone()).or_insert_with(HashMap::new).insert(key, val);
+                    });
+                } else {
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        map.entry(orig_c.clone()).or_insert_with(HashMap::new).insert(key, val);
+                    });
+                }
+            },
+        ).unwrap();
+        storage.set(s, set_item_k.into(), set_item_fn.into());
+
+        // removeItem(key)
+        let rm_item_k = v8::String::new(s, "removeItem").unwrap();
+        let orig_c = orig.clone();
+        let rm_item_fn = v8::Function::new(
+            s,
+            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                if args.length() == 0 { return; }
+                let key = args.get(0).to_rust_string_lossy(scope);
+                if is_session {
+                    SESSION_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if let Some(m) = map.get_mut(&orig_c) {
+                            m.remove(&key);
+                        }
+                    });
+                } else {
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if let Some(m) = map.get_mut(&orig_c) {
+                            m.remove(&key);
+                        }
+                    });
+                }
+            },
+        ).unwrap();
+        storage.set(s, rm_item_k.into(), rm_item_fn.into());
+
+        // clear()
+        let clear_k = v8::String::new(s, "clear").unwrap();
+        let orig_c = orig.clone();
+        let clear_fn = v8::Function::new(
+            s,
+            move |_scope: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                if is_session {
+                    SESSION_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if let Some(m) = map.get_mut(&orig_c) {
+                            m.clear();
+                        }
+                    });
+                } else {
+                    LOCAL_STORAGE.with(|st| {
+                        let mut map = st.borrow_mut();
+                        if let Some(m) = map.get_mut(&orig_c) {
+                            m.clear();
+                        }
+                    });
+                }
+            },
+        ).unwrap();
+        storage.set(s, clear_k.into(), clear_fn.into());
+
+        // key(index)
+        let key_k = v8::String::new(s, "key").unwrap();
+        let orig_c = orig.clone();
+        let key_fn = v8::Function::new(
+            s,
+            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                if args.length() == 0 { return; }
+                let idx = args.get(0).to_integer(scope).map(|i| i.value() as usize).unwrap_or(0);
+                let key_opt = if is_session {
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.keys().nth(idx).cloned()))
+                } else {
+                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.keys().nth(idx).cloned()))
+                };
+                if let Some(k) = key_opt {
+                    let k_str = v8::String::new(scope, &k).unwrap();
+                    rv.set(k_str.into());
+                } else {
+                    rv.set(v8::null(scope).into());
+                }
+            },
+        ).unwrap();
+        storage.set(s, key_k.into(), key_fn.into());
+
+        // length getter
+        let len_k = v8::String::new(s, "length").unwrap();
+        let orig_c = orig.clone();
+        let len_fn = v8::Function::new(
+            s,
+            move |scope: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                let len = if is_session {
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).map(|m| m.len()).unwrap_or(0))
+                } else {
+                    LOCAL_STORAGE.with(|st| st.borrow().get(&orig_c).map(|m| m.len()).unwrap_or(0))
+                };
+                rv.set(v8::Integer::new(scope, len as i32).into());
+            },
+        ).unwrap();
+        storage.set(s, len_k.into(), len_fn.into());
+
+        storage
+    };
+
+    let local_storage = create_storage_obj(scope, false);
+    let session_storage = create_storage_obj(scope, true);
+
+    let ls_k = v8::String::new(scope, "localStorage").unwrap();
+    let ss_k = v8::String::new(scope, "sessionStorage").unwrap();
+    global.set(scope, ls_k.into(), local_storage.into());
+    global.set(scope, ss_k.into(), session_storage.into());
+
+    // 2. Cookie native hooks
+    let get_cookie_fn = v8::Function::new(
+        scope,
+        move |s: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+            let cookies = COOKIE_JAR.with(|jar| {
+                let map = jar.borrow();
+                if let Some(list) = map.get(&origin_local) {
+                    list.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("; ")
+                } else {
+                    String::new()
+                }
+            });
+            let v_str = v8::String::new(s, &cookies).unwrap();
+            rv.set(v_str.into());
+        },
+    ).unwrap();
+
+    let orig_set = origin.clone();
+    let set_cookie_fn = v8::Function::new(
+        scope,
+        move |s: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+            if args.length() == 0 { return; }
+            let cookie_str = args.get(0).to_rust_string_lossy(s);
+            let parts: Vec<&str> = cookie_str.split(';').collect();
+            if let Some(first) = parts.first() {
+                let kv: Vec<&str> = first.splitn(2, '=').collect();
+                if kv.len() == 2 {
+                    let k = kv[0].trim().to_string();
+                    let v = kv[1].trim().to_string();
+                    COOKIE_JAR.with(|jar| {
+                        let mut map = jar.borrow_mut();
+                        let list = map.entry(orig_set.clone()).or_insert_with(Vec::new);
+                        list.retain(|(item_k, _)| item_k != &k);
+                        list.push((k, v));
+                    });
+                }
+            }
+        },
+    ).unwrap();
+
+    let doc_k = v8::String::new(scope, "__native_get_cookie").unwrap();
+    let set_doc_k = v8::String::new(scope, "__native_set_cookie").unwrap();
+    global.set(scope, doc_k.into(), get_cookie_fn.into());
+    global.set(scope, set_doc_k.into(), set_cookie_fn.into());
 }
 
 // ============================================================================
@@ -1694,23 +1938,98 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
         setupEventTarget(document);
         document.readyState = 'loading';
 
-        // W3C queueMicrotask & requestAnimationFrame
+        // Setup document.cookie getter/setter
+        Object.defineProperty(document, 'cookie', {
+            get: function() {
+                return (typeof window.__native_get_cookie === 'function') ? window.__native_get_cookie() : '';
+            },
+            set: function(val) {
+                if (typeof window.__native_set_cookie === 'function') {
+                    window.__native_set_cookie(String(val));
+                }
+            },
+            configurable: true,
+            enumerable: true
+        });
+
+        // W3C queueMicrotask
         window.queueMicrotask = function(callback) {
             if (typeof callback === 'function') {
                 Promise.resolve().then(callback).catch(function(e) { console.error(e); });
             }
         };
 
+        // Performance & Compositor Animation Frame Queue
+        window.performance = window.performance || {
+            now: function() { return Date.now(); }
+        };
+
+        window.__rafCallbacks = new Map();
+        window.__nextRafId = 1;
+
         window.requestAnimationFrame = function(callback) {
-            return window.setTimeout(function() {
-                if (typeof callback === 'function') {
-                    try { callback(Date.now()); } catch(e) { console.error(e); }
-                }
-            }, 16);
+            if (typeof callback !== 'function') return 0;
+            const id = window.__nextRafId++;
+            window.__rafCallbacks.set(id, callback);
+            return id;
         };
 
         window.cancelAnimationFrame = function(id) {
-            window.clearTimeout(id);
+            window.__rafCallbacks.delete(id);
+        };
+
+        window.__flushAnimationFrameCallbacks = function(now) {
+            if (!window.__rafCallbacks || window.__rafCallbacks.size === 0) return false;
+            const cbs = Array.from(window.__rafCallbacks.values());
+            window.__rafCallbacks.clear();
+            for (let i = 0; i < cbs.length; i++) {
+                try { cbs[i](now); } catch(e) { console.error(e); }
+            }
+            return true;
+        };
+
+        // Browser ES Module Loader & Dependency Graph Registry
+        window.__moduleRegistry = new Map();
+        window.__resolvingModules = new Map();
+
+        window.__resolveModuleUrl = function(specifier, base) {
+            try {
+                return new URL(specifier, base || window.location.href).href;
+            } catch(e) {
+                return specifier;
+            }
+        };
+
+        window.import = function(specifier) {
+            const resolvedUrl = window.__resolveModuleUrl(specifier, window.location.href);
+            if (window.__moduleRegistry.has(resolvedUrl)) {
+                return Promise.resolve(window.__moduleRegistry.get(resolvedUrl));
+            }
+            if (window.__resolvingModules.has(resolvedUrl)) {
+                return window.__resolvingModules.get(resolvedUrl);
+            }
+
+            const loadPromise = fetch(resolvedUrl)
+                .then(function(res) {
+                    if (!res.ok) throw new Error('Failed to fetch module: ' + resolvedUrl + ' (status ' + res.status + ')');
+                    return res.text();
+                })
+                .then(function(source) {
+                    const moduleNamespace = Object.create(null);
+                    // Module compilation scope with strict mode and synthetic export binder
+                    const moduleFn = new Function('exports', 'importModule', 'moduleUrl',
+                        "'use strict';\n" + source + "\n//# sourceURL=" + resolvedUrl
+                    );
+                    moduleFn(moduleNamespace, window.import, resolvedUrl);
+                    window.__moduleRegistry.set(resolvedUrl, moduleNamespace);
+                    return moduleNamespace;
+                })
+                .finally(function() {
+                    window.__resolvingModules.delete(resolvedUrl);
+                });
+
+            window.__resolvingModules.set(resolvedUrl, loadPromise);
+            return loadPromise;
         };
 
         // Standard getters/setters definition on Element objects
