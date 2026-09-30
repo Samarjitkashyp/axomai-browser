@@ -822,10 +822,77 @@ pub fn find_element_by_id(node: &NodePtr, id: &str) -> Option<NodePtr> {
 
 pub fn query_selector(node: &NodePtr, selector: &str) -> Option<NodePtr> {
     let sel = selector.trim();
+    if sel.is_empty() {
+        return None;
+    }
+
+    let sub_selectors: Vec<&str> = sel.split(',').map(|s| s.trim()).collect();
+    for sub in sub_selectors {
+        if let Some(parsed) = crate::css_parser::parse_selector(sub) {
+            if let Some(matched) = find_matching_node_selector(node, &parsed) {
+                return Some(matched);
+            }
+        } else if let Some(matched) = fallback_query_selector(node, sub) {
+            return Some(matched);
+        }
+    }
+    None
+}
+
+pub fn query_selector_all(node: &NodePtr, selector: &str) -> Vec<NodePtr> {
+    let sel = selector.trim();
+    if sel.is_empty() {
+        return Vec::new();
+    }
+
+    let sub_selectors: Vec<&str> = sel.split(',').map(|s| s.trim()).collect();
+    let mut parsed_list = Vec::new();
+    for sub in sub_selectors {
+        if let Some(parsed) = crate::css_parser::parse_selector(sub) {
+            parsed_list.push(parsed);
+        }
+    }
+
+    let mut matches = Vec::new();
+    if !parsed_list.is_empty() {
+        collect_all_matching_nodes_selector(node, &parsed_list, &mut matches);
+    } else {
+        collect_matching_nodes(node, sel, &mut matches);
+    }
+    matches
+}
+
+fn find_matching_node_selector(node: &NodePtr, sel: &crate::css_parser::Selector) -> Option<NodePtr> {
+    if sel.matches(node) {
+        return Some(Rc::clone(node));
+    }
+    let node_borrow = node.borrow();
+    for child in &node_borrow.children {
+        if let Some(found) = find_matching_node_selector(child, sel) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn collect_all_matching_nodes_selector(
+    node: &NodePtr,
+    selectors: &[crate::css_parser::Selector],
+    matches: &mut Vec<NodePtr>,
+) {
+    if selectors.iter().any(|s| s.matches(node)) {
+        matches.push(Rc::clone(node));
+    }
+    let node_borrow = node.borrow();
+    for child in &node_borrow.children {
+        collect_all_matching_nodes_selector(child, selectors, matches);
+    }
+}
+
+fn fallback_query_selector(node: &NodePtr, sel: &str) -> Option<NodePtr> {
     if sel.starts_with('#') {
         return find_element_by_id(node, &sel[1..]);
     }
-
     let node_borrow = node.borrow();
     if let NodeType::Element { ref tag, ref attributes, .. } = node_borrow.node_type {
         if sel.starts_with('.') {
@@ -839,19 +906,12 @@ pub fn query_selector(node: &NodePtr, selector: &str) -> Option<NodePtr> {
             return Some(Rc::clone(node));
         }
     }
-
     for child in &node_borrow.children {
-        if let Some(found) = query_selector(child, selector) {
+        if let Some(found) = fallback_query_selector(child, sel) {
             return Some(found);
         }
     }
     None
-}
-
-pub fn query_selector_all(node: &NodePtr, selector: &str) -> Vec<NodePtr> {
-    let mut matches = Vec::new();
-    collect_matching_nodes(node, selector.trim(), &mut matches);
-    matches
 }
 
 fn collect_matching_nodes(node: &NodePtr, sel: &str, matches: &mut Vec<NodePtr>) {

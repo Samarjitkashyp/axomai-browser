@@ -241,6 +241,58 @@ pub fn parse_grid_line_span(val: &str) -> (Option<usize>, usize) {
     (None, 1)
 }
 
+pub fn parse_grid_template_areas(val: &str) -> Vec<Vec<String>> {
+    let mut matrix: Vec<Vec<String>> = Vec::new();
+    let mut in_quote = false;
+    let mut current_row_str = String::new();
+    for ch in val.chars() {
+        if ch == '"' || ch == '\'' {
+            if in_quote {
+                let row_tokens: Vec<String> = current_row_str
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                if !row_tokens.is_empty() {
+                    matrix.push(row_tokens);
+                }
+                current_row_str.clear();
+                in_quote = false;
+            } else {
+                in_quote = true;
+            }
+        } else if in_quote {
+            current_row_str.push(ch);
+        }
+    }
+    matrix
+}
+
+pub fn find_grid_area_bounds(matrix: &[Vec<String>], area_name: &str) -> Option<(usize, usize, usize, usize)> {
+    let mut min_r = usize::MAX;
+    let mut max_r = 0;
+    let mut min_c = usize::MAX;
+    let mut max_c = 0;
+    let mut found = false;
+
+    for (r, row) in matrix.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            if cell == area_name {
+                min_r = min_r.min(r);
+                max_r = max_r.max(r);
+                min_c = min_c.min(c);
+                max_c = max_c.max(c);
+                found = true;
+            }
+        }
+    }
+
+    if found {
+        Some((min_c, max_c - min_c + 1, min_r, max_r - min_r + 1))
+    } else {
+        None
+    }
+}
+
 pub fn parse_grid_tracks(track_str: &str, available_space: f32, gap: f32) -> Vec<f32> {
     let mut tokens: Vec<String> = Vec::new();
     let trimmed = track_str.trim();
@@ -783,6 +835,12 @@ impl LayoutBox {
         let col_widths = parse_grid_tracks(col_template, content_width, col_gap);
         let num_cols = col_widths.len().max(1);
 
+        let areas_str_opt = self.style.get("grid-template-areas").map(|s| s.as_str());
+        let template_areas = areas_str_opt.map(parse_grid_template_areas).unwrap_or_default();
+
+        let auto_flow = self.style.get("grid-auto-flow").map(|s| s.as_str()).unwrap_or("row");
+        let is_dense = auto_flow.contains("dense");
+
         let mut col_offsets: Vec<f32> = Vec::with_capacity(num_cols);
         let mut acc_col_x = 0.0;
         for (c, &cw) in col_widths.iter().enumerate() {
@@ -800,12 +858,28 @@ impl LayoutBox {
         let mut auto_cursor_col = 0;
 
         for (idx, child) in self.children.iter().enumerate() {
-            let col_prop = child.style.get("grid-column").or_else(|| child.style.get("grid-column-start")).map(|s| s.as_str()).unwrap_or("auto");
-            let (explicit_col_start_1, col_span_raw) = parse_grid_line_span(col_prop);
+            let mut area_col_opt = None;
+            let mut area_row_opt = None;
+            if let Some(ga) = child.style.get("grid-area") {
+                let ga_clean = ga.trim();
+                if !template_areas.is_empty() {
+                    if let Some((ac_start, ac_span, ar_start, ar_span)) = find_grid_area_bounds(&template_areas, ga_clean) {
+                        area_col_opt = Some((Some(ac_start + 1), ac_span));
+                        area_row_opt = Some((Some(ar_start + 1), ar_span));
+                    }
+                }
+            }
+
+            let (explicit_col_start_1, col_span_raw) = area_col_opt.unwrap_or_else(|| {
+                let col_prop = child.style.get("grid-column").or_else(|| child.style.get("grid-column-start")).map(|s| s.as_str()).unwrap_or("auto");
+                parse_grid_line_span(col_prop)
+            });
             let col_span = col_span_raw.max(1).min(num_cols);
 
-            let row_prop = child.style.get("grid-row").or_else(|| child.style.get("grid-row-start")).map(|s| s.as_str()).unwrap_or("auto");
-            let (explicit_row_start_1, row_span_raw) = parse_grid_line_span(row_prop);
+            let (explicit_row_start_1, row_span_raw) = area_row_opt.unwrap_or_else(|| {
+                let row_prop = child.style.get("grid-row").or_else(|| child.style.get("grid-row-start")).map(|s| s.as_str()).unwrap_or("auto");
+                parse_grid_line_span(row_prop)
+            });
             let row_span = row_span_raw.max(1);
 
             let (col_start, row_start) = match (explicit_col_start_1, explicit_row_start_1) {
@@ -814,7 +888,7 @@ impl LayoutBox {
                 }
                 (Some(c1), None) => {
                     let c0 = c1.saturating_sub(1).min(num_cols.saturating_sub(1));
-                    let mut r0 = auto_cursor_row;
+                    let mut r0 = if is_dense { 0 } else { auto_cursor_row };
                     loop {
                         while occupied.len() <= r0 + row_span {
                             occupied.push(vec![false; num_cols]);
@@ -864,8 +938,8 @@ impl LayoutBox {
                     (c0.min(num_cols.saturating_sub(col_span)), r0)
                 }
                 (None, None) => {
-                    let mut r0 = auto_cursor_row;
-                    let mut c0 = auto_cursor_col;
+                    let mut r0 = if is_dense { 0 } else { auto_cursor_row };
+                    let mut c0 = if is_dense { 0 } else { auto_cursor_col };
                     loop {
                         if c0 + col_span > num_cols {
                             r0 += 1;
@@ -885,8 +959,10 @@ impl LayoutBox {
                             if !fits { break; }
                         }
                         if fits {
-                            auto_cursor_row = r0;
-                            auto_cursor_col = c0 + col_span;
+                            if !is_dense {
+                                auto_cursor_row = r0;
+                                auto_cursor_col = c0 + col_span;
+                            }
                             break;
                         }
                         c0 += 1;
@@ -952,17 +1028,73 @@ impl LayoutBox {
             acc_row_y += rh + if r + 1 < num_rows { row_gap } else { 0.0 };
         }
 
-        for &(idx, _col_start, _col_span, row_start, _row_span) in &placements {
+        // Alignment resolution: justify-items / align-items / place-items
+        let default_justify_items = self.style.get("justify-items").map(|s| s.as_str()).unwrap_or("stretch");
+        let default_align_items = self.style.get("align-items").map(|s| s.as_str()).unwrap_or("stretch");
+
+        let (resolved_align_items, resolved_justify_items) = if let Some(pi) = self.style.get("place-items") {
+            let parts: Vec<&str> = pi.split_whitespace().collect();
+            let ai = parts.first().copied().unwrap_or("stretch");
+            let ji = parts.get(1).copied().unwrap_or(ai);
+            (ai, ji)
+        } else {
+            (default_align_items, default_justify_items)
+        };
+
+        let justify_content = self.style.get("justify-content").map(|s| s.as_str()).unwrap_or("start");
+        let align_content = self.style.get("align-content").map(|s| s.as_str()).unwrap_or("start");
+
+        let total_cols_w = acc_col_x;
+        let free_x = (content_width - total_cols_w).max(0.0);
+        let col_shift_x = match justify_content {
+            "center" => free_x / 2.0,
+            "end" | "flex-end" | "right" => free_x,
+            _ => 0.0,
+        };
+
+        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
+        let free_y = if explicit_h > acc_row_y { explicit_h - acc_row_y } else { 0.0 };
+        let row_shift_y = match align_content {
+            "center" => free_y / 2.0,
+            "end" | "flex-end" | "bottom" => free_y,
+            _ => 0.0,
+        };
+
+        for &(idx, col_start, col_span, row_start, row_span) in &placements {
             let child = &mut self.children[idx];
-            let target_y = start_y + row_offsets.get(row_start).cloned().unwrap_or(0.0);
-            let dy = target_y - child.y;
-            if dy != 0.0 {
-                child.offset_box_and_descendants(0.0, dy);
+            let cell_x = start_x + col_shift_x + col_offsets.get(col_start).cloned().unwrap_or(0.0);
+            let cell_w = (0..col_span).fold(0.0, |acc, dc| {
+                acc + col_widths.get(col_start + dc).cloned().unwrap_or(0.0)
+            }) + (col_span.saturating_sub(1) as f32) * col_gap;
+
+            let cell_y = start_y + row_shift_y + row_offsets.get(row_start).cloned().unwrap_or(0.0);
+            let cell_h = (0..row_span).fold(0.0, |acc, dr| {
+                acc + row_heights.get(row_start + dr).cloned().unwrap_or(0.0)
+            }) + (row_span.saturating_sub(1) as f32) * row_gap;
+
+            let j_self = child.style.get("justify-self").map(|s| s.as_str()).unwrap_or(resolved_justify_items);
+            let a_self = child.style.get("align-self").map(|s| s.as_str()).unwrap_or(resolved_align_items);
+
+            let item_target_x = match j_self {
+                "center" => cell_x + (cell_w - child.width).max(0.0) / 2.0,
+                "end" | "flex-end" | "right" => cell_x + (cell_w - child.width).max(0.0),
+                _ => cell_x,
+            };
+
+            let item_target_y = match a_self {
+                "center" => cell_y + (cell_h - child.height).max(0.0) / 2.0,
+                "end" | "flex-end" | "bottom" => cell_y + (cell_h - child.height).max(0.0),
+                _ => cell_y,
+            };
+
+            let dx = item_target_x - child.x;
+            let dy = item_target_y - child.y;
+            if dx != 0.0 || dy != 0.0 {
+                child.offset_box_and_descendants(dx, dy);
             }
         }
 
         let total_grid_height = acc_row_y;
-        let explicit_h = self.style.get("height").map(|h| parse_length(h, 0.0, -1.0)).unwrap_or(-1.0);
         let final_content_height = if explicit_h >= 0.0 { explicit_h } else { total_grid_height };
         self.dimensions.content.height = final_content_height;
 
