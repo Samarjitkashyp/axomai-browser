@@ -74,6 +74,10 @@ pub struct AxomaiEngine {
     pub dom_parsing_complete: bool,
     pub dom_content_loaded_dispatched: bool,
     pub load_dispatched: bool,
+    pub is_dragging_scrollbar: bool,
+    pub drag_start_y: f32,
+    pub drag_initial_scroll: f32,
+    pub drag_container_pos: Option<(f32, f32)>,
 }
 
 impl AxomaiEngine {
@@ -115,6 +119,10 @@ impl AxomaiEngine {
             dom_parsing_complete: false,
             dom_content_loaded_dispatched: false,
             load_dispatched: false,
+            is_dragging_scrollbar: false,
+            drag_start_y: 0.0,
+            drag_initial_scroll: 0.0,
+            drag_container_pos: None,
         }
     }
 
@@ -718,6 +726,110 @@ impl AxomaiEngine {
         None
     }
 
+    pub fn handle_pointer_down(&mut self, x: f32, y: f32, button: i32) -> Option<String> {
+        let abs_y = y + self.scroll_y;
+
+        // 1. Check if clicking scrollbar on an inner scroll container
+        let mut clicked_scrollbar = false;
+        if let Some(ref mut layout_box) = self.layout_root {
+            if let Some(sc) = layout_box.find_scroll_container_at_mut(x, abs_y) {
+                let track_x = sc.x + sc.width - 9.0;
+                if x >= track_x && x <= track_x + 9.0 && abs_y >= sc.y && abs_y <= sc.y + sc.height {
+                    self.is_dragging_scrollbar = true;
+                    self.drag_start_y = y;
+                    self.drag_initial_scroll = sc.scroll_top;
+                    self.drag_container_pos = Some((x, abs_y));
+                    clicked_scrollbar = true;
+                }
+            }
+        }
+
+        if !clicked_scrollbar {
+            // Find target element selector from hit test
+            let mut target_selector = "body".to_string();
+            if let Some(ref layout_box) = self.layout_root {
+                if let Some(hit) = layout_box.hit_test(x, abs_y) {
+                    if !hit.id.is_empty() {
+                        target_selector = format!("#{}", hit.id);
+                    } else if !hit.class_name.is_empty() {
+                        target_selector = format!(".{}", hit.class_name.split_whitespace().next().unwrap_or(""));
+                    } else if !hit.tag_name.is_empty() {
+                        target_selector = hit.tag_name.clone();
+                    }
+                }
+            }
+            self.js_engine.dispatch_pointer_event("pointerdown", &target_selector, x, y, button);
+        }
+
+        self.handle_click(x, y, 0.0)
+    }
+
+    pub fn handle_pointer_move(&mut self, x: f32, y: f32) -> Option<String> {
+        let abs_y = y + self.scroll_y;
+
+        // 1. If dragging scrollbar, update scroll position
+        if self.is_dragging_scrollbar {
+            let dy = y - self.drag_start_y;
+            if let Some((cx, cy)) = self.drag_container_pos {
+                if let Some(ref mut layout_box) = self.layout_root {
+                    if let Some(sc) = layout_box.find_scroll_container_at_mut(cx, cy) {
+                        let max_y = (sc.scroll_height - sc.height).max(1.0);
+                        let ratio = sc.scroll_height / sc.height.max(1.0);
+                        sc.scroll_top = (self.drag_initial_scroll + dy * ratio).clamp(0.0, max_y);
+                    }
+                }
+                if let Some(ref layout_box) = self.layout_root {
+                    let mut list = Vec::new();
+                    build_display_list(layout_box, &mut list);
+                    self.display_list = list;
+                    self.is_dirty = true;
+                }
+            } else {
+                let ratio = (self.max_scroll_y + 800.0) / 800.0;
+                self.scroll_y = (self.drag_initial_scroll + dy * ratio).clamp(0.0, self.max_scroll_y);
+                self.is_dirty = true;
+            }
+        }
+
+        // 2. Dispatch pointermove to JS engine
+        let mut target_selector = "body".to_string();
+        if let Some(ref layout_box) = self.layout_root {
+            if let Some(hit) = layout_box.hit_test(x, abs_y) {
+                if !hit.id.is_empty() {
+                    target_selector = format!("#{}", hit.id);
+                } else if !hit.class_name.is_empty() {
+                    target_selector = format!(".{}", hit.class_name.split_whitespace().next().unwrap_or(""));
+                } else if !hit.tag_name.is_empty() {
+                    target_selector = hit.tag_name.clone();
+                }
+            }
+        }
+        self.js_engine.dispatch_pointer_event("pointermove", &target_selector, x, y, 0);
+
+        self.handle_hover(x, y, 0.0)
+    }
+
+    pub fn handle_pointer_up(&mut self, x: f32, y: f32, button: i32) -> Option<String> {
+        self.is_dragging_scrollbar = false;
+        self.drag_container_pos = None;
+
+        let abs_y = y + self.scroll_y;
+        let mut target_selector = "body".to_string();
+        if let Some(ref layout_box) = self.layout_root {
+            if let Some(hit) = layout_box.hit_test(x, abs_y) {
+                if !hit.id.is_empty() {
+                    target_selector = format!("#{}", hit.id);
+                } else if !hit.class_name.is_empty() {
+                    target_selector = format!(".{}", hit.class_name.split_whitespace().next().unwrap_or(""));
+                } else if !hit.tag_name.is_empty() {
+                    target_selector = hit.tag_name.clone();
+                }
+            }
+        }
+        self.js_engine.dispatch_pointer_event("pointerup", &target_selector, x, y, button);
+        None
+    }
+
     fn get_focused_input_val(&self) -> String {
         if let Some(idx) = self.focused_input_idx {
             if idx < self.display_list.len() {
@@ -920,6 +1032,22 @@ impl AxomaiEngine {
                 }
                 DisplayCommand::PopOpacity => {
                     json.push_str(r#"{"type":"popOpacity"}"#);
+                }
+                DisplayCommand::PushTransform { a, b, c, d, tx, ty } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"pushTransform","a":{},"b":{},"c":{},"d":{},"tx":{},"ty":{}}}"#,
+                        a, b, c, d, tx, ty
+                    ));
+                }
+                DisplayCommand::PopTransform => {
+                    json.push_str(r#"{"type":"popTransform"}"#);
+                }
+                DisplayCommand::DrawGradientRect { x1, y1, x2, y2, gradient, border_radius } => {
+                    let escaped_grad = gradient.replace('\\', "\\\\").replace('"', "\\\"");
+                    json.push_str(&format!(
+                        r#"{{"type":"gradientRect","x1":{},"y1":{},"x2":{},"y2":{},"gradient":"{}","borderRadius":{}}}"#,
+                        x1, y1 - scroll_y, x2, y2 - scroll_y, escaped_grad, border_radius
+                    ));
                 }
                 DisplayCommand::DrawText {
                     x,

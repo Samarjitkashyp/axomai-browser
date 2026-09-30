@@ -503,33 +503,56 @@ impl V8JSEngine {
 
     /// Dispatch a native click event with full Event object and bubbling
     pub fn dispatch_click_event(&mut self, target_selector: &str, click_x: f32, click_y: f32) -> bool {
+        self.dispatch_pointer_event("click", target_selector, click_x, click_y, 0)
+    }
+
+    /// Dispatch pointer/mouse events (pointerdown, pointerup, pointermove, mousedown, mouseup, mousemove, click) with true event bubbling
+    pub fn dispatch_pointer_event(
+        &mut self,
+        event_type: &str,
+        target_selector: &str,
+        client_x: f32,
+        client_y: f32,
+        button: i32,
+    ) -> bool {
         let js = format!(
             r#"
             (function() {{
-                const el = document.querySelector("{sel}") || document.getElementById("{sel}");
+                const el = document.querySelector("{sel}") || document.getElementById("{sel}") || document.body;
                 if (el) {{
-                    const event = {{
-                        type: 'click',
-                        target: el,
-                        currentTarget: el,
+                    const opts = {{
                         clientX: {x},
                         clientY: {y},
+                        button: {btn},
+                        buttons: {btns},
                         bubbles: true,
-                        cancelable: true,
-                        defaultPrevented: false,
-                        _stopped: false,
-                        preventDefault: function() {{ this.defaultPrevented = true; }},
-                        stopPropagation: function() {{ this._stopped = true; }}
+                        cancelable: true
                     }};
-                    el.dispatchEvent(event);
+                    if (typeof PointerEvent === 'function') {{
+                        const pe = new PointerEvent("{ev}", opts);
+                        el.dispatchEvent(pe);
+                    }}
+                    if (typeof MouseEvent === 'function') {{
+                        const me = new MouseEvent("{mev}", opts);
+                        el.dispatchEvent(me);
+                    }}
                     return true;
                 }}
                 return false;
             }})();
             "#,
             sel = target_selector,
-            x = click_x,
-            y = click_y
+            ev = event_type,
+            mev = match event_type {
+                "pointerdown" => "mousedown",
+                "pointerup" => "mouseup",
+                "pointermove" => "mousemove",
+                other => other,
+            },
+            x = client_x,
+            y = client_y,
+            btn = button,
+            btns = if event_type == "pointerdown" || button > 0 { 1 } else { 0 },
         );
         self.execute(&js).unwrap_or(false)
     }
@@ -1915,8 +1938,23 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             this.clientX = options.clientX || 0;
             this.clientY = options.clientY || 0;
             this.button = options.button || 0;
+            this.buttons = options.buttons || 0;
         };
         MouseEvent.prototype = Object.create(Event.prototype);
+
+        window.PointerEvent = function(type, options) {
+            MouseEvent.call(this, type, options);
+            options = options || {};
+            this.pointerId = options.pointerId || 1;
+            this.width = options.width || 1;
+            this.height = options.height || 1;
+            this.pressure = options.pressure || (options.buttons ? 0.5 : 0);
+            this.tiltX = options.tiltX || 0;
+            this.tiltY = options.tiltY || 0;
+            this.pointerType = options.pointerType || 'mouse';
+            this.isPrimary = options.isPrimary !== undefined ? options.isPrimary : true;
+        };
+        PointerEvent.prototype = Object.create(MouseEvent.prototype);
 
         window.KeyboardEvent = function(type, options) {
             Event.call(this, type, options);
@@ -1925,6 +1963,38 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             this.code = options.code || '';
         };
         KeyboardEvent.prototype = Object.create(Event.prototype);
+
+        // Window Scrolling APIs
+        window.scrollX = 0;
+        window.scrollY = 0;
+        window.pageXOffset = 0;
+        window.pageYOffset = 0;
+        window.scrollTo = function(x, y) {
+            let targetX = 0, targetY = 0;
+            if (typeof x === 'object' && x !== null) {
+                targetX = x.left !== undefined ? x.left : (window.scrollX || 0);
+                targetY = x.top !== undefined ? x.top : (window.scrollY || 0);
+            } else {
+                targetX = Number(x) || 0;
+                targetY = Number(y) || 0;
+            }
+            window.scrollX = targetX;
+            window.scrollY = targetY;
+            window.pageXOffset = targetX;
+            window.pageYOffset = targetY;
+        };
+        window.scroll = window.scrollTo;
+        window.scrollBy = function(dx, dy) {
+            let targetX = 0, targetY = 0;
+            if (typeof dx === 'object' && dx !== null) {
+                targetX = dx.left || 0;
+                targetY = dx.top || 0;
+            } else {
+                targetX = Number(dx) || 0;
+                targetY = Number(dy) || 0;
+            }
+            window.scrollTo(window.scrollX + targetX, window.scrollY + targetY);
+        };
 
         // --------------------------------------------------------------------
         // Universal W3C EventTarget with True Capture & Bubble Phases

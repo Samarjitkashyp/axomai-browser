@@ -193,6 +193,94 @@ pub fn parse_border_properties(style: &mut HashMap<String, String>, containing_w
     border_widths
 }
 
+pub fn parse_transform_matrix(transform_str: &str, width: f32, height: f32) -> Option<[f32; 6]> {
+    let trimmed = transform_str.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return None;
+    }
+
+    let mut a: f32 = 1.0;
+    let mut b: f32 = 0.0;
+    let mut c: f32 = 0.0;
+    let mut d: f32 = 1.0;
+    let mut tx: f32 = 0.0;
+    let mut ty: f32 = 0.0;
+
+    if let Some(start) = trimmed.find("translate(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = &trimmed[start + 10..start + end];
+            let parts: Vec<&str> = inner.split(',').collect();
+            if !parts.is_empty() {
+                tx = parse_length(parts[0], width, 0.0);
+            }
+            if parts.len() > 1 {
+                ty = parse_length(parts[1], height, 0.0);
+            }
+        }
+    } else if let Some(start) = trimmed.find("translateX(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = &trimmed[start + 11..start + end];
+            tx = parse_length(inner, width, 0.0);
+        }
+    } else if let Some(start) = trimmed.find("translateY(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = &trimmed[start + 11..start + end];
+            ty = parse_length(inner, height, 0.0);
+        }
+    }
+
+    if let Some(start) = trimmed.find("rotate(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = trimmed[start + 7..start + end].trim();
+            let rad = if inner.ends_with("deg") {
+                inner[..inner.len() - 3].trim().parse::<f32>().unwrap_or(0.0).to_radians()
+            } else if inner.ends_with("rad") {
+                inner[..inner.len() - 3].trim().parse::<f32>().unwrap_or(0.0)
+            } else {
+                inner.parse::<f32>().unwrap_or(0.0).to_radians()
+            };
+            a = rad.cos();
+            b = rad.sin();
+            c = -rad.sin();
+            d = rad.cos();
+        }
+    }
+
+    if let Some(start) = trimmed.find("scale(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = &trimmed[start + 6..start + end];
+            let parts: Vec<&str> = inner.split(',').collect();
+            if !parts.is_empty() {
+                let sx = parts[0].trim().parse::<f32>().unwrap_or(1.0);
+                let sy = if parts.len() > 1 { parts[1].trim().parse::<f32>().unwrap_or(sx) } else { sx };
+                a *= sx;
+                d *= sy;
+            }
+        }
+    }
+
+    if let Some(start) = trimmed.find("matrix(") {
+        if let Some(end) = trimmed[start..].find(')') {
+            let inner = &trimmed[start + 7..start + end];
+            let parts: Vec<&str> = inner.split(',').map(|s| s.trim()).collect();
+            if parts.len() == 6 {
+                if let (Ok(m_a), Ok(m_b), Ok(m_c), Ok(m_d), Ok(m_tx), Ok(m_ty)) = (
+                    parts[0].parse::<f32>(),
+                    parts[1].parse::<f32>(),
+                    parts[2].parse::<f32>(),
+                    parts[3].parse::<f32>(),
+                    parts[4].parse::<f32>(),
+                    parts[5].parse::<f32>(),
+                ) {
+                    return Some([m_a, m_b, m_c, m_d, m_tx, m_ty]);
+                }
+            }
+        }
+    }
+
+    Some([a, b, c, d, tx, ty])
+}
+
 pub fn get_href(node: &NodePtr) -> String {
     let mut curr = Some(node.clone());
     while let Some(n) = curr {
@@ -257,6 +345,9 @@ pub struct LayoutBox {
     pub scroll_height: f32,
     pub scroll_width: f32,
     pub is_scroll_container: bool,
+    pub transform: String,
+    pub transform_matrix: Option<[f32; 6]>,
+    pub background_gradient: Option<String>,
 }
 
 impl LayoutBox {
@@ -273,6 +364,15 @@ impl LayoutBox {
         let border_radius = parse_px(style.get("border-radius").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
         let box_shadow = style.get("box-shadow").cloned().unwrap_or_default();
         let opacity = style.get("opacity").and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(1.0).clamp(0.0, 1.0);
+        let transform = style.get("transform").cloned().unwrap_or_default();
+
+        let background_gradient = style.get("background").or_else(|| style.get("background-image")).and_then(|bg| {
+            if bg.contains("gradient") {
+                Some(bg.clone())
+            } else {
+                None
+            }
+        });
 
         LayoutBox {
             box_type,
@@ -304,6 +404,9 @@ impl LayoutBox {
             scroll_height: 0.0,
             scroll_width: 0.0,
             is_scroll_container: false,
+            transform,
+            transform_matrix: None,
+            background_gradient,
         }
     }
 
@@ -436,6 +539,10 @@ impl LayoutBox {
         self.scroll_width = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
         let is_scroll_overflow = self.overflow == "auto" || self.overflow == "scroll" || self.overflow == "hidden";
         self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
+
+        if !self.transform.is_empty() {
+            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+        }
 
         // Apply positioning offsets
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
@@ -739,6 +846,10 @@ impl LayoutBox {
         self.scroll_width = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
         let is_scroll_overflow = self.overflow == "auto" || self.overflow == "scroll" || self.overflow == "hidden";
         self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
+
+        if !self.transform.is_empty() {
+            self.transform_matrix = parse_transform_matrix(&self.transform, self.width, self.height);
+        }
 
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
 

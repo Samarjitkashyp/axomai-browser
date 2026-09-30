@@ -251,6 +251,34 @@ window.__axomai_render_display_list = function(displayList) {
       canvas.focus();
     });
 
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.focus();
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      if (window.ipc) {
+        window.ipc.postMessage(`pointer:down,${e.button},${px},${py}`);
+      }
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      if (window.ipc) {
+        window.ipc.postMessage(`pointer:move,0,${px},${py}`);
+      }
+    });
+
+    canvas.addEventListener('pointerup', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      if (window.ipc) {
+        window.ipc.postMessage(`pointer:up,${e.button},${px},${py}`);
+      }
+    });
+
     canvas.addEventListener('click', (e) => {
       canvas.focus();
       const rect = canvas.getBoundingClientRect();
@@ -306,7 +334,12 @@ window.__axomai_render_display_list = function(displayList) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (const cmd of list) {
-    if (cmd.type === 'pushOpacity') {
+    if (cmd.type === 'pushTransform') {
+      ctx.save();
+      ctx.transform(cmd.a, cmd.b, cmd.c, cmd.d, cmd.tx, cmd.ty);
+    } else if (cmd.type === 'popTransform') {
+      ctx.restore();
+    } else if (cmd.type === 'pushOpacity') {
       ctx.save();
       ctx.globalAlpha = (ctx.globalAlpha || 1.0) * (cmd.opacity !== undefined ? cmd.opacity : 1.0);
     } else if (cmd.type === 'popOpacity') {
@@ -337,6 +370,58 @@ window.__axomai_render_display_list = function(displayList) {
         ctx.fill();
       } else {
         ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      }
+      ctx.restore();
+    } else if (cmd.type === 'gradientRect') {
+      ctx.save();
+      const w = cmd.x2 - cmd.x1;
+      const h = cmd.y2 - cmd.y1;
+      let gradObj = null;
+      const gradStr = cmd.gradient || '';
+      if (gradStr.includes('linear-gradient')) {
+        let isHorizontal = gradStr.includes('to right') || gradStr.includes('90deg');
+        let isDiagonal = gradStr.includes('to bottom right') || gradStr.includes('135deg') || gradStr.includes('45deg');
+        if (isDiagonal) {
+          gradObj = ctx.createLinearGradient(cmd.x1, cmd.y1, cmd.x2, cmd.y2);
+        } else if (isHorizontal) {
+          gradObj = ctx.createLinearGradient(cmd.x1, cmd.y1, cmd.x2, cmd.y1);
+        } else {
+          gradObj = ctx.createLinearGradient(cmd.x1, cmd.y1, cmd.x1, cmd.y2);
+        }
+        const matches = gradStr.match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)/g) || [];
+        const colors = matches.filter(m => !['linear', 'gradient', 'to', 'right', 'left', 'bottom', 'top', 'deg'].includes(m.toLowerCase()));
+        if (colors.length >= 2) {
+          colors.forEach((c, idx) => {
+            try { gradObj.addColorStop(idx / (colors.length - 1), c); } catch (e) {}
+          });
+        } else if (colors.length === 1) {
+          try {
+            gradObj.addColorStop(0, colors[0]);
+            gradObj.addColorStop(1, colors[0]);
+          } catch (e) {}
+        }
+      } else if (gradStr.includes('radial-gradient')) {
+        const cx = cmd.x1 + w / 2;
+        const cy = cmd.y1 + h / 2;
+        const r = Math.max(w, h) / 2;
+        gradObj = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        const matches = gradStr.match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)/g) || [];
+        const colors = matches.filter(m => !['radial', 'gradient', 'circle', 'at', 'center'].includes(m.toLowerCase()));
+        if (colors.length >= 2) {
+          colors.forEach((c, idx) => {
+            try { gradObj.addColorStop(idx / (colors.length - 1), c); } catch (e) {}
+          });
+        }
+      }
+
+      ctx.fillStyle = gradObj || '#4a90e2';
+      const r = cmd.borderRadius || 0;
+      if (r > 0 && typeof ctx.roundRect === 'function') {
+        ctx.beginPath();
+        ctx.roundRect(cmd.x1, cmd.y1, w, h, r);
+        ctx.fill();
+      } else {
+        ctx.fillRect(cmd.x1, cmd.y1, w, h);
       }
       ctx.restore();
     } else if (cmd.type === 'rect') {

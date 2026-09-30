@@ -47,6 +47,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if msg.starts_with("navigate:") {
                     let nav_url = &msg[9..];
                     let _ = eng.load_url(nav_url, 1380.0, 860.0);
+                } else if msg.starts_with("pointer:") {
+                    let parts: Vec<&str> = msg[8..].split(',').collect();
+                    if parts.len() == 4 {
+                        let action = parts[0];
+                        let btn = parts[1].parse::<i32>().unwrap_or(0);
+                        if let (Ok(x), Ok(y)) = (parts[2].parse::<f32>(), parts[3].parse::<f32>()) {
+                            match action {
+                                "down" => {
+                                    if let Some(nav_url) = eng.handle_pointer_down(x, y, btn) {
+                                        println!("[Axomai Desktop] Pointer down navigating: {}", nav_url);
+                                        let _ = eng.load_url(&nav_url, 1380.0, 860.0);
+                                    }
+                                }
+                                "move" => {
+                                    let _ = eng.handle_pointer_move(x, y);
+                                }
+                                "up" => {
+                                    let _ = eng.handle_pointer_up(x, y, btn);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                 } else if msg.starts_with("click:") {
                     let coords = &msg[6..];
                     if let Some(comma) = coords.find(',') {

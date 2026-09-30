@@ -159,7 +159,14 @@ pub extern "C" fn axomai_engine_get_display_command(
             ffi_cmd.height = *height;
             copy_to_c_buf(color, &mut ffi_cmd.color);
         }
-        DisplayCommand::PushClip { .. } | DisplayCommand::PopClip | DisplayCommand::PushOpacity { .. } | DisplayCommand::PopOpacity => {
+        DisplayCommand::DrawGradientRect { x1, y1, x2, y2, .. } => {
+            ffi_cmd.cmd_type = 0;
+            ffi_cmd.x = *x1;
+            ffi_cmd.y = *y1;
+            ffi_cmd.width = *x2 - *x1;
+            ffi_cmd.height = *y2 - *y1;
+        }
+        DisplayCommand::PushClip { .. } | DisplayCommand::PopClip | DisplayCommand::PushOpacity { .. } | DisplayCommand::PopOpacity | DisplayCommand::PushTransform { .. } | DisplayCommand::PopTransform => {
             // Non-rendering control commands
             return false;
         }

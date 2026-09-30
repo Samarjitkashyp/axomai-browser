@@ -35,6 +35,23 @@ pub enum DisplayCommand {
         opacity: f32,
     },
     PopOpacity,
+    PushTransform {
+        a: f32,
+        b: f32,
+        c: f32,
+        d: f32,
+        tx: f32,
+        ty: f32,
+    },
+    PopTransform,
+    DrawGradientRect {
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        gradient: String,
+        border_radius: f32,
+    },
     DrawText {
         x: f32,
         y: f32,
@@ -172,7 +189,20 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
     let cur_x = box_tree.x + offset_x;
     let cur_y = box_tree.y + offset_y;
 
-    // 0. Opacity Stacking Context
+    // 0. Transform Stacking Context
+    let has_transform = box_tree.transform_matrix.is_some();
+    if let Some([a, b, c, d, tx, ty]) = box_tree.transform_matrix {
+        display_list.push(DisplayCommand::PushTransform {
+            a,
+            b,
+            c,
+            d,
+            tx,
+            ty,
+        });
+    }
+
+    // 0b. Opacity Stacking Context
     let has_opacity = box_tree.opacity < 0.999;
     if has_opacity {
         display_list.push(DisplayCommand::PushOpacity {
@@ -200,8 +230,17 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
         }
     }
 
-    // 2. Paint background
-    if let Some(bg_color) = box_tree.style.get("background-color") {
+    // 2. Paint Gradient Background
+    if let Some(ref grad) = box_tree.background_gradient {
+        display_list.push(DisplayCommand::DrawGradientRect {
+            x1: cur_x,
+            y1: cur_y,
+            x2: cur_x + box_tree.width,
+            y2: cur_y + box_tree.height,
+            gradient: grad.clone(),
+            border_radius: box_tree.border_radius,
+        });
+    } else if let Some(bg_color) = box_tree.style.get("background-color") {
         if bg_color != "transparent" && !bg_color.is_empty() {
             display_list.push(DisplayCommand::DrawRect {
                 x1: cur_x,
@@ -393,6 +432,10 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
 
     if has_opacity {
         display_list.push(DisplayCommand::PopOpacity);
+    }
+
+    if has_transform {
+        display_list.push(DisplayCommand::PopTransform);
     }
 }
 
