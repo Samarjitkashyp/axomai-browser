@@ -251,6 +251,12 @@ pub struct LayoutBox {
     pub overflow: String,
     pub border_radius: f32,
     pub box_shadow: String,
+    pub opacity: f32,
+    pub scroll_top: f32,
+    pub scroll_left: f32,
+    pub scroll_height: f32,
+    pub scroll_width: f32,
+    pub is_scroll_container: bool,
 }
 
 impl LayoutBox {
@@ -266,6 +272,7 @@ impl LayoutBox {
         let overflow = style.get("overflow").cloned().unwrap_or_else(|| "visible".to_string());
         let border_radius = parse_px(style.get("border-radius").map(|s| s.as_str()).unwrap_or("0px"), 0.0);
         let box_shadow = style.get("box-shadow").cloned().unwrap_or_default();
+        let opacity = style.get("opacity").and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(1.0).clamp(0.0, 1.0);
 
         LayoutBox {
             box_type,
@@ -291,6 +298,12 @@ impl LayoutBox {
             overflow,
             border_radius,
             box_shadow,
+            opacity,
+            scroll_top: 0.0,
+            scroll_left: 0.0,
+            scroll_height: 0.0,
+            scroll_width: 0.0,
+            is_scroll_container: false,
         }
     }
 
@@ -418,6 +431,11 @@ impl LayoutBox {
         self.y = border_box.y;
         self.width = border_box.width;
         self.height = border_box.height;
+
+        self.scroll_height = computed_content_height + self.dimensions.padding.top + self.dimensions.padding.bottom + self.dimensions.border.top + self.dimensions.border.bottom;
+        self.scroll_width = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
+        let is_scroll_overflow = self.overflow == "auto" || self.overflow == "scroll" || self.overflow == "hidden";
+        self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
 
         // Apply positioning offsets
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
@@ -717,6 +735,11 @@ impl LayoutBox {
         self.width = border_box.width;
         self.height = border_box.height;
 
+        self.scroll_height = computed_h + self.dimensions.padding.top + self.dimensions.padding.bottom + self.dimensions.border.top + self.dimensions.border.bottom;
+        self.scroll_width = content_width + self.dimensions.padding.left + self.dimensions.padding.right + self.dimensions.border.left + self.dimensions.border.right;
+        let is_scroll_overflow = self.overflow == "auto" || self.overflow == "scroll" || self.overflow == "hidden";
+        self.is_scroll_container = is_scroll_overflow && (self.scroll_height > self.height || self.scroll_width > self.width);
+
         self.apply_position_offsets(x, y, max_width, self.dimensions.content.height);
 
         self.dimensions.margin_box().height
@@ -738,6 +761,16 @@ impl LayoutBox {
             self.y += offset_y;
             self.dimensions.content.x += offset_x;
             self.dimensions.content.y += offset_y;
+        } else if pos == "sticky" {
+            let top_opt = self.style.get("top").map(|v| parse_length(v, containing_h, 0.0));
+            if let Some(sticky_top) = top_opt {
+                let clamped_top = self.y.max(parent_y + sticky_top);
+                let max_y = (parent_y + containing_h - self.height).max(parent_y);
+                let final_y = clamped_top.min(max_y);
+                let diff_y = final_y - self.y;
+                self.y = final_y;
+                self.dimensions.content.y += diff_y;
+            }
         } else if pos == "absolute" || pos == "fixed" {
             let top_opt = self.style.get("top").map(|v| parse_length(v, containing_h, 0.0));
             let left_opt = self.style.get("left").map(|v| parse_length(v, containing_w, 0.0));
@@ -762,6 +795,61 @@ impl LayoutBox {
                 self.y = base_y + containing_h - self.height - bottom;
                 self.dimensions.content.y = self.y;
             }
+        }
+    }
+
+    /// Accurate hit-testing traversing stacking contexts (highest z-index layer tested first) and accounting for nested scroll offsets
+    pub fn hit_test(&self, target_x: f32, target_y: f32) -> Option<&LayoutBox> {
+        let inside = target_x >= self.x && target_x <= self.x + self.width && target_y >= self.y && target_y <= self.y + self.height;
+        if !inside && self.overflow == "hidden" {
+            return None;
+        }
+
+        let inner_target_x = target_x + self.scroll_left;
+        let inner_target_y = target_y + self.scroll_top;
+
+        let mut sorted_children: Vec<&LayoutBox> = self.children.iter().collect();
+        sorted_children.sort_by(|a, b| {
+            let a_level = if a.z_index < 0 { 0 } else if !a.is_positioned && a.z_index == 0 { 1 } else if a.is_positioned && a.z_index == 0 { 2 } else { 3 };
+            let b_level = if b.z_index < 0 { 0 } else if !b.is_positioned && b.z_index == 0 { 1 } else if b.is_positioned && b.z_index == 0 { 2 } else { 3 };
+            if a_level != b_level { b_level.cmp(&a_level) } else { b.z_index.cmp(&a.z_index) }
+        });
+
+        for child in sorted_children {
+            if let Some(hit) = child.hit_test(inner_target_x, inner_target_y) {
+                return Some(hit);
+            }
+        }
+
+        if inside {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    /// Finds the deepest scroll container containing target point (x, y) that has scrollable content
+    pub fn find_scroll_container_at_mut(&mut self, target_x: f32, target_y: f32) -> Option<&mut LayoutBox> {
+        let inside = target_x >= self.x && target_x <= self.x + self.width && target_y >= self.y && target_y <= self.y + self.height;
+        if !inside {
+            return None;
+        }
+
+        let inner_x = target_x + self.scroll_left;
+        let inner_y = target_y + self.scroll_top;
+
+        for child in self.children.iter_mut().rev() {
+            if let Some(sc) = child.find_scroll_container_at_mut(inner_x, inner_y) {
+                return Some(sc);
+            }
+        }
+
+        let max_scroll_y = (self.scroll_height - self.height).max(0.0);
+        let max_scroll_x = (self.scroll_width - self.width).max(0.0);
+        if (self.overflow == "auto" || self.overflow == "scroll") && (max_scroll_y > 0.0 || max_scroll_x > 0.0) {
+            Some(self)
+        } else {
+            None
         }
     }
 

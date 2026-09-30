@@ -263,8 +263,11 @@ window.__axomai_render_display_list = function(displayList) {
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
       if (window.ipc) {
-        window.ipc.postMessage(`wheel:${e.deltaY}`);
+        window.ipc.postMessage(`wheel:${e.deltaY},${e.deltaX || 0},${clickX},${clickY}`);
       }
     }, { passive: false });
 
@@ -303,7 +306,12 @@ window.__axomai_render_display_list = function(displayList) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (const cmd of list) {
-    if (cmd.type === 'pushClip') {
+    if (cmd.type === 'pushOpacity') {
+      ctx.save();
+      ctx.globalAlpha = (ctx.globalAlpha || 1.0) * (cmd.opacity !== undefined ? cmd.opacity : 1.0);
+    } else if (cmd.type === 'popOpacity') {
+      ctx.restore();
+    } else if (cmd.type === 'pushClip') {
       ctx.save();
       ctx.beginPath();
       const r = cmd.borderRadius || 0;

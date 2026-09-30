@@ -159,7 +159,7 @@ pub extern "C" fn axomai_engine_get_display_command(
             ffi_cmd.height = *height;
             copy_to_c_buf(color, &mut ffi_cmd.color);
         }
-        DisplayCommand::PushClip { .. } | DisplayCommand::PopClip => {
+        DisplayCommand::PushClip { .. } | DisplayCommand::PopClip | DisplayCommand::PushOpacity { .. } | DisplayCommand::PopOpacity => {
             // Non-rendering control commands
             return false;
         }

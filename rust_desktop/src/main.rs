@@ -64,8 +64,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = eng.load_url(&nav_url, 1380.0, 860.0);
                     }
                 } else if msg.starts_with("wheel:") {
-                    let delta = &msg[6..];
-                    if let Ok(dy) = delta.parse::<f32>() {
+                    let parts: Vec<&str> = msg[6..].split(',').collect();
+                    if parts.len() == 4 {
+                        if let (Ok(dy), Ok(dx), Ok(cx), Ok(cy)) = (
+                            parts[0].parse::<f32>(),
+                            parts[1].parse::<f32>(),
+                            parts[2].parse::<f32>(),
+                            parts[3].parse::<f32>(),
+                        ) {
+                            let _ = eng.handle_scroll_at(cx, cy, dx, dy, 1380.0, 860.0);
+                        }
+                    } else if let Ok(dy) = msg[6..].parse::<f32>() {
                         let _ = eng.handle_scroll(dy);
                     }
                 } else if msg == "back" {

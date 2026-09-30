@@ -519,6 +519,48 @@ impl AxomaiEngine {
     }
 
     pub fn handle_scroll(&mut self, delta_y: f32) -> bool {
+        self.handle_scroll_at(0.0, 0.0, 0.0, delta_y, 1200.0, 800.0)
+    }
+
+    pub fn handle_scroll_at(&mut self, cursor_x: f32, cursor_y: f32, delta_x: f32, delta_y: f32, _viewport_w: f32, _viewport_h: f32) -> bool {
+        let abs_y = cursor_y + self.scroll_y;
+
+        // 1. Try scrolling an inner scroll container if mouse is over one
+        let mut scrolled_container = false;
+        if let Some(ref mut layout_box) = self.layout_root {
+            if let Some(sc) = layout_box.find_scroll_container_at_mut(cursor_x, abs_y) {
+                let max_y = (sc.scroll_height - sc.height).max(0.0);
+                let max_x = (sc.scroll_width - sc.width).max(0.0);
+                let old_top = sc.scroll_top;
+                let old_left = sc.scroll_left;
+
+                if max_y > 0.0 && delta_y != 0.0 {
+                    sc.scroll_top = (sc.scroll_top + delta_y).clamp(0.0, max_y);
+                    if (sc.scroll_top - old_top).abs() > 0.1 {
+                        scrolled_container = true;
+                    }
+                }
+                if max_x > 0.0 && delta_x != 0.0 {
+                    sc.scroll_left = (sc.scroll_left + delta_x).clamp(0.0, max_x);
+                    if (sc.scroll_left - old_left).abs() > 0.1 {
+                        scrolled_container = true;
+                    }
+                }
+            }
+        }
+
+        if scrolled_container {
+            // Rebuild display list with updated container scroll offsets
+            if let Some(ref layout_box) = self.layout_root {
+                let mut list = Vec::new();
+                build_display_list(layout_box, &mut list);
+                self.display_list = list;
+                self.is_dirty = true;
+            }
+            return true;
+        }
+
+        // 2. Fallback to viewport scroll
         let old_scroll = self.scroll_y;
         self.scroll_y = (self.scroll_y + delta_y).clamp(0.0, self.max_scroll_y);
         let changed = (old_scroll - self.scroll_y).abs() > 0.1;
@@ -547,6 +589,21 @@ impl AxomaiEngine {
             self.is_dirty = true;
         }
 
+        // 1. First perform tree-based hit test if layout tree exists
+        if let Some(ref layout_box) = self.layout_root {
+            if let Some(hit) = layout_box.hit_test(click_x, abs_y) {
+                if !hit.href.is_empty() {
+                    self.js_engine.dispatch_click_event("a", click_x, abs_y);
+                    if let Some(ref url_obj) = self.current_url {
+                        return Some(url_obj.resolve(&hit.href));
+                    } else {
+                        return Some(hit.href.clone());
+                    }
+                }
+            }
+        }
+
+        // 2. Match interactive display commands
         for (idx, cmd) in self.display_list.iter_mut().enumerate() {
             match cmd {
                 DisplayCommand::DrawInput {
@@ -839,10 +896,11 @@ impl AxomaiEngine {
                     spread_radius,
                     color,
                     border_radius,
+                    is_inset,
                 } => {
                     json.push_str(&format!(
-                        r#"{{"type":"boxShadow","x":{},"y":{},"width":{},"height":{},"offsetX":{},"offsetY":{},"blur":{},"spread":{},"color":"{}","borderRadius":{}}}"#,
-                        x, y - scroll_y, width, height, offset_x, offset_y, blur_radius, spread_radius, color, border_radius
+                        r#"{{"type":"boxShadow","x":{},"y":{},"width":{},"height":{},"offsetX":{},"offsetY":{},"blur":{},"spread":{},"color":"{}","borderRadius":{},"isInset":{}}}"#,
+                        x, y - scroll_y, width, height, offset_x, offset_y, blur_radius, spread_radius, color, border_radius, is_inset
                     ));
                 }
                 DisplayCommand::PushClip { x, y, width, height, border_radius } => {
@@ -853,6 +911,15 @@ impl AxomaiEngine {
                 }
                 DisplayCommand::PopClip => {
                     json.push_str(r#"{"type":"popClip"}"#);
+                }
+                DisplayCommand::PushOpacity { opacity } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"pushOpacity","opacity":{}}}"#,
+                        opacity
+                    ));
+                }
+                DisplayCommand::PopOpacity => {
+                    json.push_str(r#"{"type":"popOpacity"}"#);
                 }
                 DisplayCommand::DrawText {
                     x,
