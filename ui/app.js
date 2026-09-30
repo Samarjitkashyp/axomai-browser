@@ -1,6 +1,24 @@
-// Axomai Browser - Interactive UI Handler (Mockup & Native Bridge Ready)
+// Axomai Browser - Interactive UI Handler & Native Engine Bridge
+
+const imageCache = new Map();
+let lastDisplayList = null;
 
 document.addEventListener('DOMContentLoaded', () => {
+  const newTabView = document.getElementById('newTabView');
+  const engineViewport = document.getElementById('engineViewport');
+  const omnibox = document.querySelector('.omnibox-input');
+
+  function showNewTab() {
+    if (newTabView) newTabView.style.display = 'flex';
+    if (engineViewport) engineViewport.style.display = 'none';
+    if (omnibox) omnibox.value = '';
+  }
+
+  function showEngineViewport() {
+    if (newTabView) newTabView.style.display = 'none';
+    if (engineViewport) engineViewport.style.display = 'flex';
+  }
+
   // 1. Tab Switching
   const tabs = document.querySelectorAll('.tab');
   tabs.forEach(tab => {
@@ -14,6 +32,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       tabs.forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
+
+      const tabType = tab.getAttribute('data-tab');
+      if (tabType === 'new-tab') {
+        showNewTab();
+      } else if (tabType === 'assam') {
+        navigateTo('https://tourism.assam.gov.in');
+      } else if (tabType === 'youtube') {
+        navigateTo('https://youtube.com');
+      }
     });
   });
 
@@ -24,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const tabsContainer = document.querySelector('.tabs-container');
       const newTab = document.createElement('div');
       newTab.className = 'tab active';
+      newTab.setAttribute('data-tab', 'new-tab');
       newTab.innerHTML = `
         <div class="tab-icon">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
@@ -40,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
       tabsContainer.insertBefore(newTab, btnNewTab);
+      showNewTab();
 
       newTab.addEventListener('click', (e) => {
         if (e.target.closest('.tab-close')) {
@@ -49,11 +78,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         newTab.classList.add('active');
+        showNewTab();
       });
     });
   }
 
-  // 3. AI Sidebar Toggle
+  // 3. Left Sidebar Home Button
+  const navHome = document.querySelector('.nav-item.active') || document.querySelector('.nav-item');
+  if (navHome) {
+    navHome.addEventListener('click', () => {
+      showNewTab();
+    });
+  }
+
+  // 4. AI Sidebar Toggle
   const btnToggleAi = document.getElementById('btnToggleAi');
   const btnCloseAi = document.getElementById('btnCloseAi');
   const aiSidebar = document.getElementById('aiSidebar');
@@ -70,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 4. AI Sub-tabs (Chat, Summarize, Translate, Tools)
+  // 5. AI Sub-tabs (Chat, Summarize, Translate, Tools)
   const aiTabs = document.querySelectorAll('.ai-tab');
   aiTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -79,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 5. News Feed Card Tabs
+  // 6. News Feed Card Tabs
   const cardTabs = document.querySelectorAll('.card-tab');
   cardTabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -88,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 6. Navigation Buttons Feedback
+  // 7. Navigation Buttons Feedback
   const btnReload = document.getElementById('btnReload');
   if (btnReload) {
     btnReload.addEventListener('click', () => {
@@ -98,11 +136,18 @@ document.addEventListener('DOMContentLoaded', () => {
         btnReload.style.transform = '';
         btnReload.style.transition = '';
       }, 500);
+      if (omnibox && omnibox.value.trim()) {
+        navigateTo(omnibox.value.trim());
+      }
     });
   }
 
   // Helper: Navigate via Native Rust Core IPC or fallback
   function navigateTo(url) {
+    if (omnibox) {
+      omnibox.value = url;
+    }
+    showEngineViewport();
     if (window.ipc) {
       window.ipc.postMessage('navigate:' + url);
     } else {
@@ -114,8 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 7. Omnibox Enter handling
-  const omnibox = document.querySelector('.omnibox-input');
+  // 8. Omnibox Enter handling
   if (omnibox) {
     omnibox.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -127,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 8. Search Input Enter handling
+  // 9. Search Input Enter handling
   const searchInput = document.querySelector('.search-input');
   if (searchInput) {
     searchInput.addEventListener('keydown', (e) => {
@@ -139,28 +183,48 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // 10. Shortcut items click
+  document.querySelectorAll('.shortcut-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      const href = item.getAttribute('href');
+      if (href && href.startsWith('http')) {
+        e.preventDefault();
+        navigateTo(href);
+      }
+    });
+  });
 });
 
 // Axomai Core Rust Engine DisplayList HTML5 Canvas Rendering Bridge
 window.__axomai_render_display_list = function(displayList) {
   const list = typeof displayList === 'string' ? JSON.parse(displayList) : displayList;
-  if (!Array.isArray(list) || list.length === 0) return;
+  if (!Array.isArray(list)) return;
 
+  lastDisplayList = list;
+
+  const engineViewport = document.getElementById('engineViewport');
+  const newTabView = document.getElementById('newTabView');
   let canvas = document.getElementById('axomai-engine-canvas');
+
+  if (list.length === 0) {
+    if (newTabView) newTabView.style.display = 'flex';
+    if (engineViewport) engineViewport.style.display = 'none';
+    return;
+  }
+
+  if (newTabView) newTabView.style.display = 'none';
+  if (engineViewport) engineViewport.style.display = 'flex';
+
   if (!canvas) {
     canvas = document.createElement('canvas');
     canvas.id = 'axomai-engine-canvas';
-    canvas.style.position = 'fixed';
-    canvas.style.top = '88px';
-    canvas.style.left = '72px';
-    canvas.style.right = '0';
-    canvas.style.bottom = '0';
-    canvas.style.width = 'calc(100vw - 72px)';
-    canvas.style.height = 'calc(100vh - 88px)';
-    canvas.style.zIndex = '900';
-    canvas.style.backgroundColor = '#ffffff';
-    document.body.appendChild(canvas);
+    if (engineViewport) {
+      engineViewport.appendChild(canvas);
+    }
+  }
 
+  if (!canvas._clickBound) {
     canvas.addEventListener('click', (e) => {
       const rect = canvas.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
@@ -169,10 +233,14 @@ window.__axomai_render_display_list = function(displayList) {
         window.ipc.postMessage(`click:${clickX},${clickY}`);
       }
     });
+    canvas._clickBound = true;
   }
 
-  canvas.width = canvas.clientWidth || 1200;
-  canvas.height = canvas.clientHeight || 800;
+  const containerW = (engineViewport && engineViewport.clientWidth) || 1200;
+  const containerH = (engineViewport && engineViewport.clientHeight) || 800;
+  canvas.width = containerW;
+  canvas.height = containerH;
+
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -201,10 +269,31 @@ window.__axomai_render_display_list = function(displayList) {
       ctx.font = "bold 13px 'Segoe UI', sans-serif";
       ctx.fillText(cmd.label || '', cmd.x + 12, cmd.y + 20);
     } else if (cmd.type === 'image') {
-      ctx.fillStyle = '#f1f3f4';
-      ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
-      ctx.strokeStyle = '#dadce0';
-      ctx.strokeRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      if (cmd.src && cmd.src.startsWith('data:')) {
+        let cached = imageCache.get(cmd.src);
+        if (!cached) {
+          cached = new Image();
+          cached.src = cmd.src;
+          cached.onload = () => {
+            if (lastDisplayList) {
+              window.__axomai_render_display_list(lastDisplayList);
+            }
+          };
+          imageCache.set(cmd.src, cached);
+        }
+        if (cached.complete && cached.naturalWidth > 0) {
+          ctx.drawImage(cached, cmd.x, cmd.y, cmd.width, cmd.height);
+        } else {
+          ctx.fillStyle = '#f1f3f4';
+          ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+        }
+      } else {
+        ctx.fillStyle = '#f1f3f4';
+        ctx.fillRect(cmd.x, cmd.y, cmd.width, cmd.height);
+        ctx.strokeStyle = '#dadce0';
+        ctx.strokeRect(cmd.x, cmd.y, cmd.width, cmd.height);
+      }
     }
   }
 };
+

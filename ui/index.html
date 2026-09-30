@@ -280,10 +280,15 @@
         </ul>
       </aside>
 
-      <!-- CENTER CONTENT CANVAS -->
-      <main class="main-canvas">
-        <div class="scenic-backdrop" style="background-image: url('assets/images/bg.jpg');">
-          <div class="scenic-overlay"></div>
+      <!-- CENTER CONTENT CANVAS & ENGINE VIEWPORT -->
+      <main class="main-canvas" id="mainCanvas">
+        <div class="engine-viewport" id="engineViewport" style="display: none;">
+          <canvas id="axomai-engine-canvas"></canvas>
+        </div>
+
+        <div class="new-tab-content" id="newTabView">
+          <div class="scenic-backdrop" style="background-image: url('assets/images/bg.jpg');">
+            <div class="scenic-overlay"></div>
           
           <!-- Top Right Weather Widget -->
           <div class="weather-widget">
@@ -590,6 +595,7 @@
             </div>
           </div>
 
+        </div>
         </div>
       </main>
 

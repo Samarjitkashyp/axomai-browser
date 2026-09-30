@@ -2,8 +2,9 @@ use crate::css_parser::{style_tree, CSSParser, Rule, DEFAULT_UA_STYLES};
 use crate::html_parser::{HTMLParser, NodePtr, NodeType};
 use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
-use crate::network::URL;
+use crate::network::{base64_encode, URL};
 use crate::painter::{build_display_list, DisplayCommand};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -18,8 +19,17 @@ pub struct NavigationResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptKind {
+    Classic, // Standard external script (strict sequential document order)
+    Async,   // async attribute (execute as soon as available out of order)
+    Defer,   // defer attribute (execute in document order after DOM parsing)
+    Module,  // type="module"
+}
+
 pub struct PendingScript {
     pub order: usize,
+    pub kind: ScriptKind,
     pub url: String,
     pub code: String,
 }
@@ -40,6 +50,8 @@ pub struct AxomaiEngine {
     script_tx: Sender<PendingScript>,
     script_rx: Receiver<PendingScript>,
     pub pending_scripts: usize,
+    pub next_ordered_script_to_run: usize,
+    pub ordered_scripts_buffer: HashMap<usize, PendingScript>,
 }
 
 impl AxomaiEngine {
@@ -67,6 +79,8 @@ impl AxomaiEngine {
             script_tx,
             script_rx,
             pending_scripts: 0,
+            next_ordered_script_to_run: 0,
+            ordered_scripts_buffer: HashMap::new(),
         }
     }
 
@@ -100,6 +114,11 @@ impl AxomaiEngine {
     }
 
     pub fn load_html(&mut self, html_content: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
+        // Reset script execution ordering state for the new document
+        self.next_ordered_script_to_run = 0;
+        self.ordered_scripts_buffer.clear();
+        self.pending_scripts = 0;
+
         // 1. HTML DOM Parse
         let dom_root = HTMLParser::new(html_content).parse();
 
@@ -116,12 +135,31 @@ impl AxomaiEngine {
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
         let mut script_order = 0;
+
         for entry in scripts {
             match entry {
-                ScriptEntry::Inline(code) => {
-                    let _ = self.js_engine.execute(&code);
+                ScriptEntry::Inline { code, kind } => {
+                    if kind == ScriptKind::Async {
+                        let _ = self.js_engine.execute(&code);
+                    } else if script_order == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
+                        let _ = self.js_engine.execute(&code);
+                        self.next_ordered_script_to_run += 1;
+                        script_order += 1;
+                    } else {
+                        let order = script_order;
+                        script_order += 1;
+                        self.ordered_scripts_buffer.insert(
+                            order,
+                            PendingScript {
+                                order,
+                                kind,
+                                url: "inline".to_string(),
+                                code,
+                            },
+                        );
+                    }
                 }
-                ScriptEntry::External(src) => {
+                ScriptEntry::External { src, kind } => {
                     let resolved_url = if let Some(ref current) = self.current_url {
                         current.resolve(&src)
                     } else {
@@ -131,11 +169,32 @@ impl AxomaiEngine {
                         if url_obj.scheme == "file" || url_obj.scheme == "data" {
                             let (_headers, js_code) = url_obj.request();
                             if !js_code.is_empty() {
-                                let _ = self.js_engine.execute(&js_code);
+                                if kind == ScriptKind::Async {
+                                    let _ = self.js_engine.execute(&js_code);
+                                } else if script_order == self.next_ordered_script_to_run && self.ordered_scripts_buffer.is_empty() {
+                                    let _ = self.js_engine.execute(&js_code);
+                                    self.next_ordered_script_to_run += 1;
+                                    script_order += 1;
+                                } else {
+                                    let order = script_order;
+                                    script_order += 1;
+                                    self.ordered_scripts_buffer.insert(
+                                        order,
+                                        PendingScript {
+                                            order,
+                                            kind,
+                                            url: resolved_url,
+                                            code: js_code,
+                                        },
+                                    );
+                                }
                             }
                         } else {
-                            // Non-blocking async ScriptScheduler (never blocks HTML/CSS rendering pipeline)
-                            println!("[Axomai ScriptScheduler] Queued non-blocking external script: {}", resolved_url);
+                            // Non-blocking async ScriptScheduler with browser ordering semantics
+                            println!(
+                                "[Axomai ScriptScheduler] Queued {:?} external script (order {}): {}",
+                                kind, script_order, resolved_url
+                            );
                             let script_tx = self.script_tx.clone();
                             let order = script_order;
                             script_order += 1;
@@ -151,6 +210,7 @@ impl AxomaiEngine {
                                 };
                                 let _ = script_tx.send(PendingScript {
                                     order,
+                                    kind,
                                     url: script_url,
                                     code: js_code,
                                 });
@@ -360,32 +420,53 @@ impl AxomaiEngine {
             executed = true;
         }
 
-        // 3. Process completed external scripts via async ScriptScheduler
-        let mut completed_scripts = Vec::new();
+        // 3. Process completed external scripts via async ScriptScheduler with strict sequential ordering
+        let mut script_mutated = false;
+        let mut async_scripts = Vec::new();
+
         while let Ok(script) = self.script_rx.try_recv() {
             if self.pending_scripts > 0 {
                 self.pending_scripts -= 1;
             }
-            completed_scripts.push(script);
+            if script.kind == ScriptKind::Async {
+                async_scripts.push(script);
+            } else {
+                self.ordered_scripts_buffer.insert(script.order, script);
+            }
         }
 
-        if !completed_scripts.is_empty() {
-            completed_scripts.sort_by_key(|s| s.order);
-            let mut script_mutated = false;
-            for script in completed_scripts {
-                if !script.code.is_empty() {
-                    println!("[Axomai ScriptScheduler] Executing deferred script: {}", script.url);
-                    if let Ok(mutated) = self.js_engine.execute(&script.code) {
-                        if mutated {
-                            script_mutated = true;
-                        }
+        // Execute async scripts immediately as they arrive
+        for script in async_scripts {
+            if !script.code.is_empty() {
+                println!("[Axomai ScriptScheduler] Executing async script: {}", script.url);
+                if let Ok(mutated) = self.js_engine.execute(&script.code) {
+                    if mutated {
+                        script_mutated = true;
                     }
                 }
             }
-            if script_mutated {
-                self.restyle_and_relayout(viewport_w, viewport_h);
-            }
             executed = true;
+        }
+
+        // Execute sequential ordered scripts strictly in order (0 -> 1 -> 2 -> ...)
+        while let Some(script) = self.ordered_scripts_buffer.remove(&self.next_ordered_script_to_run) {
+            if !script.code.is_empty() {
+                println!(
+                    "[Axomai ScriptScheduler] Executing ordered script (order {}): {}",
+                    self.next_ordered_script_to_run, script.url
+                );
+                if let Ok(mutated) = self.js_engine.execute(&script.code) {
+                    if mutated {
+                        script_mutated = true;
+                    }
+                }
+            }
+            self.next_ordered_script_to_run += 1;
+            executed = true;
+        }
+
+        if script_mutated {
+            self.restyle_and_relayout(viewport_w, viewport_h);
         }
 
         executed
@@ -450,11 +531,20 @@ impl AxomaiEngine {
                     ));
                 }
                 DisplayCommand::DrawImage {
-                    x, y, width, height, ..
+                    x,
+                    y,
+                    width,
+                    height,
+                    image_bytes,
                 } => {
+                    let b64 = if !image_bytes.is_empty() {
+                        format!("data:image/png;base64,{}", base64_encode(image_bytes))
+                    } else {
+                        String::new()
+                    };
                     json.push_str(&format!(
-                        r#"{{"type":"image","x":{},"y":{},"width":{},"height":{}}}"#,
-                        x, y, width, height
+                        r#"{{"type":"image","x":{},"y":{},"width":{},"height":{},"src":"{}"}}"#,
+                        x, y, width, height, b64
                     ));
                 }
             }
@@ -465,7 +555,7 @@ impl AxomaiEngine {
 
     /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
     pub fn has_pending_events(&self) -> bool {
-        self.pending_scripts > 0 || self.js_engine.has_pending_events()
+        self.pending_scripts > 0 || !self.ordered_scripts_buffer.is_empty() || self.js_engine.has_pending_events()
     }
 }
 
@@ -488,17 +578,40 @@ fn extract_style_tags(node: &NodePtr, css_list: &mut Vec<String>) {
 
 #[derive(Debug, Clone)]
 pub enum ScriptEntry {
-    Inline(String),
-    External(String),
+    Inline { code: String, kind: ScriptKind },
+    External { src: String, kind: ScriptKind },
 }
 
 fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
     let b = node.borrow();
-    if let NodeType::Element { ref tag, ref attributes, .. } = b.node_type {
+    if let NodeType::Element {
+        ref tag,
+        ref attributes,
+        ..
+    } = b.node_type
+    {
         if tag == "script" {
+            let is_async = attributes.contains_key("async");
+            let is_defer = attributes.contains_key("defer");
+            let script_type = attributes.get("type").map(|s| s.as_str()).unwrap_or("");
+            let is_module = script_type == "module";
+
+            let kind = if is_async {
+                ScriptKind::Async
+            } else if is_defer {
+                ScriptKind::Defer
+            } else if is_module {
+                ScriptKind::Module
+            } else {
+                ScriptKind::Classic
+            };
+
             if let Some(src) = attributes.get("src") {
                 if !src.trim().is_empty() {
-                    script_list.push(ScriptEntry::External(src.trim().to_string()));
+                    script_list.push(ScriptEntry::External {
+                        src: src.trim().to_string(),
+                        kind,
+                    });
                     return;
                 }
             }
@@ -510,7 +623,10 @@ fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
                 }
             }
             if !inline_code.trim().is_empty() {
-                script_list.push(ScriptEntry::Inline(inline_code));
+                script_list.push(ScriptEntry::Inline {
+                    code: inline_code,
+                    kind,
+                });
             }
         }
     }
