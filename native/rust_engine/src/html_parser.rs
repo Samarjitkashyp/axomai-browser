@@ -5,8 +5,14 @@ use std::rc::{Rc, Weak};
 pub type NodePtr = Rc<RefCell<NodeData>>;
 pub type WeakNodePtr = Weak<RefCell<NodeData>>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeType {
+    Document,
+    DocumentType {
+        name: String,
+        public_id: Option<String>,
+        system_id: Option<String>,
+    },
     Element {
         tag: String,
         attributes: HashMap<String, String>,
@@ -14,6 +20,9 @@ pub enum NodeType {
     },
     Text {
         text: String,
+    },
+    Comment {
+        comment: String,
     },
 }
 
@@ -25,6 +34,14 @@ pub struct NodeData {
 }
 
 impl NodeData {
+    pub fn new_document() -> NodePtr {
+        Rc::new(RefCell::new(NodeData {
+            node_type: NodeType::Document,
+            parent: None,
+            children: Vec::new(),
+        }))
+    }
+
     pub fn new_element(tag: &str, attributes: HashMap<String, String>) -> NodePtr {
         Rc::new(RefCell::new(NodeData {
             node_type: NodeType::Element {
@@ -41,6 +58,16 @@ impl NodeData {
         Rc::new(RefCell::new(NodeData {
             node_type: NodeType::Text {
                 text: text.to_string(),
+            },
+            parent: None,
+            children: Vec::new(),
+        }))
+    }
+
+    pub fn new_comment(comment: &str) -> NodePtr {
+        Rc::new(RefCell::new(NodeData {
+            node_type: NodeType::Comment {
+                comment: comment.to_string(),
             },
             parent: None,
             children: Vec::new(),
@@ -70,231 +97,631 @@ pub const SELF_CLOSING_TAGS: &[&str] = &[
     "track", "wbr",
 ];
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum HTMLToken {
+    Doctype {
+        name: Option<String>,
+        public_id: Option<String>,
+        system_id: Option<String>,
+    },
+    StartTag {
+        name: String,
+        attributes: HashMap<String, String>,
+        self_closing: bool,
+    },
+    EndTag {
+        name: String,
+    },
+    Character(char),
+    Text(String),
+    Comment(String),
+    EOF,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenizerState {
+    Data,
+    TagOpen,
+    EndTagOpen,
+    TagName,
+    BeforeAttributeName,
+    AttributeName,
+    AfterAttributeName,
+    BeforeAttributeValue,
+    AttributeValueDoubleQuoted,
+    AttributeValueSingleQuoted,
+    AttributeValueUnquoted,
+    AfterAttributeValueQuoted,
+    SelfClosingStartTag,
+    MarkupDeclarationOpen,
+    CommentStart,
+    Comment,
+    CommentEnd,
+    RawText,
+}
+
+pub struct HTMLTokenizer {
+    input: Vec<char>,
+    pos: usize,
+    state: TokenizerState,
+    raw_tag_name: String,
+}
+
+impl HTMLTokenizer {
+    pub fn new(html: &str) -> Self {
+        HTMLTokenizer {
+            input: html.chars().collect(),
+            pos: 0,
+            state: TokenizerState::Data,
+            raw_tag_name: String::new(),
+        }
+    }
+
+    pub fn insert_input(&mut self, html_to_insert: &str) {
+        let chars_to_insert: Vec<char> = html_to_insert.chars().collect();
+        self.input.splice(self.pos..self.pos, chars_to_insert);
+    }
+
+    pub fn next_token(&mut self) -> HTMLToken {
+        let mut current_tag_name = String::new();
+        let mut current_attributes: HashMap<String, String> = HashMap::new();
+        let mut current_attr_key = String::new();
+        let mut current_attr_val = String::new();
+        let mut is_self_closing = false;
+        let mut comment_buf = String::new();
+
+        while self.pos < self.input.len() {
+            let c = self.input[self.pos];
+
+            match self.state {
+                TokenizerState::Data => {
+                    if c == '<' {
+                        self.state = TokenizerState::TagOpen;
+                        self.pos += 1;
+                    } else if c == '&' {
+                        // Decode entity if present or emit character
+                        let decoded = self.consume_entity();
+                        return HTMLToken::Text(decoded);
+                    } else {
+                        self.pos += 1;
+                        return HTMLToken::Character(c);
+                    }
+                }
+
+                TokenizerState::TagOpen => {
+                    if c == '!' {
+                        self.state = TokenizerState::MarkupDeclarationOpen;
+                        self.pos += 1;
+                    } else if c == '/' {
+                        self.state = TokenizerState::EndTagOpen;
+                        self.pos += 1;
+                    } else if c.is_ascii_alphabetic() {
+                        current_tag_name.clear();
+                        current_tag_name.push(c.to_ascii_lowercase());
+                        self.state = TokenizerState::TagName;
+                        self.pos += 1;
+                    } else if c == '?' {
+                        // Bogus comment
+                        self.state = TokenizerState::Comment;
+                        comment_buf.clear();
+                        self.pos += 1;
+                    } else {
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::Character('<');
+                    }
+                }
+
+                TokenizerState::EndTagOpen => {
+                    if c.is_ascii_alphabetic() {
+                        current_tag_name.clear();
+                        current_tag_name.push(c.to_ascii_lowercase());
+                        self.state = TokenizerState::TagName;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        self.state = TokenizerState::Data;
+                        self.pos += 1;
+                    } else {
+                        self.state = TokenizerState::Comment;
+                        comment_buf.clear();
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::TagName => {
+                    if c.is_whitespace() {
+                        self.state = TokenizerState::BeforeAttributeName;
+                        self.pos += 1;
+                    } else if c == '/' {
+                        self.state = TokenizerState::SelfClosingStartTag;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        let tag = current_tag_name.to_lowercase();
+                        if tag == "script" || tag == "style" || tag == "textarea" || tag == "title" {
+                            self.state = TokenizerState::RawText;
+                            self.raw_tag_name = tag.clone();
+                        }
+                        return HTMLToken::StartTag {
+                            name: tag,
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_tag_name.push(c.to_ascii_lowercase());
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::BeforeAttributeName => {
+                    if c.is_whitespace() {
+                        self.pos += 1;
+                    } else if c == '/' {
+                        self.state = TokenizerState::SelfClosingStartTag;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        let tag = current_tag_name.to_lowercase();
+                        if tag == "script" || tag == "style" || tag == "textarea" || tag == "title" {
+                            self.state = TokenizerState::RawText;
+                            self.raw_tag_name = tag.clone();
+                        }
+                        return HTMLToken::StartTag {
+                            name: tag,
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_attr_key.clear();
+                        current_attr_val.clear();
+                        current_attr_key.push(c.to_ascii_lowercase());
+                        self.state = TokenizerState::AttributeName;
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AttributeName => {
+                    if c.is_whitespace() {
+                        self.state = TokenizerState::AfterAttributeName;
+                        self.pos += 1;
+                    } else if c == '=' {
+                        self.state = TokenizerState::BeforeAttributeValue;
+                        self.pos += 1;
+                    } else if c == '/' {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        self.state = TokenizerState::SelfClosingStartTag;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        let tag = current_tag_name.to_lowercase();
+                        if tag == "script" || tag == "style" || tag == "textarea" || tag == "title" {
+                            self.state = TokenizerState::RawText;
+                            self.raw_tag_name = tag.clone();
+                        }
+                        return HTMLToken::StartTag {
+                            name: tag,
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_attr_key.push(c.to_ascii_lowercase());
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AfterAttributeName => {
+                    if c.is_whitespace() {
+                        self.pos += 1;
+                    } else if c == '=' {
+                        self.state = TokenizerState::BeforeAttributeValue;
+                        self.pos += 1;
+                    } else if c == '/' {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        self.state = TokenizerState::SelfClosingStartTag;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::StartTag {
+                            name: current_tag_name.to_lowercase(),
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        current_attr_key.clear();
+                        current_attr_key.push(c.to_ascii_lowercase());
+                        self.state = TokenizerState::AttributeName;
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::BeforeAttributeValue => {
+                    if c.is_whitespace() {
+                        self.pos += 1;
+                    } else if c == '"' {
+                        self.state = TokenizerState::AttributeValueDoubleQuoted;
+                        self.pos += 1;
+                    } else if c == '\'' {
+                        self.state = TokenizerState::AttributeValueSingleQuoted;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        current_attributes.insert(current_attr_key.clone(), String::new());
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::StartTag {
+                            name: current_tag_name.to_lowercase(),
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_attr_val.clear();
+                        current_attr_val.push(c);
+                        self.state = TokenizerState::AttributeValueUnquoted;
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AttributeValueDoubleQuoted => {
+                    if c == '"' {
+                        current_attributes.insert(current_attr_key.clone(), current_attr_val.clone());
+                        self.state = TokenizerState::AfterAttributeValueQuoted;
+                        self.pos += 1;
+                    } else {
+                        current_attr_val.push(c);
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AttributeValueSingleQuoted => {
+                    if c == '\'' {
+                        current_attributes.insert(current_attr_key.clone(), current_attr_val.clone());
+                        self.state = TokenizerState::AfterAttributeValueQuoted;
+                        self.pos += 1;
+                    } else {
+                        current_attr_val.push(c);
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AttributeValueUnquoted => {
+                    if c.is_whitespace() {
+                        current_attributes.insert(current_attr_key.clone(), current_attr_val.clone());
+                        self.state = TokenizerState::BeforeAttributeName;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        current_attributes.insert(current_attr_key.clone(), current_attr_val.clone());
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::StartTag {
+                            name: current_tag_name.to_lowercase(),
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        current_attr_val.push(c);
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::AfterAttributeValueQuoted => {
+                    if c.is_whitespace() {
+                        self.state = TokenizerState::BeforeAttributeName;
+                        self.pos += 1;
+                    } else if c == '/' {
+                        self.state = TokenizerState::SelfClosingStartTag;
+                        self.pos += 1;
+                    } else if c == '>' {
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::StartTag {
+                            name: current_tag_name.to_lowercase(),
+                            attributes: current_attributes,
+                            self_closing: is_self_closing,
+                        };
+                    } else {
+                        self.state = TokenizerState::BeforeAttributeName;
+                    }
+                }
+
+                TokenizerState::SelfClosingStartTag => {
+                    if c == '>' {
+                        is_self_closing = true;
+                        self.pos += 1;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::StartTag {
+                            name: current_tag_name.to_lowercase(),
+                            attributes: current_attributes,
+                            self_closing: true,
+                        };
+                    } else if c.is_whitespace() {
+                        self.pos += 1;
+                    } else {
+                        self.state = TokenizerState::BeforeAttributeName;
+                    }
+                }
+
+                TokenizerState::MarkupDeclarationOpen => {
+                    let remaining: String = self.input[self.pos..].iter().take(7).collect();
+                    let rem_lower = remaining.to_lowercase();
+                    if rem_lower.starts_with("--") {
+                        self.pos += 2;
+                        comment_buf.clear();
+                        self.state = TokenizerState::Comment;
+                    } else if rem_lower.starts_with("doctype") {
+                        self.pos += 7;
+                        let mut doctype_str = String::new();
+                        while self.pos < self.input.len() && self.input[self.pos] != '>' {
+                            doctype_str.push(self.input[self.pos]);
+                            self.pos += 1;
+                        }
+                        if self.pos < self.input.len() {
+                            self.pos += 1; // consume '>'
+                        }
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::Doctype {
+                            name: Some(doctype_str.trim().to_string()),
+                            public_id: None,
+                            system_id: None,
+                        };
+                    } else {
+                        self.state = TokenizerState::Comment;
+                    }
+                }
+
+                TokenizerState::CommentStart => {
+                    self.state = TokenizerState::Comment;
+                }
+
+                TokenizerState::Comment => {
+                    let rem: String = self.input[self.pos..].iter().take(3).collect();
+                    if rem == "-->" {
+                        self.pos += 3;
+                        self.state = TokenizerState::Data;
+                        return HTMLToken::Comment(comment_buf);
+                    } else {
+                        comment_buf.push(c);
+                        self.pos += 1;
+                    }
+                }
+
+                TokenizerState::CommentEnd => {
+                    self.state = TokenizerState::Data;
+                }
+
+                TokenizerState::RawText => {
+                    let close_tag = format!("</{}>", self.raw_tag_name);
+                    let rem: String = self.input[self.pos..].iter().take(close_tag.len()).collect();
+                    if rem.to_lowercase() == close_tag {
+                        self.pos += close_tag.len();
+                        self.state = TokenizerState::Data;
+                        let tag = self.raw_tag_name.clone();
+                        self.raw_tag_name.clear();
+                        return HTMLToken::EndTag { name: tag };
+                    } else {
+                        self.pos += 1;
+                        return HTMLToken::Character(c);
+                    }
+                }
+            }
+        }
+
+        HTMLToken::EOF
+    }
+
+    fn consume_entity(&mut self) -> String {
+        let mut entity_buf = String::new();
+        self.pos += 1; // consume '&'
+        while self.pos < self.input.len() && entity_buf.len() < 10 {
+            let c = self.input[self.pos];
+            if c == ';' {
+                self.pos += 1;
+                let full = format!("&{};", entity_buf);
+                return html_escape::decode_html_entities(&full).to_string();
+            } else if c.is_alphanumeric() || c == '#' {
+                entity_buf.push(c);
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        let raw = format!("&{}", entity_buf);
+        html_escape::decode_html_entities(&raw).to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InsertionMode {
+    Initial,
+    BeforeHtml,
+    BeforeHead,
+    InHead,
+    AfterHead,
+    InBody,
+    AfterBody,
+    AfterHtml,
+}
+
 pub struct HTMLParser<'a> {
     body: &'a str,
-    unfinished: Vec<NodePtr>,
+    open_elements: Vec<NodePtr>,
+    root: Option<NodePtr>,
+    head_element: Option<NodePtr>,
+    mode: InsertionMode,
 }
 
 impl<'a> HTMLParser<'a> {
     pub fn new(body: &'a str) -> Self {
         HTMLParser {
             body,
-            unfinished: Vec::new(),
+            open_elements: Vec::new(),
+            root: None,
+            head_element: None,
+            mode: InsertionMode::Initial,
         }
     }
 
     pub fn parse(mut self) -> NodePtr {
-        let mut text_buf = String::new();
-        let chars: Vec<char> = self.body.chars().collect();
-        let n = chars.len();
-        let mut i = 0;
+        let mut tokenizer = HTMLTokenizer::new(self.body);
+        let mut char_buffer = String::new();
 
-        while i < n {
-            let c = chars[i];
-
-            // 1. Comments
-            if self.body[i..].starts_with("<!--") {
-                if !text_buf.is_empty() {
-                    self.add_text(&text_buf);
-                    text_buf.clear();
+        loop {
+            let token = tokenizer.next_token();
+            if token == HTMLToken::EOF {
+                if !char_buffer.is_empty() {
+                    self.insert_text(&char_buffer);
+                    char_buffer.clear();
                 }
-                if let Some(end_comment) = self.body[i + 4..].find("-->") {
-                    i += 4 + end_comment + 3;
-                } else {
-                    i = n;
-                }
-                continue;
+                break;
             }
 
-            // 2. Script / Style raw contents
-            if !self.unfinished.is_empty() {
-                let top_tag = {
-                    let top = self.unfinished.last().unwrap().borrow();
-                    if let NodeType::Element { ref tag, .. } = top.node_type {
-                        tag.clone()
-                    } else {
-                        String::new()
+            match token {
+                HTMLToken::Character(c) => {
+                    char_buffer.push(c);
+                }
+                HTMLToken::Text(txt) => {
+                    char_buffer.push_str(&txt);
+                }
+                _ => {
+                    if !char_buffer.is_empty() {
+                        self.insert_text(&char_buffer);
+                        char_buffer.clear();
                     }
-                };
-
-                if top_tag == "script" || top_tag == "style" {
-                    let close_tag = format!("</{}>", top_tag);
-                    let body_slice = &self.body[i..];
-                    let lower_slice = body_slice.to_lowercase();
-                    if let Some(end_raw) = lower_slice.find(&close_tag) {
-                        let raw_content = &self.body[i..i + end_raw];
-                        if !raw_content.is_empty() {
-                            self.add_text(raw_content);
-                        }
-                        i += end_raw + close_tag.len();
-                        self.unfinished.pop();
-                        continue;
-                    } else {
-                        let raw_content = &self.body[i..];
-                        if !raw_content.is_empty() {
-                            self.add_text(raw_content);
-                        }
-                        self.unfinished.pop();
-                        break;
-                    }
+                    self.handle_token(token);
                 }
             }
-
-            if c == '<' {
-                if !text_buf.is_empty() {
-                    self.add_text(&text_buf);
-                    text_buf.clear();
-                }
-            } else if c == '>' {
-                self.add_tag(&text_buf);
-                text_buf.clear();
-            } else {
-                text_buf.push(c);
-            }
-
-            i += 1;
-        }
-
-        if !text_buf.is_empty() {
-            self.add_text(&text_buf);
         }
 
         self.finish()
     }
 
-    fn add_text(&mut self, text: &str) {
+    fn handle_token(&mut self, token: HTMLToken) {
+        match token {
+            HTMLToken::Doctype { .. } => {
+                self.mode = InsertionMode::BeforeHtml;
+            }
+            HTMLToken::StartTag {
+                name,
+                attributes,
+                self_closing,
+            } => {
+                self.handle_start_tag(&name, attributes, self_closing);
+            }
+            HTMLToken::EndTag { name } => {
+                self.handle_end_tag(&name);
+            }
+            HTMLToken::Comment(comment) => {
+                let comment_node = NodeData::new_comment(&comment);
+                if let Some(current) = self.current_node() {
+                    NodeData::add_child(&current, &comment_node);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_start_tag(&mut self, tag_name: &str, attributes: HashMap<String, String>, self_closing: bool) {
+        if tag_name == "html" {
+            if self.root.is_none() {
+                let html_node = NodeData::new_element("html", attributes);
+                self.root = Some(Rc::clone(&html_node));
+                self.open_elements.push(html_node);
+                self.mode = InsertionMode::BeforeHead;
+            }
+            return;
+        }
+
+        if self.root.is_none() {
+            let html_node = NodeData::new_element("html", HashMap::new());
+            self.root = Some(Rc::clone(&html_node));
+            self.open_elements.push(html_node);
+            self.mode = InsertionMode::BeforeHead;
+        }
+
+        if tag_name == "head" {
+            let head_node = NodeData::new_element("head", attributes);
+            self.head_element = Some(Rc::clone(&head_node));
+            if let Some(current) = self.current_node() {
+                NodeData::add_child(&current, &head_node);
+            }
+            self.open_elements.push(head_node);
+            self.mode = InsertionMode::InHead;
+            return;
+        }
+
+        if tag_name == "body" {
+            let body_node = NodeData::new_element("body", attributes);
+            if let Some(current) = self.current_node() {
+                NodeData::add_child(&current, &body_node);
+            }
+            self.open_elements.push(body_node);
+            self.mode = InsertionMode::InBody;
+            return;
+        }
+
+        let is_self_closing = self_closing || SELF_CLOSING_TAGS.contains(&tag_name);
+        let node = NodeData::new_element(tag_name, attributes);
+
+        if let Some(current) = self.current_node() {
+            NodeData::add_child(&current, &node);
+        }
+
+        if !is_self_closing {
+            self.open_elements.push(node);
+        }
+    }
+
+    fn handle_end_tag(&mut self, tag_name: &str) {
+        if self.open_elements.len() > 1 {
+            let mut match_idx = None;
+            for idx in (0..self.open_elements.len()).rev() {
+                let b = self.open_elements[idx].borrow();
+                if let NodeType::Element { ref tag, .. } = b.node_type {
+                    if tag == tag_name {
+                        match_idx = Some(idx);
+                        break;
+                    }
+                }
+            }
+            if let Some(idx) = match_idx {
+                self.open_elements.truncate(idx);
+            }
+        }
+    }
+
+    fn insert_text(&mut self, text: &str) {
         let unescaped = html_escape::decode_html_entities(text).to_string();
         if unescaped.is_empty() {
             return;
         }
-        if let Some(top) = self.unfinished.last() {
+        if let Some(current) = self.current_node() {
             let text_node = NodeData::new_text(&unescaped);
-            NodeData::add_child(top, &text_node);
+            NodeData::add_child(&current, &text_node);
         }
     }
 
-    fn add_tag(&mut self, tag_content: &str) {
-        let content = tag_content.trim();
-        if content.is_empty() || content.starts_with('!') || content.starts_with('?') {
-            return;
-        }
+    fn current_node(&self) -> Option<NodePtr> {
+        self.open_elements.last().map(Rc::clone).or_else(|| self.root.as_ref().map(Rc::clone))
+    }
 
-        if content.starts_with('/') {
-            let tag_name = content[1..].trim().to_lowercase();
-            if self.unfinished.len() > 1 {
-                let mut match_idx = None;
-                for idx in (0..self.unfinished.len()).rev() {
-                    let node = self.unfinished[idx].borrow();
-                    if let NodeType::Element { ref tag, .. } = node.node_type {
-                        if tag == &tag_name {
-                            match_idx = Some(idx);
-                            break;
-                        }
-                    }
-                }
-                if let Some(idx) = match_idx {
-                    self.unfinished.truncate(idx);
-                }
+    fn finish(mut self) -> NodePtr {
+        if let Some(root) = self.root {
+            // Ensure <body> exists
+            if find_body(&root).is_none() {
+                let body = NodeData::new_element("body", HashMap::new());
+                NodeData::add_child(&root, &body);
             }
-            return;
-        }
-
-        let (tag_name, attributes) = self.parse_attributes(content);
-        let is_self_closing = content.ends_with('/') || SELF_CLOSING_TAGS.contains(&tag_name.as_str());
-
-        let node = NodeData::new_element(&tag_name, attributes);
-
-        if is_self_closing {
-            if let Some(top) = self.unfinished.last() {
-                NodeData::add_child(top, &node);
-            } else {
-                self.unfinished.push(node);
-            }
+            root
         } else {
-            if let Some(top) = self.unfinished.last() {
-                NodeData::add_child(top, &node);
-            }
-            self.unfinished.push(node);
+            let root = NodeData::new_element("html", HashMap::new());
+            let body = NodeData::new_element("body", HashMap::new());
+            NodeData::add_child(&root, &body);
+            root
         }
-    }
-
-    fn parse_attributes(&self, text: &str) -> (String, HashMap<String, String>) {
-        let parts: Vec<&str> = text.splitn(2, char::is_whitespace).collect();
-        let tag_name = parts[0].trim_matches('/').to_lowercase();
-        let mut attributes = HashMap::new();
-
-        if parts.len() < 2 {
-            return (tag_name, attributes);
-        }
-
-        let attr_str = parts[1].trim_matches('/');
-        let chars: Vec<char> = attr_str.chars().collect();
-        let n = chars.len();
-        let mut i = 0;
-
-        while i < n {
-            while i < n && chars[i].is_whitespace() {
-                i += 1;
-            }
-            if i >= n {
-                break;
-            }
-
-            let key_start = i;
-            while i < n && !chars[i].is_whitespace() && chars[i] != '=' {
-                i += 1;
-            }
-            let key: String = chars[key_start..i].iter().collect::<String>().to_lowercase();
-
-            while i < n && chars[i].is_whitespace() {
-                i += 1;
-            }
-
-            if i < n && chars[i] == '=' {
-                i += 1;
-                while i < n && chars[i].is_whitespace() {
-                    i += 1;
-                }
-                if i < n {
-                    if chars[i] == '"' || chars[i] == '\'' {
-                        let quote = chars[i];
-                        i += 1;
-                        let val_start = i;
-                        while i < n && chars[i] != quote {
-                            i += 1;
-                        }
-                        let val: String = chars[val_start..i].iter().collect();
-                        if i < n {
-                            i += 1;
-                        }
-                        attributes.insert(key, val);
-                    } else {
-                        let val_start = i;
-                        while i < n && !chars[i].is_whitespace() {
-                            i += 1;
-                        }
-                        let val: String = chars[val_start..i].iter().collect();
-                        attributes.insert(key, val);
-                    }
-                } else {
-                    attributes.insert(key, String::new());
-                }
-            } else {
-                attributes.insert(key, String::new());
-            }
-        }
-
-        (tag_name, attributes)
-    }
-
-    fn finish(self) -> NodePtr {
-        if !self.unfinished.is_empty() {
-            return Rc::clone(&self.unfinished[0]);
-        }
-        let root = NodeData::new_element("html", HashMap::new());
-        let body = NodeData::new_element("body", HashMap::new());
-        NodeData::add_child(&root, &body);
-        root
     }
 }
 
@@ -369,6 +796,7 @@ pub fn get_node_text_content(node: &NodePtr) -> String {
             }
             out
         }
+        _ => String::new(),
     }
 }
 
@@ -440,7 +868,9 @@ fn serialize_node_html(node: &NodePtr, out: &mut String) {
                 out.push('>');
             }
         }
+        _ => {}
     }
 }
+
 
 

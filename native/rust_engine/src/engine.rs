@@ -275,7 +275,14 @@ impl AxomaiEngine {
 
         // Update history entry if not already matching current top of history
         let current_url_str = self.current_url.as_ref().map(|u| u.as_string()).unwrap_or_else(|| "about:blank".to_string());
-        if self.history.is_empty() || self.history[self.history_index].url != current_url_str {
+        if self.history.is_empty() {
+            self.history.push(HistoryEntry {
+                url: current_url_str,
+                title: extracted_title,
+                scroll_y: 0.0,
+            });
+            self.history_index = 0;
+        } else if self.history[self.history_index].url != current_url_str {
             if self.history_index + 1 < self.history.len() {
                 self.history.truncate(self.history_index + 1);
             }
@@ -285,6 +292,9 @@ impl AxomaiEngine {
                 scroll_y: 0.0,
             });
             self.history_index = self.history.len() - 1;
+        } else {
+            // Same URL (e.g. reload or back/forward traversal), update title
+            self.history[self.history_index].title = extracted_title;
         }
 
         // 4. Extract <style> & Style Tree
@@ -317,9 +327,16 @@ impl AxomaiEngine {
 
     pub fn go_back(&mut self, viewport_w: f32, viewport_h: f32) -> Option<String> {
         if self.can_go_back() {
+            // Save current scroll position in current entry before navigating back
+            if self.history_index < self.history.len() {
+                self.history[self.history_index].scroll_y = self.scroll_y;
+            }
             self.history_index -= 1;
             let entry = self.history[self.history_index].clone();
+            let saved_scroll = entry.scroll_y;
             let _ = self.load_url(&entry.url, viewport_w, viewport_h);
+            self.scroll_y = saved_scroll;
+            self.restyle_and_relayout(viewport_w, viewport_h);
             return Some(entry.url);
         }
         None
@@ -327,9 +344,16 @@ impl AxomaiEngine {
 
     pub fn go_forward(&mut self, viewport_w: f32, viewport_h: f32) -> Option<String> {
         if self.can_go_forward() {
+            // Save current scroll position in current entry before navigating forward
+            if self.history_index < self.history.len() {
+                self.history[self.history_index].scroll_y = self.scroll_y;
+            }
             self.history_index += 1;
             let entry = self.history[self.history_index].clone();
+            let saved_scroll = entry.scroll_y;
             let _ = self.load_url(&entry.url, viewport_w, viewport_h);
+            self.scroll_y = saved_scroll;
+            self.restyle_and_relayout(viewport_w, viewport_h);
             return Some(entry.url);
         }
         None
@@ -338,7 +362,10 @@ impl AxomaiEngine {
     pub fn reload(&mut self, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
         if let Some(ref u) = self.current_url {
             let url_str = u.as_string();
-            self.load_url(&url_str, viewport_w, viewport_h)
+            let saved_scroll = self.scroll_y;
+            let res = self.load_url(&url_str, viewport_w, viewport_h);
+            self.scroll_y = saved_scroll;
+            res
         } else {
             Ok(())
         }
@@ -377,6 +404,9 @@ impl AxomaiEngine {
         self.scroll_y = (self.scroll_y + delta_y).clamp(0.0, self.max_scroll_y);
         let changed = (old_scroll - self.scroll_y).abs() > 0.1;
         if changed {
+            if self.history_index < self.history.len() {
+                self.history[self.history_index].scroll_y = self.scroll_y;
+            }
             self.is_dirty = true;
         }
         changed
@@ -532,8 +562,17 @@ impl AxomaiEngine {
                 println!("[Axomai Engine] Discarding stale navigation response (doc_id {} vs current {})", nav.document_id, self.document_id);
                 continue;
             }
+            let saved_scroll = if self.history_index < self.history.len() && self.history[self.history_index].url == nav.url.as_string() {
+                self.history[self.history_index].scroll_y
+            } else {
+                0.0
+            };
             self.current_url = Some(nav.url);
             let _ = self.load_html(&nav.body, viewport_w, viewport_h);
+            if saved_scroll > 0.0 {
+                self.scroll_y = saved_scroll;
+                self.restyle_and_relayout(viewport_w, viewport_h);
+            }
             self.status_message = "Page Loaded Successfully".to_string();
             executed = true;
         }
