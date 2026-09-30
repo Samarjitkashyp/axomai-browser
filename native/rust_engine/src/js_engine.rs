@@ -291,6 +291,35 @@ impl V8JSEngine {
         // 1. Process Completed Async Fetch Requests (Non-blocking network thread)
         let completed_fetches = drain_fetch_results_for_engine(self.engine_id);
 
+        for fetch_res in &completed_fetches {
+            // Process Set-Cookie response headers into origin COOKIE_JAR
+            for (k, v) in &fetch_res.headers {
+                if k.eq_ignore_ascii_case("set-cookie") {
+                    let parts: Vec<&str> = v.split(';').collect();
+                    if let Some(first) = parts.first() {
+                        let kv: Vec<&str> = first.splitn(2, '=').collect();
+                        if kv.len() == 2 {
+                            let ck = kv[0].trim().to_string();
+                            let cv = kv[1].trim().to_string();
+                            let orig = get_origin_from_url(&fetch_res.url);
+                            COOKIE_JAR.with(|jar| {
+                                let mut map = jar.borrow_mut();
+                                let list = map.entry(orig).or_insert_with(Vec::new);
+                                list.retain(|(item_k, _)| item_k != &ck);
+                                let is_deleted = parts.iter().skip(1).any(|p| {
+                                    let p_lower = p.trim().to_lowercase();
+                                    p_lower == "max-age=0" || p_lower.starts_with("expires=thu, 01 jan 1970")
+                                });
+                                if !is_deleted {
+                                    list.push((ck, cv));
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         for fetch_res in completed_fetches {
             let resolver_opt = PENDING_FETCH_RESOLVERS.with(|map| {
                 map.borrow_mut().remove(&fetch_res.request_id)
@@ -901,6 +930,20 @@ fn setup_async_fetch_api<'s>(
             PENDING_FETCH_RESOLVERS.with(|map| {
                 map.borrow_mut().insert(request_id, resolver_global);
             });
+
+            // Attach cookies matching origin
+            let cookies_to_send = COOKIE_JAR.with(|jar| {
+                let map = jar.borrow();
+                let orig = get_origin_from_url(&resolved_url);
+                if let Some(list) = map.get(&orig) {
+                    list.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("; ")
+                } else {
+                    String::new()
+                }
+            });
+            if !cookies_to_send.is_empty() {
+                custom_headers.push(("Cookie".to_string(), cookies_to_send));
+            }
 
             // Spawn background thread to perform non-blocking HTTP request
             // ONLY plain Rust data is moved to worker thread!
@@ -2079,9 +2122,16 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             return true;
         };
 
-        // Browser ES Module Transpiler, Dependency Loader & Registry
+        // Browser ES Module State Machine, Dependency Loader & Live Binding Registry
         window.__moduleRegistry = new Map();
+        window.__moduleRecords = new Map();
         window.__resolvingModules = new Map();
+
+        const MODULE_UNLINKED = 0;
+        const MODULE_LINKING = 1;
+        const MODULE_LINKED = 2;
+        const MODULE_EVALUATING = 3;
+        const MODULE_EVALUATED = 4;
 
         window.__resolveModuleUrl = function(specifier, base) {
             try {
@@ -2091,84 +2141,152 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             }
         };
 
+        // AST-safe ES Module Transformer that strips comments, preserves strings, and emits live getters
         window.__transformESModule = function(source) {
-            let transformed = source;
+            let i = 0;
+            const len = source.length;
+            let cleanSource = '';
+            let inString = false;
+            let strQuote = '';
 
-            // 1. import defaultExport from "specifier";
+            while (i < len) {
+                const ch = source[i];
+                const next = (i + 1 < len) ? source[i + 1] : '';
+
+                if (inString) {
+                    cleanSource += ch;
+                    if (ch === '\\' && i + 1 < len) {
+                        cleanSource += source[++i];
+                    } else if (ch === strQuote) {
+                        inString = false;
+                    }
+                    i++;
+                    continue;
+                }
+
+                // Line comment
+                if (ch === '/' && next === '/') {
+                    while (i < len && source[i] !== '\n') i++;
+                    cleanSource += '\n';
+                    continue;
+                }
+
+                // Block comment
+                if (ch === '/' && next === '*') {
+                    i += 2;
+                    while (i + 1 < len && !(source[i] === '*' && source[i+1] === '/')) i++;
+                    i += 2;
+                    cleanSource += ' ';
+                    continue;
+                }
+
+                // String literal
+                if (ch === '"' || ch === "'" || ch === '`') {
+                    inString = true;
+                    strQuote = ch;
+                    cleanSource += ch;
+                    i++;
+                    continue;
+                }
+
+                cleanSource += ch;
+                i++;
+            }
+
+            let transformed = cleanSource;
+
+            // 1. import defaultExport, { a, b as c } from "specifier";
             transformed = transformed.replace(
-                /^\s*import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
+                /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*,\s*\{([^}]+)\}\s+from\s*['"]([^'"]+)['"]\s*;?/g,
+                function(m, def, named, spec) {
+                    const norm = named.replace(/\s+as\s+/g, ': ');
+                    return 'const { default: ' + def + ', ' + norm + ' } = await importModule("' + spec + '");';
+                }
+            );
+
+            // 2. import defaultExport from "specifier";
+            transformed = transformed.replace(
+                /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
                 'const { default: $1 } = await importModule("$2");'
             );
 
-            // 2. import * as name from "specifier";
+            // 3. import * as name from "specifier";
             transformed = transformed.replace(
-                /^\s*import\s+\*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
+                /import\s*\*\s*as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
                 'const $1 = await importModule("$2");'
             );
 
-            // 3. import { a, b as c } from "specifier";
+            // 4. import { a, b as c } from "specifier";
             transformed = transformed.replace(
-                /^\s*import\s+\{([^}]+)\}\s+from\s+['"]([^'"]+)['"]\s*;?/gm,
-                function(match, bindings, specifier) {
+                /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;?/g,
+                function(m, bindings, specifier) {
                     const normalized = bindings.replace(/\s+as\s+/g, ': ');
                     return 'const { ' + normalized + ' } = await importModule("' + specifier + '");';
                 }
             );
 
-            // 4. import "specifier";
+            // 5. import "specifier";
             transformed = transformed.replace(
-                /^\s*import\s+['"]([^'"]+)['"]\s*;?/gm,
+                /import\s*['"]([^'"]+)['"]\s*;?/g,
                 'await importModule("$1");'
             );
 
-            // 5. export default expression;
+            // 6. export default expression;
             transformed = transformed.replace(
-                /^\s*export\s+default\s+([^;]+);?/gm,
-                'exports.default = $1;'
+                /export\s+default\s+([^;]+);?/g,
+                'const __defaultExport = $1; Object.defineProperty(exports, "default", { get: () => __defaultExport, enumerable: true, configurable: true });'
             );
 
-            // 6. export const/let/var x = 1, y = 2;
+            // 7. export const/let/var decls; -> with LIVE GETTERS
             transformed = transformed.replace(
-                /^\s*export\s+(const|let|var)\s+([^;]+);?/gm,
+                /export\s+(const|let|var)\s+([^;]+);?/g,
                 function(match, declType, decls) {
                     let res = declType + ' ' + decls + ';\n';
                     const parts = decls.split(',');
-                    for (let i = 0; i < parts.length; i++) {
-                        const name = parts[i].split('=')[0].trim();
-                        if (name) {
-                            res += 'exports.' + name + ' = ' + name + ';\n';
+                    for (let p = 0; p < parts.length; p++) {
+                        const name = parts[p].split('=')[0].trim();
+                        if (name && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+                            res += 'Object.defineProperty(exports, "' + name + '", { get: () => ' + name + ', enumerable: true, configurable: true });\n';
                         }
                     }
                     return res;
                 }
             );
 
-            // 7. export function name(...) { ... }
+            // 8. export function name(...) { ... }
             transformed = transformed.replace(
-                /^\s*export\s+function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/gm,
-                'exports.$1 = $1; function $1'
+                /export\s+function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
+                'Object.defineProperty(exports, "$1", { get: () => $1, enumerable: true, configurable: true }); function $1'
             );
 
-            // 8. export class name { ... }
+            // 9. export async function name(...) { ... }
             transformed = transformed.replace(
-                /^\s*export\s+class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/gm,
-                'exports.$1 = $1; class $1'
+                /export\s+async\s+function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
+                'Object.defineProperty(exports, "$1", { get: () => $1, enumerable: true, configurable: true }); async function $1'
             );
 
-            // 9. export { a, b as c };
+            // 10. export class name { ... }
             transformed = transformed.replace(
-                /^\s*export\s+\{([^}]+)\}\s*;?/gm,
+                /export\s+class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
+                'Object.defineProperty(exports, "$1", { get: () => $1, enumerable: true, configurable: true }); class $1'
+            );
+
+            // 11. export { a, b as c }; -> LIVE GETTERS
+            transformed = transformed.replace(
+                /export\s*\{([^}]+)\}\s*;?/g,
                 function(match, bindings) {
                     const items = bindings.split(',');
                     let res = '';
-                    for (let i = 0; i < items.length; i++) {
-                        const item = items[i].trim();
+                    for (let p = 0; p < items.length; p++) {
+                        const item = items[p].trim();
                         if (!item) continue;
                         if (item.indexOf(' as ') !== -1) {
                             const pair = item.split(' as ');
-                            res += 'exports.' + pair[1].trim() + ' = ' + pair[0].trim() + ';\n';
+                            const srcName = pair[0].trim();
+                            const exportName = pair[1].trim();
+                            res += 'Object.defineProperty(exports, "' + exportName + '", { get: () => ' + srcName + ', enumerable: true, configurable: true });\n';
                         } else {
-                            res += 'exports.' + item + ' = ' + item + ';\n';
+                            res += 'Object.defineProperty(exports, "' + item + '", { get: () => ' + item + ', enumerable: true, configurable: true });\n';
                         }
                     }
                     return res;
@@ -2178,30 +2296,48 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             return transformed;
         };
 
-        window.__executeModule = function(source, moduleUrl) {
+        window.__executeModule = async function(source, moduleUrl) {
             const resolvedUrl = window.__resolveModuleUrl(moduleUrl || 'inline-module', window.location.href);
+
+            let record = window.__moduleRecords.get(resolvedUrl);
+            if (record && record.status === MODULE_EVALUATED) {
+                return record.namespace;
+            }
+
+            if (!record) {
+                record = {
+                    url: resolvedUrl,
+                    status: MODULE_LINKING,
+                    namespace: Object.create(null),
+                    source: source
+                };
+                window.__moduleRecords.set(resolvedUrl, record);
+                window.__moduleRegistry.set(resolvedUrl, record.namespace);
+            }
+
             const transformed = window.__transformESModule(source);
+            record.status = MODULE_EVALUATING;
 
             const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
             const moduleFn = new AsyncFunction('exports', 'importModule', 'moduleUrl',
                 "'use strict';\n" + transformed + "\n//# sourceURL=" + resolvedUrl
             );
 
-            const moduleNamespace = Object.create(null);
-            window.__moduleRegistry.set(resolvedUrl, moduleNamespace);
+            try {
+                await moduleFn(record.namespace, window.import, resolvedUrl);
+                record.status = MODULE_EVALUATED;
+            } catch(e) {
+                console.error('[Axomai ESModule Exception in ' + resolvedUrl + ']:', e);
+            }
 
-            return moduleFn(moduleNamespace, window.import, resolvedUrl).then(function() {
-                return moduleNamespace;
-            }).catch(function(e) {
-                console.error('[Axomai ESModule Error in ' + resolvedUrl + ']:', e);
-                return moduleNamespace;
-            });
+            return record.namespace;
         };
 
         window.import = function(specifier) {
             const resolvedUrl = window.__resolveModuleUrl(specifier, window.location.href);
-            if (window.__moduleRegistry.has(resolvedUrl)) {
-                return Promise.resolve(window.__moduleRegistry.get(resolvedUrl));
+            if (window.__moduleRecords.has(resolvedUrl)) {
+                const rec = window.__moduleRecords.get(resolvedUrl);
+                return Promise.resolve(rec.namespace);
             }
             if (window.__resolvingModules.has(resolvedUrl)) {
                 return window.__resolvingModules.get(resolvedUrl);
