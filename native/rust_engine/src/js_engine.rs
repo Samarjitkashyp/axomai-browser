@@ -5,9 +5,10 @@ use crate::html_parser::{
 };
 use crate::network::URL;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::Once;
+use std::sync::{Arc, Mutex, Once};
+use std::thread;
 use std::time::{Duration, Instant};
 use v8;
 
@@ -19,6 +20,37 @@ fn ensure_v8_initialized() {
         v8::V8::initialize_platform(platform);
         v8::V8::initialize();
     });
+}
+
+// ============================================================================
+// ASYNC FETCH QUEUE & STRUCTS
+// ============================================================================
+
+pub struct CompletedFetch {
+    pub resolver: v8::Global<v8::PromiseResolver>,
+    pub status: u16,
+    pub body: String,
+    pub error: Option<String>,
+}
+
+lazy_static_queue! {
+    static ref ASYNC_FETCH_QUEUE: Arc<Mutex<Vec<CompletedFetch>>> = Arc::new(Mutex::new(Vec::new()));
+}
+
+macro_rules! lazy_static_queue {
+    ($(#[$attr:meta])* static ref $N:ident : $T:ty = $e:expr;) => {
+        static mut $N: Option<$T> = None;
+        static INIT: Once = Once::new();
+
+        fn get_async_fetch_queue() -> &'static Arc<Mutex<Vec<CompletedFetch>>> {
+            unsafe {
+                INIT.call_once(|| {
+                    $N = Some($e);
+                });
+                $N.as_ref().unwrap()
+            }
+        }
+    };
 }
 
 // ============================================================================
@@ -113,9 +145,9 @@ impl V8JSEngine {
         setup_navigator_api(scope, global);
         setup_document_api(scope, global);
         setup_timer_apis(scope, global);
-        setup_fetch_api(scope, global, url_str);
+        setup_async_fetch_api(scope, global, url_str);
 
-        // 5. Inject DOM & Window/Document Prototype Event Helpers
+        // 5. Inject DOM & EventTarget Prototype Helpers
         inject_dom_prototype_bootstrap(scope);
 
         // 6. Store persistent Context reference
@@ -134,7 +166,7 @@ impl V8JSEngine {
         let context = v8::Local::new(handle_scope, page_context_global);
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
-        // Setup TryCatch block to accurately capture JS exceptions (line, message, stack)
+        // Setup TryCatch block to accurately capture JS exceptions
         let try_catch = &mut v8::TryCatch::new(scope);
 
         let code = v8::String::new(try_catch, source).ok_or("Failed to allocate JS source string")?;
@@ -169,7 +201,7 @@ impl V8JSEngine {
             }
         }
 
-        // 1. CRITICAL: Perform Microtask Checkpoint so Promises (Promise.resolve, .then, async/await) resolve!
+        // 1. Perform Microtask Checkpoint so Promises (Promise.resolve, .then, async/await) resolve!
         try_catch.perform_microtask_checkpoint();
 
         // 2. Harvest any timers registered during script execution
@@ -196,7 +228,7 @@ impl V8JSEngine {
         Ok(was_mutated)
     }
 
-    /// Process queued timers and run Microtask Checkpoint (Real Browser Event Loop tick)
+    /// Process queued timers, async network fetch results, and microtasks (Browser Event Loop tick)
     pub fn process_event_loop(&mut self) -> bool {
         let isolate = match self.isolate.as_mut() {
             Some(iso) => iso,
@@ -214,17 +246,88 @@ impl V8JSEngine {
         let context = v8::Local::new(handle_scope, page_context_global);
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
+        // 1. Process Completed Async Fetch Requests (Non-blocking network thread)
+        let mut completed_fetches = Vec::new();
+        let queue = get_async_fetch_queue();
+        if let Ok(mut q) = queue.lock() {
+            completed_fetches.append(&mut *q);
+        }
+
+        for fetch_res in completed_fetches {
+            let resolver = fetch_res.resolver.open(scope);
+
+            if let Some(err_msg) = fetch_res.error {
+                let err_v = v8::String::new(scope, &err_msg).unwrap();
+                resolver.reject(scope, err_v.into());
+            } else {
+                let resp_obj = v8::Object::new(scope);
+
+                let status_k = v8::String::new(scope, "status").unwrap();
+                let status_v = v8::Integer::new(scope, fetch_res.status as i32);
+                resp_obj.set(scope, status_k.into(), status_v.into());
+
+                let ok_k = v8::String::new(scope, "ok").unwrap();
+                let ok_v = v8::Boolean::new(scope, fetch_res.status >= 200 && fetch_res.status < 300);
+                resp_obj.set(scope, ok_k.into(), ok_v.into());
+
+                // text() method
+                let text_k = v8::String::new(scope, "text").unwrap();
+                let body_clone = fetch_res.body.clone();
+                let text_fn = v8::Function::new(
+                    scope,
+                    move |s: &mut v8::HandleScope,
+                          _a: v8::FunctionCallbackArguments,
+                          mut r: v8::ReturnValue| {
+                        let text_res = v8::PromiseResolver::new(s).unwrap();
+                        let text_p = text_res.get_promise(s);
+                        let text_str = v8::String::new(s, &body_clone).unwrap();
+                        text_res.resolve(s, text_str.into());
+                        r.set(text_p.into());
+                    },
+                )
+                .unwrap();
+                resp_obj.set(scope, text_k.into(), text_fn.into());
+
+                // json() method
+                let json_k = v8::String::new(scope, "json").unwrap();
+                let body_json = fetch_res.body.clone();
+                let json_fn = v8::Function::new(
+                    scope,
+                    move |s: &mut v8::HandleScope,
+                          _a: v8::FunctionCallbackArguments,
+                          mut r: v8::ReturnValue| {
+                        let json_res = v8::PromiseResolver::new(s).unwrap();
+                        let json_p = json_res.get_promise(s);
+                        let json_str = v8::String::new(s, &body_json).unwrap();
+                        if let Some(parsed) = v8::json::parse(s, json_str) {
+                            json_res.resolve(s, parsed);
+                        } else {
+                            let err = v8::String::new(s, "Invalid JSON in response").unwrap();
+                            json_res.reject(s, err.into());
+                        }
+                        r.set(json_p.into());
+                    },
+                )
+                .unwrap();
+                resp_obj.set(scope, json_k.into(), json_fn.into());
+
+                resolver.resolve(scope, resp_obj.into());
+            }
+
+            executed_any = true;
+            scope.perform_microtask_checkpoint();
+        }
+
+        // 2. Process Scheduled Async Timers
         let mut remaining = Vec::new();
 
         for timer in self.timers.drain(..) {
-            // Check if timer was cancelled
             let is_cancelled = CANCELLED_TIMERS.with(|c| c.borrow().contains(&timer.id));
             if is_cancelled {
                 continue;
             }
 
             if now.duration_since(timer.created_at) >= timer.delay {
-                // ACTUALLY DELAYED: Executes only after the real elapsed time!
                 let func = timer.callback.open(scope);
                 let recv = context.global(scope).into();
 
@@ -236,7 +339,6 @@ impl V8JSEngine {
                     eprintln!("[Axomai V8 Timer Exception]: {}", msg);
                 }
 
-                // Run Microtask Checkpoint after each timer callback (Promises inside setTimeout)
                 try_catch.perform_microtask_checkpoint();
                 executed_any = true;
 
@@ -256,12 +358,12 @@ impl V8JSEngine {
 
         self.timers = remaining;
 
-        // Harvest any newly queued timers from timer callbacks
+        // Harvest any newly queued timers from callbacks
         PENDING_TIMERS.with(|q| {
             self.timers.append(&mut *q.borrow_mut());
         });
 
-        // Extra Microtask Checkpoint to drain any pending async jobs
+        // Drain any pending microtasks
         scope.perform_microtask_checkpoint();
 
         let was_mutated = CURRENT_CONTEXT.with(|ctx| {
@@ -277,7 +379,7 @@ impl V8JSEngine {
         executed_any || was_mutated
     }
 
-    /// Dispatch a native click event with full Event object (type, target, bubbles)
+    /// Dispatch a native click event with full Event object and bubbling
     pub fn dispatch_click_event(&mut self, target_selector: &str, click_x: f32, click_y: f32) -> bool {
         let js = format!(
             r#"
@@ -293,6 +395,7 @@ impl V8JSEngine {
                         bubbles: true,
                         cancelable: true,
                         defaultPrevented: false,
+                        _stopped: false,
                         preventDefault: function() {{ this.defaultPrevented = true; }},
                         stopPropagation: function() {{ this._stopped = true; }}
                     }};
@@ -325,6 +428,23 @@ fn register_dom_tree(
         register_dom_tree(child, registry, next_id);
     }
     id
+}
+
+/// Prune detached nodes from node_registry to prevent memory leaks
+fn prune_detached_nodes(ctx: &mut ActiveContext) {
+    if let Some(ref root) = ctx.dom_root {
+        let mut reachable = HashSet::new();
+        collect_reachable_nodes(root, &mut reachable);
+        ctx.node_registry.retain(|_, node| reachable.contains(&Rc::as_ptr(node)));
+    }
+}
+
+fn collect_reachable_nodes(node: &NodePtr, set: &mut HashSet<*const std::cell::RefCell<NodeData>>) {
+    set.insert(Rc::as_ptr(node));
+    let children = node.borrow().children.clone();
+    for child in &children {
+        collect_reachable_nodes(child, set);
+    }
 }
 
 // ============================================================================
@@ -433,7 +553,6 @@ fn setup_timer_apis<'s>(
     scope: &mut v8::ContextScope<'s, v8::HandleScope>,
     global: v8::Local<v8::Object>,
 ) {
-    // 1. setTimeout(callback, delay_ms)
     let timeout_key = v8::String::new(scope, "setTimeout").unwrap();
     let timeout_fn = v8::Function::new(
         scope,
@@ -477,7 +596,6 @@ fn setup_timer_apis<'s>(
     .unwrap();
     global.set(scope, timeout_key.into(), timeout_fn.into());
 
-    // 2. setInterval(callback, delay_ms)
     let interval_key = v8::String::new(scope, "setInterval").unwrap();
     let interval_fn = v8::Function::new(
         scope,
@@ -521,7 +639,6 @@ fn setup_timer_apis<'s>(
     .unwrap();
     global.set(scope, interval_key.into(), interval_fn.into());
 
-    // 3. clearTimeout(timer_id) & clearInterval(timer_id)
     let clear_timeout_k = v8::String::new(scope, "clearTimeout").unwrap();
     let clear_timeout_fn = v8::Function::new(
         scope,
@@ -544,10 +661,10 @@ fn setup_timer_apis<'s>(
 }
 
 // ============================================================================
-// NATIVE FETCH() WEB API IMPLEMENTATION (Returns Promise<Response>)
+// TRUE ASYNCHRONOUS FETCH() API (Uses Background Worker Thread & Channel)
 // ============================================================================
 
-fn setup_fetch_api<'s>(
+fn setup_async_fetch_api<'s>(
     scope: &mut v8::ContextScope<'s, v8::HandleScope>,
     global: v8::Local<v8::Object>,
     base_url_str: &str,
@@ -576,76 +693,37 @@ fn setup_fetch_api<'s>(
             let promise = resolver.get_promise(scope);
             rv.set(promise.into());
 
-            // Perform HTTP GET request via ureq networking layer
-            let fetch_result = ureq::get(&resolved_url).call();
+            let resolver_global = v8::Global::new(scope, resolver);
 
-            match fetch_result {
-                Ok(response) => {
-                    let status_code = response.status();
-                    let ok_bool = status_code >= 200 && status_code < 300;
-                    let body_text = response.into_string().unwrap_or_default();
-
-                    let resp_obj = v8::Object::new(scope);
-
-                    // status & ok
-                    let status_k = v8::String::new(scope, "status").unwrap();
-                    let status_v = v8::Integer::new(scope, status_code as i32);
-                    resp_obj.set(scope, status_k.into(), status_v.into());
-
-                    let ok_k = v8::String::new(scope, "ok").unwrap();
-                    let ok_v = v8::Boolean::new(scope, ok_bool);
-                    resp_obj.set(scope, ok_k.into(), ok_v.into());
-
-                    // response.text() -> returns Promise resolving to body_text
-                    let text_k = v8::String::new(scope, "text").unwrap();
-                    let body_clone = body_text.clone();
-                    let text_fn = v8::Function::new(
-                        scope,
-                        move |s: &mut v8::HandleScope,
-                              _a: v8::FunctionCallbackArguments,
-                              mut r: v8::ReturnValue| {
-                            let text_res = v8::PromiseResolver::new(s).unwrap();
-                            let text_p = text_res.get_promise(s);
-                            let text_str = v8::String::new(s, &body_clone).unwrap();
-                            text_res.resolve(s, text_str.into());
-                            r.set(text_p.into());
-                        },
-                    )
-                    .unwrap();
-                    resp_obj.set(scope, text_k.into(), text_fn.into());
-
-                    // response.json() -> returns Promise resolving to parsed JSON
-                    let json_k = v8::String::new(scope, "json").unwrap();
-                    let body_json = body_text.clone();
-                    let json_fn = v8::Function::new(
-                        scope,
-                        move |s: &mut v8::HandleScope,
-                              _a: v8::FunctionCallbackArguments,
-                              mut r: v8::ReturnValue| {
-                            let json_res = v8::PromiseResolver::new(s).unwrap();
-                            let json_p = json_res.get_promise(s);
-
-                            let json_str = v8::String::new(s, &body_json).unwrap();
-                            if let Some(parsed) = v8::json::parse(s, json_str) {
-                                json_res.resolve(s, parsed);
-                            } else {
-                                let err = v8::String::new(s, "Invalid JSON").unwrap();
-                                json_res.reject(s, err.into());
-                            }
-                            r.set(json_p.into());
-                        },
-                    )
-                    .unwrap();
-                    resp_obj.set(scope, json_k.into(), json_fn.into());
-
-                    resolver.resolve(scope, resp_obj.into());
+            // Spawn background thread to perform non-blocking HTTP request
+            thread::spawn(move || {
+                match ureq::get(&resolved_url).call() {
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let body = resp.into_string().unwrap_or_default();
+                        let q = get_async_fetch_queue();
+                        if let Ok(mut lock) = q.lock() {
+                            lock.push(CompletedFetch {
+                                resolver: resolver_global,
+                                status,
+                                body,
+                                error: None,
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        let q = get_async_fetch_queue();
+                        if let Ok(mut lock) = q.lock() {
+                            lock.push(CompletedFetch {
+                                resolver: resolver_global,
+                                status: 500,
+                                body: String::new(),
+                                error: Some(format!("Fetch Error: {}", err)),
+                            });
+                        }
+                    }
                 }
-                Err(err) => {
-                    let err_msg = format!("Network Error: {}", err);
-                    let err_v = v8::String::new(scope, &err_msg).unwrap();
-                    resolver.reject(scope, err_v.into());
-                }
-            }
+            });
         },
     )
     .unwrap();
@@ -692,6 +770,7 @@ fn setup_document_api<'s>(
                                 NodeData::add_child(&target, &snippet_tree);
                             }
                             c.dom_mutated = true;
+                            prune_detached_nodes(c);
                         }
                     }
                 });
@@ -869,10 +948,6 @@ fn wrap_dom_element<'s>(
                     if let (Some(parent), Some(child)) = (parent_node, child_node) {
                         NodeData::add_child(&parent, &child);
                         c.dom_mutated = true;
-                        println!(
-                            "[Axomai V8 DOM] appendChild: Child Node #{} appended to Parent Node #{}",
-                            child_id, parent_id
-                        );
                     }
                 }
             });
@@ -917,6 +992,7 @@ fn wrap_dom_element<'s>(
                     if let (Some(parent), Some(child)) = (parent_node, child_node) {
                         NodeData::remove_child(&parent, &child);
                         c.dom_mutated = true;
+                        prune_detached_nodes(c);
                     }
                 }
             });
@@ -947,6 +1023,7 @@ fn wrap_dom_element<'s>(
                     if let Some(node) = c.node_registry.get(&node_id) {
                         remove_node(node);
                         c.dom_mutated = true;
+                        prune_detached_nodes(c);
                     }
                 }
             });
@@ -1008,6 +1085,7 @@ fn bind_element_accessor_functions<'s>(
                             set_node_inner_html(&node, &html_val);
                             c.dom_mutated = true;
                             register_dom_tree(&node, &mut c.node_registry, &mut c.next_node_id);
+                            prune_detached_nodes(c);
                         }
                     }
                 });
@@ -1135,13 +1213,13 @@ fn bind_element_event_functions<'s>(
 }
 
 /// Inject JavaScript bootstrap code that configures:
-/// 1. window.addEventListener, document.addEventListener
-/// 2. element.innerHTML, textContent, className, id reactive property getters & setters
-/// 3. Event bubbling, preventDefault, stopPropagation
+/// 1. window.addEventListener, document.addEventListener, element.addEventListener
+/// 2. Event bubbling & capture phase from target -> parent -> document -> window
+/// 3. element.innerHTML, textContent, className, id reactive property getters & setters
 fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::HandleScope>) {
     let bootstrap_js = r#"
     (function() {
-        // Universal EventTarget implementation
+        // Universal EventTarget implementation with W3C Bubbling
         function setupEventTarget(obj) {
             if (!obj) return obj;
             obj.__events = {};
@@ -1154,13 +1232,43 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 this.__events[type] = this.__events[type].filter(l => l !== listener);
             };
             obj.dispatchEvent = function(event) {
-                const evt = (typeof event === 'string') ? { type: event } : event;
+                const evt = (typeof event === 'string') ? { type: event, bubbles: true } : event;
                 if (!evt.target) evt.target = this;
+                evt.currentTarget = this;
+
+                // 1. Invoke Target Listeners
                 if (typeof this['on' + evt.type] === 'function') {
                     this['on' + evt.type].call(this, evt);
                 }
                 if (this.__events && this.__events[evt.type]) {
                     this.__events[evt.type].forEach(l => l.call(this, evt));
+                }
+
+                // 2. Bubble up to parents if bubbles is true and propagation is not stopped
+                if (evt.bubbles && !evt._stopped) {
+                    let curr = this.parentElement;
+                    while (curr && !evt._stopped) {
+                        evt.currentTarget = curr;
+                        if (typeof curr['on' + evt.type] === 'function') {
+                            curr['on' + evt.type].call(curr, evt);
+                        }
+                        if (curr.__events && curr.__events[evt.type]) {
+                            curr.__events[evt.type].forEach(l => l.call(curr, evt));
+                        }
+                        curr = curr.parentElement;
+                    }
+
+                    // Document Level Bubbling
+                    if (!evt._stopped && typeof document !== 'undefined' && document.__events && document.__events[evt.type]) {
+                        evt.currentTarget = document;
+                        document.__events[evt.type].forEach(l => l.call(document, evt));
+                    }
+
+                    // Window Level Bubbling
+                    if (!evt._stopped && typeof window !== 'undefined' && window.__events && window.__events[evt.type]) {
+                        evt.currentTarget = window;
+                        window.__events[evt.type].forEach(l => l.call(window, evt));
+                    }
                 }
             };
             return obj;

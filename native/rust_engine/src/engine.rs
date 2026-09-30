@@ -1,4 +1,4 @@
-use crate::css_parser::{style_tree, CSSParser, DEFAULT_UA_STYLES};
+use crate::css_parser::{style_tree, CSSParser, Rule, DEFAULT_UA_STYLES};
 use crate::html_parser::{HTMLParser, NodePtr, NodeType};
 use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
@@ -14,6 +14,7 @@ pub struct AxomaiEngine {
     pub focused_input_idx: Option<usize>,
     pub status_message: String,
     pub js_engine: V8JSEngine,
+    pub active_css_rules: Vec<Rule>,
 }
 
 impl AxomaiEngine {
@@ -27,6 +28,7 @@ impl AxomaiEngine {
             focused_input_idx: None,
             status_message: "Ready".to_string(),
             js_engine: V8JSEngine::new(),
+            active_css_rules: Vec::new(),
         }
     }
 
@@ -86,29 +88,39 @@ impl AxomaiEngine {
         let mut all_rules = ua_rules;
         all_rules.extend(author_rules);
 
-        style_tree(&dom_root, &all_rules);
+        self.active_css_rules = all_rules;
+        self.dom_root = Some(dom_root);
 
-        self.dom_root = Some(dom_root.clone());
-
-        // 4. Layout
-        if let Some(mut layout_box) = build_layout_tree(&dom_root, self.current_url.as_ref()) {
-            let total_h = layout_box.layout(0.0, 0.0, viewport_w.max(800.0));
-            self.max_scroll_y = (total_h - viewport_h).max(0.0);
-
-            // 5. Display List
-            let mut list = Vec::new();
-            build_display_list(&layout_box, &mut list);
-
-            self.layout_root = Some(layout_box);
-            self.display_list = list;
-        } else {
-            self.layout_root = None;
-            self.display_list.clear();
-            self.max_scroll_y = 0.0;
-        }
+        // 4. Restyle, Layout & Display List
+        self.restyle_and_relayout(viewport_w, viewport_h);
 
         self.status_message = "Page Loaded Successfully".to_string();
         Ok(())
+    }
+
+    /// Recalculates style using both UA and Author CSS rules, and reconstructs the layout and display list
+    pub fn restyle_and_relayout(&mut self, viewport_w: f32, viewport_h: f32) {
+        if let Some(ref dom_root) = self.dom_root {
+            // 1. Re-apply cascading style tree with all active rules (UA + Author)
+            style_tree(dom_root, &self.active_css_rules);
+
+            // 2. Rebuild Layout Tree
+            if let Some(mut layout_box) = build_layout_tree(dom_root, self.current_url.as_ref()) {
+                let total_h = layout_box.layout(0.0, 0.0, viewport_w.max(800.0));
+                self.max_scroll_y = (total_h - viewport_h).max(0.0);
+
+                // 3. Rebuild Display List
+                let mut list = Vec::new();
+                build_display_list(&layout_box, &mut list);
+
+                self.layout_root = Some(layout_box);
+                self.display_list = list;
+            } else {
+                self.layout_root = None;
+                self.display_list.clear();
+                self.max_scroll_y = 0.0;
+            }
+        }
     }
 
     pub fn handle_click(&mut self, click_x: f32, click_y: f32, scroll_y: f32) -> Option<String> {
@@ -138,6 +150,7 @@ impl AxomaiEngine {
                     if click_x >= *x && click_x <= *x + *width && abs_y >= *y && abs_y <= *y + *height {
                         *is_focused = true;
                         self.focused_input_idx = Some(idx);
+                        self.js_engine.dispatch_click_event("input", click_x, abs_y);
                         return None;
                     }
                 }
@@ -167,6 +180,7 @@ impl AxomaiEngine {
                         && abs_y >= *y
                         && abs_y <= *y + *height
                     {
+                        self.js_engine.dispatch_click_event("a", click_x, abs_y);
                         if let Some(ref url_obj) = self.current_url {
                             return Some(url_obj.resolve(href));
                         } else {
@@ -247,18 +261,8 @@ impl AxomaiEngine {
     pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
         let executed = self.js_engine.process_event_loop();
         if executed {
-            if let Some(ref dom_root) = self.dom_root {
-                let ua_rules = CSSParser::new(DEFAULT_UA_STYLES).parse();
-                style_tree(dom_root, &ua_rules);
-                if let Some(mut layout_box) = build_layout_tree(dom_root, self.current_url.as_ref()) {
-                    let total_h = layout_box.layout(0.0, 0.0, viewport_w.max(800.0));
-                    self.max_scroll_y = (total_h - viewport_h).max(0.0);
-                    let mut list = Vec::new();
-                    build_display_list(&layout_box, &mut list);
-                    self.layout_root = Some(layout_box);
-                    self.display_list = list;
-                }
-            }
+            // Reapply author + UA styles and recalculate layout
+            self.restyle_and_relayout(viewport_w, viewport_h);
         }
         executed
     }
