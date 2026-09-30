@@ -164,15 +164,21 @@ impl AxomaiEngine {
             .map(|u| u.as_string())
             .unwrap_or_else(|| "about:blank".to_string());
 
+        let parser = HTMLParser::new(html_content);
+        let dom_root = parser.get_root();
+        self.dom_root = Some(Rc::clone(&dom_root));
+
+        // 1. Establish ONE persistent V8 Context bound to the root DOM BEFORE parsing begins
+        self.js_engine.reset_page_context(Some(&dom_root), &url_str);
+
         let mut ordered_script_counter = 0;
         let mut defer_scripts = Vec::new();
         let mut scheduled_scripts = Vec::new();
-        let mut immediate_scripts_to_run = Vec::new();
-
         let current_url = self.current_url.clone();
+        let script_tx = self.script_tx.clone();
 
-        // 1. HTML DOM Parse with parser-integrated script extraction
-        let dom_root = HTMLParser::new(html_content).parse_interactive(|attrs, body, _tokenizer| {
+        // 2. Stream-driven HTML parse with synchronous Parser Pause -> Execute -> Resume
+        let final_dom_root = parser.parse_interactive(|attrs, body, _tokenizer| {
             let is_async = attrs.contains_key("async");
             let is_defer = attrs.contains_key("defer");
             let script_type = attrs.get("type").map(|s| s.as_str()).unwrap_or("");
@@ -188,6 +194,7 @@ impl AxomaiEngine {
                 ScriptKind::Classic
             };
 
+            // External script handling
             if let Some(src) = attrs.get("src") {
                 if !src.trim().is_empty() {
                     let resolved_url = if let Some(ref current) = current_url {
@@ -195,29 +202,44 @@ impl AxomaiEngine {
                     } else {
                         src.trim().to_string()
                     };
-                    scheduled_scripts.push((resolved_url, kind));
+
+                    if kind == ScriptKind::Defer || kind == ScriptKind::Async {
+                        scheduled_scripts.push((resolved_url, kind));
+                    } else {
+                        // Classic external script
+                        if let Ok(url_obj) = URL::parse(&resolved_url) {
+                            if url_obj.scheme == "file" || url_obj.scheme == "data" {
+                                // Local synchronous script: pause parser, execute, resume!
+                                let (_headers, js_code) = url_obj.request();
+                                if !js_code.is_empty() {
+                                    println!("[Axomai ParserController] Synchronous parser pause -> executing local script: {}", resolved_url);
+                                    let _ = self.js_engine.execute(&js_code);
+                                }
+                            } else {
+                                scheduled_scripts.push((resolved_url, kind));
+                            }
+                        }
+                    }
                     return;
                 }
             }
 
+            // Inline script handling
             if !body.trim().is_empty() {
                 if kind == ScriptKind::Defer {
                     defer_scripts.push(body.to_string());
                 } else {
-                    immediate_scripts_to_run.push((body.to_string(), kind));
+                    // GENUINE SYNCHRONOUS PARSER PAUSE -> EXECUTE -> RESUME
+                    println!("[Axomai ParserController] Synchronous parser pause -> executing inline script ({} bytes)", body.len());
+                    let _ = self.js_engine.execute(body);
+                    println!("[Axomai ParserController] Inline script execution complete -> parser resumed");
                 }
             }
         });
 
-        // 2. Establish persistent V8 Context bound to the parsed DOM root
-        self.js_engine.reset_page_context(Some(&dom_root), &url_str);
+        self.dom_root = Some(Rc::clone(&final_dom_root));
 
-        // Execute parser-encountered inline scripts immediately
-        for (code, _kind) in immediate_scripts_to_run {
-            let _ = self.js_engine.execute(&code);
-        }
-
-        // Schedule external scripts via ScriptScheduler
+        // 3. Schedule external async / deferred scripts
         for (resolved_url, kind) in scheduled_scripts {
             if let Ok(url_obj) = URL::parse(&resolved_url) {
                 if url_obj.scheme == "file" || url_obj.scheme == "data" {
@@ -241,7 +263,7 @@ impl AxomaiEngine {
                         "[Axomai ScriptScheduler] Queued {:?} external script (doc_id {}, order {}): {}",
                         kind, doc_id, order, resolved_url
                     );
-                    let script_tx = self.script_tx.clone();
+                    let tx = script_tx.clone();
                     self.pending_scripts += 1;
                     let script_url = resolved_url.clone();
                     thread::spawn(move || {
@@ -252,7 +274,7 @@ impl AxomaiEngine {
                                 String::new()
                             }
                         };
-                        let _ = script_tx.send(PendingScript {
+                        let _ = tx.send(PendingScript {
                             document_id: doc_id,
                             order,
                             kind,
@@ -264,18 +286,19 @@ impl AxomaiEngine {
             }
         }
 
-        // Execute all collected defer scripts in strict document order
+        // 4. Execute all collected defer scripts in strict document order after parser completion
         for defer_code in defer_scripts {
+            println!("[Axomai ScriptController] Executing deferred script in document order");
             let _ = self.js_engine.execute(&defer_code);
         }
 
-        // Dispatch DOMContentLoaded event when DOM parsing and defer scripts finish
+        // 5. Dispatch DOMContentLoaded event when DOM parsing finishes and defer scripts have executed
         self.js_engine.dispatch_dom_content_loaded();
         self.dom_content_loaded_dispatched = true;
 
-        // 3. Extract <title> and update current_title & history stack
+        // 6. Extract <title> and update current_title & history stack
         let mut title_buf = String::new();
-        extract_title_tag(&dom_root, &mut title_buf);
+        extract_title_tag(&final_dom_root, &mut title_buf);
         let extracted_title = if !title_buf.trim().is_empty() {
             title_buf.trim().to_string()
         } else if let Some(ref u) = self.current_url {

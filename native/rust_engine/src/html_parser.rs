@@ -556,12 +556,25 @@ pub struct HTMLParser<'a> {
 
 impl<'a> HTMLParser<'a> {
     pub fn new(body: &'a str) -> Self {
+        let html_node = NodeData::new_element("html", HashMap::new());
+        let body_node = NodeData::new_element("body", HashMap::new());
+        NodeData::add_child(&html_node, &body_node);
+
         HTMLParser {
             body,
-            open_elements: Vec::new(),
-            root: None,
+            open_elements: vec![Rc::clone(&html_node), Rc::clone(&body_node)],
+            root: Some(Rc::clone(&html_node)),
             head_element: None,
             mode: InsertionMode::Initial,
+        }
+    }
+
+    pub fn get_root(&self) -> NodePtr {
+        if let Some(ref root) = self.root {
+            Rc::clone(root)
+        } else {
+            let root = NodeData::new_element("html", HashMap::new());
+            root
         }
     }
 
@@ -674,27 +687,21 @@ impl<'a> HTMLParser<'a> {
 
     fn handle_start_tag(&mut self, tag_name: &str, attributes: HashMap<String, String>, self_closing: bool) {
         if tag_name == "html" {
-            if self.root.is_none() {
-                let html_node = NodeData::new_element("html", attributes);
-                self.root = Some(Rc::clone(&html_node));
-                self.open_elements.push(html_node);
-                self.mode = InsertionMode::BeforeHead;
+            if let Some(ref root) = self.root {
+                let mut b = root.borrow_mut();
+                if let NodeType::Element { ref mut attributes: root_attrs, .. } = b.node_type {
+                    root_attrs.extend(attributes);
+                }
             }
-            return;
-        }
-
-        if self.root.is_none() {
-            let html_node = NodeData::new_element("html", HashMap::new());
-            self.root = Some(Rc::clone(&html_node));
-            self.open_elements.push(html_node);
             self.mode = InsertionMode::BeforeHead;
+            return;
         }
 
         if tag_name == "head" {
             let head_node = NodeData::new_element("head", attributes);
             self.head_element = Some(Rc::clone(&head_node));
-            if let Some(current) = self.current_node() {
-                NodeData::add_child(&current, &head_node);
+            if let Some(ref root) = self.root {
+                NodeData::add_child(root, &head_node);
             }
             self.open_elements.push(head_node);
             self.mode = InsertionMode::InHead;
@@ -702,9 +709,20 @@ impl<'a> HTMLParser<'a> {
         }
 
         if tag_name == "body" {
+            if let Some(ref root) = self.root {
+                if let Some(existing_body) = find_body(root) {
+                    let mut b = existing_body.borrow_mut();
+                    if let NodeType::Element { ref mut attributes: body_attrs, .. } = b.node_type {
+                        body_attrs.extend(attributes);
+                    }
+                    self.open_elements.push(existing_body);
+                    self.mode = InsertionMode::InBody;
+                    return;
+                }
+            }
             let body_node = NodeData::new_element("body", attributes);
-            if let Some(current) = self.current_node() {
-                NodeData::add_child(&current, &body_node);
+            if let Some(ref root) = self.root {
+                NodeData::add_child(root, &body_node);
             }
             self.open_elements.push(body_node);
             self.mode = InsertionMode::InBody;
