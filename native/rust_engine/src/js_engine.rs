@@ -3220,6 +3220,169 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             this.__workerContext = null;
         };
 
+        // FormData W3C API
+        function FormData(form) {
+            this._data = new Map();
+            if (form && form.tagName && form.tagName.toLowerCase() === 'form') {
+                const inputs = form.querySelectorAll ? form.querySelectorAll('input, select, textarea') : [];
+                for (let i = 0; i < inputs.length; i++) {
+                    const inp = inputs[i];
+                    const name = inp.getAttribute ? inp.getAttribute('name') : inp.name;
+                    if (name) {
+                        const val = inp.value !== undefined ? inp.value : (inp.getAttribute ? inp.getAttribute('value') : '');
+                        this.append(name, val);
+                    }
+                }
+            }
+        }
+        FormData.prototype.append = function(name, value) {
+            const k = String(name);
+            if (!this._data.has(k)) this._data.set(k, []);
+            this._data.get(k).push(String(value));
+        };
+        FormData.prototype.get = function(name) {
+            const list = this._data.get(String(name));
+            return list && list.length > 0 ? list[0] : null;
+        };
+        FormData.prototype.getAll = function(name) {
+            return this._data.get(String(name)) || [];
+        };
+        FormData.prototype.has = function(name) {
+            return this._data.has(String(name));
+        };
+        FormData.prototype.delete = function(name) {
+            this._data.delete(String(name));
+        };
+        window.FormData = FormData;
+
+        // Standard getters/setters and DOM methods definition on Element objects
+        window.__setupElementProperties = function(el) {
+            if (!el || el.__protoHooked) return el;
+            el.__protoHooked = true;
+
+            setupEventTarget(el);
+
+            Object.defineProperty(el, 'innerHTML', {
+                get: function() { return this.__getInnerHTML ? this.__getInnerHTML() : ''; },
+                set: function(val) { if (this.__setInnerHTML) this.__setInnerHTML(String(val)); },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(el, 'textContent', {
+                get: function() { return this.__getTextContent ? this.__getTextContent() : ''; },
+                set: function(val) { if (this.__setTextContent) this.__setTextContent(String(val)); },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(el, 'className', {
+                get: function() { return this.getAttribute ? (this.getAttribute('class') || '') : ''; },
+                set: function(val) { if (this.setAttribute) this.setAttribute('class', String(val)); },
+                configurable: true,
+                enumerable: true
+            });
+
+            Object.defineProperty(el, 'id', {
+                get: function() { return this.getAttribute ? (this.getAttribute('id') || '') : ''; },
+                set: function(val) { if (this.setAttribute) this.setAttribute('id', String(val)); },
+                configurable: true,
+                enumerable: true
+            });
+
+            // Element Traversal & Hierarchy APIs
+            el.matches = function(sel) {
+                if (!sel) return false;
+                if (document.querySelectorAll) {
+                    const all = document.querySelectorAll(sel);
+                    for (let i = 0; i < all.length; i++) {
+                        if (all[i] === this) return true;
+                    }
+                }
+                return false;
+            };
+
+            el.closest = function(sel) {
+                let curr = this;
+                while (curr && curr.nodeType === 1) {
+                    if (curr.matches && curr.matches(sel)) return curr;
+                    curr = curr.parentElement;
+                }
+                return null;
+            };
+
+            el.contains = function(other) {
+                let curr = other;
+                while (curr) {
+                    if (curr === this) return true;
+                    curr = curr.parentElement;
+                }
+                return false;
+            };
+
+            el.cloneNode = function(deep) {
+                const tag = this.tagName ? this.tagName.toLowerCase() : 'div';
+                const clone = document.createElement(tag);
+                if (this.className) clone.className = this.className;
+                if (this.id) clone.id = this.id + '_clone';
+                if (deep && this.innerHTML) {
+                    clone.innerHTML = this.innerHTML;
+                }
+                return clone;
+            };
+
+            el.insertBefore = function(newChild, refChild) {
+                if (!refChild) return this.appendChild(newChild);
+                return this.appendChild(newChild);
+            };
+
+            el.replaceChild = function(newChild, oldChild) {
+                if (oldChild && typeof oldChild.remove === 'function') {
+                    oldChild.remove();
+                }
+                return this.appendChild(newChild);
+            };
+
+            el.prepend = function(...nodes) {
+                for (const n of nodes) {
+                    const nodeObj = typeof n === 'string' ? document.createTextNode(n) : n;
+                    this.appendChild(nodeObj);
+                }
+            };
+
+            // Form element validation & lifecycle APIs
+            if (el.tagName && el.tagName.toLowerCase() === 'form') {
+                el.submit = function() {
+                    const evt = new Event('submit', { bubbles: true, cancelable: true });
+                    this.dispatchEvent(evt);
+                };
+                el.requestSubmit = function() {
+                    this.submit();
+                };
+                el.reset = function() {
+                    const evt = new Event('reset', { bubbles: true, cancelable: true });
+                    this.dispatchEvent(evt);
+                };
+            }
+
+            if (el.tagName && (el.tagName.toLowerCase() === 'input' || el.tagName.toLowerCase() === 'select' || el.tagName.toLowerCase() === 'textarea')) {
+                el.checkValidity = function() {
+                    if (this.getAttribute && this.getAttribute('required')) {
+                        return (this.value && this.value.length > 0);
+                    }
+                    return true;
+                };
+                el.reportValidity = function() {
+                    return this.checkValidity();
+                };
+                el.setCustomValidity = function(msg) {
+                    this.__customValidity = msg;
+                };
+            }
+
+            return el;
+        };
+
         if (document.body) {
             window.__setupElementProperties(document.body);
         }

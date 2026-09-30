@@ -10,6 +10,22 @@ pub enum AttributeOp {
     Contains,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum PseudoClassKind {
+    FirstChild,
+    LastChild,
+    OnlyChild,
+    NthChild { a: i32, b: i32 },
+    NthOfType { a: i32, b: i32 },
+    Disabled,
+    Checked,
+    Required,
+    Root,
+    Hover,
+    Focus,
+    Active,
+}
+
 #[derive(Debug, Clone)]
 pub enum Selector {
     Universal,
@@ -24,6 +40,10 @@ pub enum Selector {
     Compound(Vec<Selector>),
     Descendant(Box<Selector>, Box<Selector>),
     DirectChild(Box<Selector>, Box<Selector>),
+    AdjacentSibling(Box<Selector>, Box<Selector>),
+    GeneralSibling(Box<Selector>, Box<Selector>),
+    Not(Box<Selector>),
+    PseudoClass(PseudoClassKind),
 }
 
 impl Selector {
@@ -110,6 +130,148 @@ impl Selector {
                 }
                 false
             }
+            Selector::AdjacentSibling(prev_sel, curr_sel) => {
+                if !curr_sel.matches(node) {
+                    return false;
+                }
+                if let Some(parent_weak) = &node_borrow.parent {
+                    if let Some(parent_rc) = parent_weak.upgrade() {
+                        let pb = parent_rc.borrow();
+                        let elem_children: Vec<&NodePtr> = pb.children.iter().filter(|c| {
+                            matches!(c.borrow().node_type, NodeType::Element { .. })
+                        }).collect();
+                        if let Some(idx) = elem_children.iter().position(|c| std::rc::Rc::ptr_eq(c, node)) {
+                            if idx > 0 {
+                                return prev_sel.matches(elem_children[idx - 1]);
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            Selector::GeneralSibling(prev_sel, curr_sel) => {
+                if !curr_sel.matches(node) {
+                    return false;
+                }
+                if let Some(parent_weak) = &node_borrow.parent {
+                    if let Some(parent_rc) = parent_weak.upgrade() {
+                        let pb = parent_rc.borrow();
+                        let elem_children: Vec<&NodePtr> = pb.children.iter().filter(|c| {
+                            matches!(c.borrow().node_type, NodeType::Element { .. })
+                        }).collect();
+                        if let Some(idx) = elem_children.iter().position(|c| std::rc::Rc::ptr_eq(c, node)) {
+                            return elem_children[0..idx].iter().any(|prev_node| prev_sel.matches(prev_node));
+                        }
+                    }
+                }
+                false
+            }
+            Selector::Not(inner_sel) => !inner_sel.matches(node),
+            Selector::PseudoClass(kind) => {
+                if !matches!(node_borrow.node_type, NodeType::Element { .. }) {
+                    return false;
+                }
+                match kind {
+                    PseudoClassKind::Root => {
+                        if let NodeType::Element { ref tag, .. } = node_borrow.node_type {
+                            tag == "html" || node_borrow.parent.is_none()
+                        } else {
+                            false
+                        }
+                    }
+                    PseudoClassKind::Disabled => {
+                        if let NodeType::Element { ref attributes, .. } = node_borrow.node_type {
+                            attributes.contains_key("disabled")
+                        } else {
+                            false
+                        }
+                    }
+                    PseudoClassKind::Checked => {
+                        if let NodeType::Element { ref attributes, .. } = node_borrow.node_type {
+                            attributes.contains_key("checked") || attributes.contains_key("selected")
+                        } else {
+                            false
+                        }
+                    }
+                    PseudoClassKind::Required => {
+                        if let NodeType::Element { ref attributes, .. } = node_borrow.node_type {
+                            attributes.contains_key("required")
+                        } else {
+                            false
+                        }
+                    }
+                    PseudoClassKind::Hover | PseudoClassKind::Focus | PseudoClassKind::Active => false,
+                    PseudoClassKind::FirstChild => {
+                        if let Some(pw) = &node_borrow.parent {
+                            if let Some(prc) = pw.upgrade() {
+                                let pb = prc.borrow();
+                                let first_elem = pb.children.iter().find(|c| matches!(c.borrow().node_type, NodeType::Element { .. }));
+                                return first_elem.map(|c| std::rc::Rc::ptr_eq(c, node)).unwrap_or(false);
+                            }
+                        }
+                        false
+                    }
+                    PseudoClassKind::LastChild => {
+                        if let Some(pw) = &node_borrow.parent {
+                            if let Some(prc) = pw.upgrade() {
+                                let pb = prc.borrow();
+                                let last_elem = pb.children.iter().rfind(|c| matches!(c.borrow().node_type, NodeType::Element { .. }));
+                                return last_elem.map(|c| std::rc::Rc::ptr_eq(c, node)).unwrap_or(false);
+                            }
+                        }
+                        false
+                    }
+                    PseudoClassKind::OnlyChild => {
+                        if let Some(pw) = &node_borrow.parent {
+                            if let Some(prc) = pw.upgrade() {
+                                let pb = prc.borrow();
+                                let elem_count = pb.children.iter().filter(|c| matches!(c.borrow().node_type, NodeType::Element { .. })).count();
+                                return elem_count == 1;
+                            }
+                        }
+                        false
+                    }
+                    PseudoClassKind::NthChild { a, b } => {
+                        if let Some(pw) = &node_borrow.parent {
+                            if let Some(prc) = pw.upgrade() {
+                                let pb = prc.borrow();
+                                let elem_children: Vec<&NodePtr> = pb.children.iter().filter(|c| {
+                                    matches!(c.borrow().node_type, NodeType::Element { .. })
+                                }).collect();
+                                if let Some(idx) = elem_children.iter().position(|c| std::rc::Rc::ptr_eq(c, node)) {
+                                    let k = (idx + 1) as i32;
+                                    return match_nth(k, *a, *b);
+                                }
+                            }
+                        }
+                        false
+                    }
+                    PseudoClassKind::NthOfType { a, b } => {
+                        let my_tag = if let NodeType::Element { ref tag, .. } = node_borrow.node_type {
+                            tag.clone()
+                        } else {
+                            return false;
+                        };
+                        if let Some(pw) = &node_borrow.parent {
+                            if let Some(prc) = pw.upgrade() {
+                                let pb = prc.borrow();
+                                let same_tag_children: Vec<&NodePtr> = pb.children.iter().filter(|c| {
+                                    if let NodeType::Element { ref tag, .. } = c.borrow().node_type {
+                                        tag == &my_tag
+                                    } else {
+                                        false
+                                    }
+                                }).collect();
+                                if let Some(idx) = same_tag_children.iter().position(|c| std::rc::Rc::ptr_eq(c, node)) {
+                                    let k = (idx + 1) as i32;
+                                    return match_nth(k, *a, *b);
+                                }
+                            }
+                        }
+                        false
+                    }
+                }
+            }
         }
     }
 
@@ -117,8 +279,9 @@ impl Selector {
         match self {
             Selector::Universal => (0, 0, 0),
             Selector::ID(_) => (1, 0, 0),
-            Selector::Class(_) | Selector::Attribute { .. } => (0, 1, 0),
+            Selector::Class(_) | Selector::Attribute { .. } | Selector::PseudoClass(_) => (0, 1, 0),
             Selector::Tag(_) => (0, 0, 1),
+            Selector::Not(inner) => inner.specificity(),
             Selector::Compound(list) => {
                 let mut ids = 0;
                 let mut classes = 0;
@@ -131,12 +294,24 @@ impl Selector {
                 }
                 (ids, classes, tags)
             }
-            Selector::DirectChild(parent, child) | Selector::Descendant(parent, child) => {
+            Selector::DirectChild(parent, child)
+            | Selector::Descendant(parent, child)
+            | Selector::AdjacentSibling(parent, child)
+            | Selector::GeneralSibling(parent, child) => {
                 let (i1, c1, t1) = parent.specificity();
                 let (i2, c2, t2) = child.specificity();
                 (i1 + i2, c1 + c2, t1 + t2)
             }
         }
+    }
+}
+
+fn match_nth(k: i32, a: i32, b: i32) -> bool {
+    if a == 0 {
+        k == b
+    } else {
+        let diff = k - b;
+        (diff % a == 0) && (diff / a >= 0)
     }
 }
 
@@ -439,10 +614,18 @@ pub fn parse_selector(sel_str: &str) -> Option<Selector> {
     }
 
     let mut normalized = String::new();
+    let mut in_bracket = false;
+    let mut in_paren = false;
+
     for ch in sel_str.chars() {
-        if ch == '>' {
+        if ch == '[' { in_bracket = true; }
+        else if ch == ']' { in_bracket = false; }
+        else if ch == '(' { in_paren = true; }
+        else if ch == ')' { in_paren = false; }
+
+        if !in_bracket && !in_paren && (ch == '>' || ch == '+' || ch == '~') {
             normalized.push(' ');
-            normalized.push('>');
+            normalized.push(ch);
             normalized.push(' ');
         } else {
             normalized.push(ch);
@@ -458,8 +641,8 @@ pub fn parse_selector(sel_str: &str) -> Option<Selector> {
     let mut next_combinator = ' ';
 
     for tok in tokens {
-        if tok == ">" {
-            next_combinator = '>';
+        if tok == ">" || tok == "+" || tok == "~" {
+            next_combinator = tok.chars().next().unwrap();
             continue;
         }
 
@@ -469,10 +652,11 @@ pub fn parse_selector(sel_str: &str) -> Option<Selector> {
                     current_sel = Some(parsed);
                 }
                 Some(prev) => {
-                    if next_combinator == '>' {
-                        current_sel = Some(Selector::DirectChild(Box::new(prev), Box::new(parsed)));
-                    } else {
-                        current_sel = Some(Selector::Descendant(Box::new(prev), Box::new(parsed)));
+                    match next_combinator {
+                        '>' => current_sel = Some(Selector::DirectChild(Box::new(prev), Box::new(parsed))),
+                        '+' => current_sel = Some(Selector::AdjacentSibling(Box::new(prev), Box::new(parsed))),
+                        '~' => current_sel = Some(Selector::GeneralSibling(Box::new(prev), Box::new(parsed))),
+                        _ => current_sel = Some(Selector::Descendant(Box::new(prev), Box::new(parsed))),
                     }
                     next_combinator = ' ';
                 }
@@ -487,6 +671,7 @@ fn parse_single_selector(part: &str) -> Option<Selector> {
     let mut sub_selectors = Vec::new();
     let mut curr_part = part.to_string();
 
+    // 1. Extract [attr=val]
     while let Some(start_bracket) = curr_part.find('[') {
         if let Some(end_bracket) = curr_part[start_bracket..].find(']') {
             let full_end = start_bracket + end_bracket;
@@ -521,18 +706,80 @@ fn parse_single_selector(part: &str) -> Option<Selector> {
         }
     }
 
+    // 2. Extract :not(...)
+    while let Some(not_idx) = curr_part.find(":not(") {
+        if let Some(end_paren) = curr_part[not_idx..].find(')') {
+            let full_end = not_idx + end_paren;
+            let inner = &curr_part[not_idx + 5..full_end];
+            if let Some(inner_sel) = parse_single_selector(inner) {
+                sub_selectors.push(Selector::Not(Box::new(inner_sel)));
+            }
+            curr_part = format!("{}{}", &curr_part[..not_idx], &curr_part[full_end + 1..]);
+        } else {
+            break;
+        }
+    }
+
+    // 3. Extract pseudo-classes
+    while let Some(colon_idx) = curr_part.find(':') {
+        let pseudo_part = &curr_part[colon_idx..];
+        let end_idx = pseudo_part[1..].find(|c: char| c == '.' || c == '#' || c == ':' || c == '[').map(|i| i + 1).unwrap_or(pseudo_part.len());
+        let full_pseudo = &pseudo_part[..end_idx];
+
+        let p_lower = full_pseudo.to_lowercase();
+        let pseudo_sel = if p_lower == ":first-child" {
+            Some(Selector::PseudoClass(PseudoClassKind::FirstChild))
+        } else if p_lower == ":last-child" {
+            Some(Selector::PseudoClass(PseudoClassKind::LastChild))
+        } else if p_lower == ":only-child" {
+            Some(Selector::PseudoClass(PseudoClassKind::OnlyChild))
+        } else if p_lower == ":root" {
+            Some(Selector::PseudoClass(PseudoClassKind::Root))
+        } else if p_lower == ":disabled" {
+            Some(Selector::PseudoClass(PseudoClassKind::Disabled))
+        } else if p_lower == ":checked" {
+            Some(Selector::PseudoClass(PseudoClassKind::Checked))
+        } else if p_lower == ":required" {
+            Some(Selector::PseudoClass(PseudoClassKind::Required))
+        } else if p_lower == ":hover" {
+            Some(Selector::PseudoClass(PseudoClassKind::Hover))
+        } else if p_lower == ":focus" {
+            Some(Selector::PseudoClass(PseudoClassKind::Focus))
+        } else if p_lower == ":active" {
+            Some(Selector::PseudoClass(PseudoClassKind::Active))
+        } else if p_lower.starts_with(":nth-child(") && p_lower.ends_with(')') {
+            let inner = &p_lower[11..p_lower.len() - 1];
+            let (a, b) = parse_nth_expr(inner);
+            Some(Selector::PseudoClass(PseudoClassKind::NthChild { a, b }))
+        } else if p_lower.starts_with(":nth-of-type(") && p_lower.ends_with(')') {
+            let inner = &p_lower[13..p_lower.len() - 1];
+            let (a, b) = parse_nth_expr(inner);
+            Some(Selector::PseudoClass(PseudoClassKind::NthOfType { a, b }))
+        } else {
+            None
+        };
+
+        if let Some(ps) = pseudo_sel {
+            sub_selectors.push(ps);
+        }
+        curr_part = format!("{}{}", &curr_part[..colon_idx], &curr_part[colon_idx + end_idx..]);
+    }
+
+    // 4. Extract ID #
     if let Some(id_idx) = curr_part.find('#') {
         let id_part = curr_part[id_idx + 1..].to_string();
         sub_selectors.push(Selector::ID(id_part.to_lowercase()));
         curr_part = curr_part[..id_idx].to_string();
     }
 
+    // 5. Extract Classes .
     while let Some(cls_idx) = curr_part.find('.') {
         let class_part = curr_part[cls_idx + 1..].to_string();
         sub_selectors.push(Selector::Class(class_part.to_lowercase()));
         curr_part = curr_part[..cls_idx].to_string();
     }
 
+    // 6. Tag / Universal *
     if !curr_part.is_empty() {
         if curr_part == "*" {
             sub_selectors.push(Selector::Universal);
@@ -550,15 +797,55 @@ fn parse_single_selector(part: &str) -> Option<Selector> {
     }
 }
 
+fn parse_nth_expr(s: &str) -> (i32, i32) {
+    let s = s.trim().to_lowercase();
+    if s == "odd" {
+        (2, 1)
+    } else if s == "even" {
+        (2, 0)
+    } else if let Ok(num) = s.parse::<i32>() {
+        (0, num)
+    } else if let Some(n_idx) = s.find('n') {
+        let a_str = s[..n_idx].trim();
+        let a = if a_str.is_empty() || a_str == "+" {
+            1
+        } else if a_str == "-" {
+            -1
+        } else {
+            a_str.parse::<i32>().unwrap_or(1)
+        };
+        let b_str = s[n_idx + 1..].trim();
+        let b = if b_str.is_empty() {
+            0
+        } else {
+            b_str.replace(' ', "").parse::<i32>().unwrap_or(0)
+        };
+        (a, b)
+    } else {
+        (0, 1)
+    }
+}
+
 pub fn parse_declarations(body_str: &str) -> HashMap<String, String> {
     let mut declarations = HashMap::new();
+    let mut important_declarations = HashMap::new();
+
     for decl in body_str.split(';') {
         let decl = decl.trim();
         if let Some(colon_idx) = decl.find(':') {
             let prop = decl[..colon_idx].trim().to_lowercase();
-            let val = decl[colon_idx + 1..].trim().to_lowercase();
+            let mut val = decl[colon_idx + 1..].trim().to_string();
+            let is_important = val.to_lowercase().ends_with("!important");
+            if is_important {
+                val = val[..val.len() - 10].trim().to_string();
+                important_declarations.insert(prop.clone(), val.clone());
+            }
             declarations.insert(prop, val);
         }
+    }
+
+    for (k, v) in important_declarations {
+        declarations.insert(k, v);
     }
     declarations
 }
@@ -576,7 +863,15 @@ i, em { display: inline; font-style: italic; }
 a { display: inline; color: blue; text-decoration: underline; }
 span { display: inline; }
 img { display: inline-block; }
-head, script, style { display: none; }
+table { display: table; border-collapse: separate; border-spacing: 2px; }
+thead { display: table-header-group; }
+tbody { display: table-row-group; }
+tfoot { display: table-footer-group; }
+tr { display: table-row; }
+td, th { display: table-cell; padding: 4px; vertical-align: inherit; }
+th { font-weight: bold; text-align: center; }
+caption { display: table-caption; text-align: center; }
+head, script, style, template { display: none; }
 "#;
 
 pub const INHERITED_PROPERTIES: &[&str] = &[
@@ -585,6 +880,13 @@ pub const INHERITED_PROPERTIES: &[&str] = &[
     "font-family",
     "font-weight",
     "font-style",
+    "line-height",
+    "letter-spacing",
+    "text-align",
+    "visibility",
+    "cursor",
+    "direction",
+    "white-space",
 ];
 
 pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
@@ -616,7 +918,7 @@ pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
             ..
         } = node_borrow.node_type
         {
-            // Inherit from parent
+            // Inherit from parent (including CSS Custom Properties --*)
             if let Some(ref pw) = parent_weak {
                 if let Some(parent_rc) = pw.upgrade() {
                     let parent_borrow = parent_rc.borrow();
@@ -625,9 +927,9 @@ pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
                         ..
                     } = parent_borrow.node_type
                     {
-                        for &prop in INHERITED_PROPERTIES {
-                            if let Some(val) = parent_style.get(prop) {
-                                style.insert(prop.to_string(), val.clone());
+                        for (k, v) in parent_style {
+                            if k.starts_with("--") || INHERITED_PROPERTIES.contains(&k.as_str()) {
+                                style.insert(k.clone(), v.clone());
                             }
                         }
                     }
@@ -646,8 +948,132 @@ pub fn style_tree(node: &NodePtr, rules: &[Rule]) {
                     style.insert(prop, val);
                 }
             }
+
+            // 3. Resolve CSS Variables: var(--name, fallback)
+            resolve_css_variables(style);
+
+            // 4. Resolve Math Functions: calc(), min(), max(), clamp()
+            resolve_css_math_functions(style);
         }
     }
+
+    let children = node.borrow().children.clone();
+    for child in children {
+        style_tree(&child, rules);
+    }
+}
+
+pub fn resolve_css_variables(style: &mut HashMap<String, String>) {
+    let custom_props: HashMap<String, String> = style
+        .iter()
+        .filter(|(k, _)| k.starts_with("--"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    for (_k, v) in style.iter_mut() {
+        if v.contains("var(--") {
+            let mut resolved = v.clone();
+            while let Some(var_start) = resolved.find("var(--") {
+                if let Some(var_end) = resolved[var_start..].find(')') {
+                    let full_end = var_start + var_end;
+                    let inner = &resolved[var_start + 4..full_end];
+                    let mut parts = inner.splitn(2, ',');
+                    let var_name = parts.next().unwrap_or("").trim();
+                    let fallback = parts.next().map(|s| s.trim()).unwrap_or("");
+
+                    let replacement = custom_props
+                        .get(var_name)
+                        .map(|s| s.as_str())
+                        .unwrap_or(fallback);
+
+                    resolved = format!("{}{}{}", &resolved[..var_start], replacement, &resolved[full_end + 1..]);
+                } else {
+                    break;
+                }
+            }
+            *v = resolved;
+        }
+    }
+}
+
+pub fn resolve_css_math_functions(style: &mut HashMap<String, String>) {
+    for (_k, v) in style.iter_mut() {
+        let v_trim = v.trim();
+        if v_trim.starts_with("calc(") && v_trim.ends_with(')') {
+            let inner = &v_trim[5..v_trim.len() - 1];
+            if let Some(res) = eval_calc_expr(inner) {
+                *v = format!("{:.2}px", res);
+            }
+        } else if v_trim.starts_with("min(") && v_trim.ends_with(')') {
+            let inner = &v_trim[4..v_trim.len() - 1];
+            let vals: Vec<f32> = inner.split(',').filter_map(|s| eval_calc_expr(s.trim())).collect();
+            if let Some(&min_val) = vals.iter().min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)) {
+                *v = format!("{:.2}px", min_val);
+            }
+        } else if v_trim.starts_with("max(") && v_trim.ends_with(')') {
+            let inner = &v_trim[4..v_trim.len() - 1];
+            let vals: Vec<f32> = inner.split(',').filter_map(|s| eval_calc_expr(s.trim())).collect();
+            if let Some(&max_val) = vals.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)) {
+                *v = format!("{:.2}px", max_val);
+            }
+        } else if v_trim.starts_with("clamp(") && v_trim.ends_with(')') {
+            let inner = &v_trim[6..v_trim.len() - 1];
+            let vals: Vec<f32> = inner.split(',').filter_map(|s| eval_calc_expr(s.trim())).collect();
+            if vals.len() == 3 {
+                let clamped = vals[1].max(vals[0]).min(vals[2]);
+                *v = format!("{:.2}px", clamped);
+            }
+        }
+    }
+}
+
+fn eval_calc_expr(expr: &str) -> Option<f32> {
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+
+    // Split on + or - with spaces around them (CSS calc requires whitespace around + and -)
+    if let Some(plus_idx) = expr.find(" + ") {
+        let left = eval_calc_expr(&expr[..plus_idx])?;
+        let right = eval_calc_expr(&expr[plus_idx + 3..])?;
+        return Some(left + right);
+    }
+    if let Some(minus_idx) = expr.find(" - ") {
+        let left = eval_calc_expr(&expr[..minus_idx])?;
+        let right = eval_calc_expr(&expr[minus_idx + 3..])?;
+        return Some(left - right);
+    }
+    if let Some(mul_idx) = expr.find(" * ") {
+        let left = eval_calc_expr(&expr[..mul_idx])?;
+        let right = eval_calc_expr(&expr[mul_idx + 3..])?;
+        return Some(left * right);
+    }
+    if let Some(div_idx) = expr.find(" / ") {
+        let left = eval_calc_expr(&expr[..div_idx])?;
+        let right = eval_calc_expr(&expr[div_idx + 3..])?;
+        if right != 0.0 {
+            return Some(left / right);
+        }
+    }
+
+    // Parse base unit (px, rem, em, pt, raw number)
+    let s = expr.trim().trim_end_matches(';').to_lowercase();
+    if s.ends_with("px") {
+        s[..s.len() - 2].trim().parse::<f32>().ok()
+    } else if s.ends_with("rem") {
+        s[..s.len() - 3].trim().parse::<f32>().ok().map(|r| r * 16.0)
+    } else if s.ends_with("em") {
+        s[..s.len() - 2].trim().parse::<f32>().ok().map(|e| e * 16.0)
+    } else if s.ends_with("pt") {
+        s[..s.len() - 2].trim().parse::<f32>().ok().map(|pt| pt * 1.333)
+    } else if s.ends_with('%') {
+        // Approximate 100% to typical viewport / container default
+        s[..s.len() - 1].trim().parse::<f32>().ok().map(|pct| pct * 8.0)
+    } else {
+        s.parse::<f32>().ok()
+    }
+}
 
     let children = node.borrow().children.clone();
     for child in children {

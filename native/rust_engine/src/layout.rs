@@ -626,6 +626,10 @@ pub enum BoxType {
     Inline,
     Flex,
     Grid,
+    Table,
+    TableRow,
+    TableCell,
+    TableSection,
     Text,
     Image,
     Input,
@@ -743,12 +747,98 @@ impl LayoutBox {
         self.dimensions.border = parse_border_properties(&mut self.style, max_width);
 
         match self.box_type {
+            BoxType::Table => self.layout_table(x, y, max_width),
+            BoxType::TableRow => self.layout_block(x, y, max_width),
+            BoxType::TableCell => self.layout_block(x, y, max_width),
+            BoxType::TableSection => self.layout_block(x, y, max_width),
             BoxType::Grid => self.layout_grid(x, y, max_width),
             BoxType::Flex => self.layout_flex(x, y, max_width),
             BoxType::Block | BoxType::AnonymousBlock => self.layout_block(x, y, max_width),
             BoxType::Image | BoxType::Input | BoxType::Button => self.layout_leaf(x, y),
             _ => self.layout_block(x, y, max_width),
         }
+    }
+
+    fn layout_table(&mut self, x: f32, y: f32, max_width: f32) -> f32 {
+        let content_width = (max_width - self.dimensions.margin.left - self.dimensions.margin.right
+            - self.dimensions.border.left - self.dimensions.border.right
+            - self.dimensions.padding.left - self.dimensions.padding.right).max(0.0);
+
+        self.x = x + self.dimensions.margin.left;
+        self.y = y + self.dimensions.margin.top;
+        self.width = max_width;
+
+        let start_x = self.x + self.dimensions.border.left + self.dimensions.padding.left;
+        let mut cursor_y = self.y + self.dimensions.border.top + self.dimensions.padding.top;
+
+        // 1. Gather all row boxes (either direct children or inside thead/tbody/tfoot)
+        let mut row_indices = Vec::new();
+        for (i, child) in self.children.iter().enumerate() {
+            if child.box_type == BoxType::TableRow || child.tag_name == "tr" {
+                row_indices.push((None, i));
+            } else if child.box_type == BoxType::TableSection || child.tag_name == "tbody" || child.tag_name == "thead" || child.tag_name == "tfoot" {
+                for (sub_i, sub_child) in child.children.iter().enumerate() {
+                    if sub_child.box_type == BoxType::TableRow || sub_child.tag_name == "tr" {
+                        row_indices.push((Some(i), sub_i));
+                    }
+                }
+            }
+        }
+
+        if row_indices.is_empty() {
+            return self.layout_block(x, y, max_width);
+        }
+
+        // 2. Count maximum columns across all rows
+        let mut max_cols = 1;
+        for &(sec_idx, row_idx) in &row_indices {
+            let row = match sec_idx {
+                Some(s) => &self.children[s].children[row_idx],
+                None => &self.children[row_idx],
+            };
+            let cell_count = row.children.iter().filter(|c| {
+                c.box_type == BoxType::TableCell || c.tag_name == "td" || c.tag_name == "th" || c.box_type == BoxType::Block || c.box_type == BoxType::Inline
+            }).count();
+            max_cols = max_cols.max(cell_count);
+        }
+
+        let spacing = parse_px(self.style.get("border-spacing").map(|s| s.as_str()).unwrap_or("2px"), 2.0);
+        let col_width = ((content_width - (max_cols.saturating_sub(1) as f32) * spacing) / (max_cols as f32)).max(20.0);
+
+        // 3. Layout each row and its cells
+        for (sec_idx, row_idx) in row_indices {
+            let row = match sec_idx {
+                Some(s) => &mut self.children[s].children[row_idx],
+                None => &mut self.children[row_idx],
+            };
+
+            row.x = start_x;
+            row.y = cursor_y;
+            row.width = content_width;
+
+            let mut row_cursor_x = start_x;
+            let mut row_max_h: f32 = 24.0;
+
+            for cell in &mut row.children {
+                cell.dimensions.padding = parse_edges(&cell.style, "padding", col_width);
+                cell.dimensions.border = parse_border_properties(&mut cell.style, col_width);
+                cell.x = row_cursor_x;
+                cell.y = cursor_y;
+                cell.width = col_width;
+
+                let cell_h = cell.layout(row_cursor_x, cursor_y, col_width);
+                row_max_h = row_max_h.max(cell_h);
+                row_cursor_x += col_width + spacing;
+            }
+
+            row.height = row_max_h;
+            cursor_y += row_max_h + spacing;
+        }
+
+        let total_h = cursor_y - y + self.dimensions.border.bottom + self.dimensions.padding.bottom + self.dimensions.margin.bottom;
+        self.height = total_h;
+        self.dimensions.content.height = (cursor_y - self.y).max(0.0);
+        total_h
     }
 
     pub fn collect_layout_boxes_geometry(&self, map: &mut HashMap<String, (f32, f32, f32, f32, f32, f32)>) {
@@ -1901,7 +1991,17 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
                 BoxType::Grid
             } else if display == "flex" {
                 BoxType::Flex
-            } else if display == "block" || display == "table" {
+            } else if display == "table" || tag == "table" {
+                BoxType::Table
+            } else if display == "table-row" || tag == "tr" {
+                BoxType::TableRow
+            } else if display == "table-cell" || tag == "td" || tag == "th" {
+                BoxType::TableCell
+            } else if display == "table-header-group" || display == "table-row-group" || display == "table-footer-group"
+                || tag == "thead" || tag == "tbody" || tag == "tfoot"
+            {
+                BoxType::TableSection
+            } else if display == "block" {
                 BoxType::Block
             } else {
                 BoxType::Inline

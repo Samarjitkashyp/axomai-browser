@@ -742,6 +742,27 @@ impl<'a> HTMLParser<'a> {
         }
 
         let is_self_closing = self_closing || SELF_CLOSING_TAGS.contains(&tag_name);
+
+        // Implicit <tbody> insertion when <tr>, <td>, or <th> is a direct child of <table>
+        if tag_name == "tr" || tag_name == "td" || tag_name == "th" {
+            let needs_implicit_tbody = self.current_node().map(|curr| {
+                let b = curr.borrow();
+                if let NodeType::Element { ref tag, .. } = b.node_type {
+                    tag == "table"
+                } else {
+                    false
+                }
+            }).unwrap_or(false);
+
+            if needs_implicit_tbody {
+                let tbody = NodeData::new_element("tbody", HashMap::new());
+                if let Some(current) = self.current_node() {
+                    NodeData::add_child(&current, &tbody);
+                }
+                self.open_elements.push(tbody);
+            }
+        }
+
         let node = NodeData::new_element(tag_name, attributes);
 
         if let Some(current) = self.current_node() {

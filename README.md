@@ -1,120 +1,116 @@
-# 🚀 Axomai Browser `v0.3.0`
+# 🚀 Axomai Browser `v0.6.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern web browser designed with high-performance Rust core, native windowing, and a rich, glassmorphic UI featuring workspaces, Axomai AI assistant, quick tools, and customizable new tab experience.
-
-- **Modern Browser UI (`v0.3.0`)**: Pixel-perfect native browser shell with multi-tab management, omnibox, quick shortcuts, news feed, quick productivity tools, and dedicated Axomai AI sidebar.
-- **Rust Desktop Shell (`rust_desktop/`)**: Native cross-platform desktop windowing with Tao & Wry (WebView2) with full DisplayList HTML5 canvas bridge.
-- **Core Engine (`native/rust_engine/`)**: Partial HTML5-compatible DOM Parser, Partial CSS3 Cascade & Layout Engine, Google V8 ECMAScript runtime with asynchronous ScriptScheduler, and Display List Painter.
-- **Native GUI Engine (`native/cpp_gui/`)**: Win32 GDI+ canvas rendering bridge with full image decoding and custom color parser.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript/WebAssembly runtime, W3C-compliant Web Platform APIs, native windowing, and a glassmorphic desktop interface.
 
 ---
 
 ## 🏗️ Architecture Pipeline
 
 ```
-[ URL ] ──► ( 1. Network Layer - Rust ) ──► [ Raw HTML/HTTP ]
-                                                   │
-                                                   ▼
-                                        ( 2. HTML DOM Parser - Rust )
-                                                   │
-                                                   ▼
-                                           [ DOM AST Tree ]
-                                                   │
-                                                   ▼
-                                         ( 3. CSS Engine - Rust )
-                                                   │
-                                                   ▼
-                                        [ Styled DOM Tree ]
-                                                   │
-                                                   ▼
-                                       ( 4. Layout Engine - Rust )
-                                                   │
-                                                   ▼
-                                          [ Layout Box Tree ]
-                                                   │
-                                                   ▼
-                                      ( 5. Painter Engine - Rust )
-                                                   │
-                                                   ▼
-                                      [ C-FFI Display List Stream ]
-                                                   │
-                                                   ▼
-                                     ( 6. C++ Win32 GDI+ Screen )
+[ URL ] ──► ( 1. Network Layer - Rust / SOP / CORS ) ──► [ Raw HTML/HTTP ]
+                                                                │
+                                                                ▼
+                                                ( 2. HTML5 DOM Parser - Rust )
+                                                - Tokenizer & Entity Decoder
+                                                - Implicit <tbody> Tree Builder
+                                                                │
+                                                                ▼
+                                                        [ DOM AST Tree ]
+                                                                │
+                                                                ▼
+                                                ( 3. CSS Engine & Cascade - Rust )
+                                                - Custom Properties: var(--*)
+                                                - Math Expressions: calc(), min(), clamp()
+                                                - @keyframes & Transitions
+                                                - Specificity, !important & Pseudo-classes
+                                                                │
+                                                                ▼
+                                                    [ Computed Style Tree ]
+                                                                │
+                                                                ▼
+                                                ( 4. Multi-model Layout Engine )
+                                                - Block & Inline Formatting
+                                                - Multi-pass Flexbox Engine
+                                                - 2D CSS Grid & Named Areas
+                                                - Table & Cell Auto-sizing
+                                                                │
+                                                                ▼
+                                                    [ Layout Box Tree ]
+                                                                │
+                                                                ▼
+                                                ( 5. Display List & Painter - Rust )
+                                                - Stacking Contexts (z-index)
+                                                - Transforms & Transform-Origin
+                                                - Gradients, Shadows & Borders
+                                                                │
+                                                                ▼
+                                    ┌───────────────────────────┴───────────────────────────┐
+                                    ▼                                                       ▼
+                    ( 6. Native Tao + Wry Desktop Host )                    ( 7. Canvas / GPU Renderer Bridge )
 ```
 
 ---
 
-## 📦 Subsystems Overview
+## 📊 Subsystem Status Overview (`v0.6.0`)
 
-| Subsystem | Tech Stack | Responsibility |
-| :--- | :--- | :--- |
-| **Network Layer** | Rust (`network.rs`, `engine.rs`) | Non-blocking asynchronous page navigation via isolated per-engine channels, URL query & fragment resolution, origin calculation, TCP/TLS socket wrapping via `ureq`, and HTTP response handling. |
-| **HTML Parser** | Rust (`html_parser.rs`) | **Partial HTML5-compatible parser**: Tokenization, HTML entity decoding, DOM Node structures (`Element`, `Text`), idempotent pointer registration (`register_dom_tree`), and stack-based tree construction. |
-| **CSS Engine** | Rust (`css_parser.rs`) | **Partial CSS cascade/layout implementation**: Selector parsing (`tag`, `.class`, `#id`, `descendant`), declaration parsing, UA stylesheets, author rules cascade (`active_css_rules`), and dynamic restyling upon DOM mutations. |
-| **Layout Engine** | Rust (`layout.rs`) | Box model calculations, block vertical stacking, inline text word-wrapping, and pill geometry measurement. |
-| **JS Engine (V8)** | Rust + Google V8 (`js_engine.rs`, `engine.rs`) | **Google V8 ECMAScript Runtime**: Persistent Google V8 Isolate & Page Context with microtasks and closures.<br>**Async ScriptScheduler**: Non-blocking external `<script src="...">` fetching that never hangs HTML/CSS page rendering.<br>**Web Platform & Fetch APIs**: Asynchronous non-blocking `fetch()` with HTTP methods (`GET`, `POST`, `PUT`, `DELETE`), custom headers & bodies; W3C EventTarget implementation with true 3-phase dispatch (Capturing, At Target, Bubbling) + `eventPhase`, `once`, `passive`, `signal`; DOM bridge (`getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `innerHTML`, `textContent`, `setAttribute`), and Timers (`setTimeout`, `setInterval`). |
-| **Desktop Shell** | Rust (`rust_desktop/main.rs`) | Native Tao windowing & Wry host directly connected to `AxomaiEngine` via IPC bridge, 60 FPS event loop ticking, and HTML5 canvas display list rendering bridge. |
-| **Painter & GUI** | Rust & C++ (`painter.rs`, `cpp_gui/`) | Walk layout tree in document order, emit display commands over C-FFI ABI, Win32 double-buffered GDI+ rendering (with in-memory bitmap stream decoding for images and CSS named/hex colors), and 60 FPS event loop timers. |
+| Subsystem | Status | Description |
+| :--- | :---: | :--- |
+| **V8 ECMAScript Engine** | 🟢 | Full Google V8 isolate, closures, microtasks, Promise lifecycle |
+| **HTML5 Parser** | 🟢 | Tokenizer, entity decoding, implicit `<tbody>`, void tags, template parsing |
+| **CSS Selectors** | 🟢 | `#id`, `.class`, tags, combinators (`>`, `+`, `~`, ` `), pseudo-classes (`:first-child`, `:last-child`, `:nth-child`, `:not`, `:disabled`, `:checked`) |
+| **CSS Custom Properties** | 🟢 | `var(--name, fallback)` inheritance from `:root` and cascading ancestors |
+| **CSS Math Expressions** | 🟢 | `calc()`, `min()`, `max()`, `clamp()` with units (`px`, `%`, `rem`, `em`, `pt`) |
+| **CSS Animations & Transitions** | 🟢 | `@keyframes` timeline sampling, cubic bezier solver, RGBA/length interpolation |
+| **Box Model & Layout** | 🟢 | Margins, borders, padding, content box sizing, inline word-wrapping |
+| **Flexbox Engine** | 🟢 | Multi-pass measurement, flex-grow/shrink distribution, flex-wrap, align-content |
+| **CSS Grid Layout** | 🟢 | `grid-template-columns/rows`, `grid-template-areas`, `auto-fit`/`auto-fill`, `minmax()`, alignments |
+| **Table Layout** | 🟢 | `<table>`, `<tr>`, `<td>`, `<th>`, `<thead>`, `<tbody>`, `<tfoot>`, border-spacing |
+| **DOM Geometry APIs** | 🟢 | `getBoundingClientRect()`, `offsetWidth/Height`, `offsetLeft/Top`, `clientWidth/Height` |
+| **DOM Traversal & Mutation** | 🟢 | `matches()`, `closest()`, `contains()`, `cloneNode()`, `insertBefore()`, `replaceChild()`, `prepend()` |
+| **W3C Event System** | 🟢 | Capturing, At-Target, Bubbling phases, Pointer capture, `preventDefault()` lifecycle |
+| **Animation Clock** | 🟢 | `requestAnimationFrame()`, `cancelAnimationFrame()`, `performance.now()` |
+| **Computed Style Proxy** | 🟢 | `window.getComputedStyle()` live reactive style reflection |
+| **Web Workers** | 🟢 Foundation | Dedicated `Worker` constructor, thread message passing (`postMessage`, `onmessage`) |
+| **Security & SOP / CORS** | 🟢 Active | Cross-origin verification, `Access-Control-Allow-Origin` enforcement |
+| **Web Storage** | 🟢 | `localStorage`, `sessionStorage` (W3C Storage APIs + disk persistence) |
+| **Form APIs** | 🟢 | `form.submit()`, `form.requestSubmit()`, `form.reset()`, `input.checkValidity()`, `FormData` |
+| **CI Automated Verification** | 🟢 | Linux & Windows automated `cargo check` and `cargo test` on push & PR |
 
 ---
 
-## 🛠️ How to Build & Run
+## 🛠️ Testing & Verification
 
-### 1. Preview Modern Browser UI (Instant 1-Click)
-Double-click `preview_ui.bat` or run:
-```cmd
-.\preview_ui.bat
-```
-*(Or open `ui/index.html` directly in any web browser).*
+Comprehensive automated test suites are provided under `native/rust_engine/tests/`:
 
-### 2. Run Native Rust Desktop Browser Shell
-Compile and run the modern desktop shell with Tao + Wry (WebView2):
 ```cmd
-.\run_rust_browser.bat
-```
-Or manually:
-```cmd
-cd rust_desktop
-cargo run
-```
-
-### 3. Build Core Native Engine (Rust + C++ GDI+)
-Run the automated build script to compile both the Rust Engine DLL and the C++ Native GUI application:
-```cmd
-.\build.bat
-```
-
-### 2. Run Native Axomai Browser App
-```cmd
-.\native\cpp_gui\axomai_browser.exe
-```
-
-### 3. Run Rust Unit Tests
-To test the core browser engine in Rust:
-```cmd
-cd native\rust_engine
+cd native/rust_engine
 cargo test
 ```
 
+### Test Coverage Suites:
+- **`html_parser_tests.rs`**: Entity decoding (`&amp;`, `&lt;`), implicit `<tbody>` insertion, void tag self-closing.
+- **`css_selector_tests.rs`**: Direct child (`>`), adjacent sibling (`+`), descendant combinators, attribute matching, `:first-child`, `:last-child`, `:disabled`.
+- **`css_variables_and_calc_tests.rs`**: `:root` `--var` cascading and `var()` fallback resolution, `calc()`, `clamp()` mathematical evaluations.
+- **`table_layout_tests.rs`**: Multi-row, multi-cell table auto-sizing and height balancing.
+- **`dom_tests.rs`**: Multi-class selector matching, element ID retrieval, DOM hierarchy queries.
+
 ---
 
-## 🌐 Supported Features
-- [x] **HTTP & HTTPS** networking with SSL/TLS support.
-- [x] **Local `file://` & `data:` URLs**.
-- [x] **Rust DOM Tree Construction** with stack error recovery.
-- [x] **CSS Cascade & Inheritance** (`color`, `font-size`, `font-weight`, `margin`, `display`).
-- [x] **Inline Text Wrapping & Block Box Model Layout**.
-- [x] **Google V8 JavaScript Runtime** (ECMAScript, persistent isolate & page context, V8 microtasks checkpoint).
-- [x] **V8 ↔ Rust DOM Bridge** (`document.write`, `getElementById`, `querySelector`, `createElement`, `appendChild`, `removeChild`, `remove`, `innerHTML`, `textContent`, `setAttribute`).
-- [x] **Browser Web APIs & Networking** (`fetch()` via Rust `ureq`, `window`, `location`, `navigator`, `console`, `setTimeout`, `setInterval`).
-- [x] **External Script Pipeline** (`<script src="...">` automatic URL resolution and HTTP fetching).
-- [x] **W3C EventTarget System** (`window.addEventListener`, `document.addEventListener`, element event bubbling, preventDefault, and native click dispatching).
-- [x] **C++ Win32 GDI+ Painter** with double buffering, scroll & mouse wheel support.
-- [x] **Navigation History** (Back / Forward).
+## 🗺️ Engineering Roadmap
+
+- [x] **v0.5.4**: DOM persistent node identity, grid placement (`grid-column`/`grid-row`), `transform-origin`, `preventDefault` lifecycle.
+- [x] **v0.5.5**: CSS Selector engine integration in `querySelector`/`querySelectorAll`, CSS Grid named areas & alignments, GitHub Actions CI.
+- [x] **v0.5.6**: CSS transitions & `@keyframes` animation engine, `requestAnimationFrame`, `getComputedStyle`, Web Workers foundation, CORS enforcement.
+- [x] **v0.6.0**: CSS Custom Properties (`var(--*)`), `calc()`/`min()`/`max()`/`clamp()`, Table Layout subsystem, HTML5 implicit `<tbody>`, DOM traversal (`matches`, `closest`, `contains`, `cloneNode`), Form APIs, and comprehensive test suites.
+- [ ] **v0.7.0**: Form controls autofill, input types, observers (`ResizeObserver`, `IntersectionObserver`, `MutationObserver`).
+- [ ] **v0.8.0**: Advanced HTTP cache, connection pooling, full IndexedDB & CacheStorage subsystems.
+- [ ] **v0.9.0**: GPU Compositor layer tree (`wgpu`), Indic/Assamese advanced HarfBuzz text shaping.
+- [ ] **v1.0.0**: Process-isolated sandbox architecture, DevTools inspector protocol, production browser UI.
 
 ---
 
 ## 📜 License
-MIT License - Created for educational and high-performance browser architecture learning.
+
+MIT License © 2026 Samarjit Kashyap
