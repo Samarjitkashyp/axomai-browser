@@ -1,9 +1,13 @@
-# 🚀 Axomai Browser
+# 🚀 Axomai Browser `v0.2.0`
 
-A modern web browser built **100% natively in Rust & C++**, implementing every core browser subsystem from TCP sockets to GPU screen pixels.
+> **Fast. Private. AI-Powered. Built for Everyone.**
 
-- **Core Engine (Rust)**: High-performance HTML5 DOM Parser, CSS3 Cascade Engine, Box Model Layout Calculator, JS Engine (`console.log`, `document.write`), and Display List Painter.
-- **GUI Application (C++)**: Native Win32 GDI+ Windowing UI with double-buffered rendering canvas, Chrome address bar, navigation history, and interactive event handling.
+A modern web browser designed with high-performance Rust core, native windowing, and a rich, glassmorphic UI featuring workspaces, Axomai AI assistant, quick tools, and customizable new tab experience.
+
+- **Modern Browser UI (`v0.2.0`)**: Pixel-perfect native browser shell with multi-tab management, omnibox, quick shortcuts, news feed, quick productivity tools, and dedicated Axomai AI sidebar.
+- **Rust Desktop Shell (`rust_desktop/`)**: Native cross-platform desktop windowing with Tao & Wry (WebView2).
+- **Core Engine (`native/rust_engine/`)**: High-performance HTML5 DOM Parser, CSS3 Cascade Engine, Box Model Layout Calculator, JS Engine, and Display List Painter.
+- **Legacy GUI Engine (`native/cpp_gui/`)**: Win32 GDI+ canvas rendering bridge.
 
 ---
 
@@ -58,7 +62,25 @@ A modern web browser built **100% natively in Rust & C++**, implementing every c
 
 ## 🛠️ How to Build & Run
 
-### 1. Build Entire Project
+### 1. Preview Modern Browser UI (Instant 1-Click)
+Double-click `preview_ui.bat` or run:
+```cmd
+.\preview_ui.bat
+```
+*(Or open `ui/index.html` directly in any web browser).*
+
+### 2. Run Native Rust Desktop Browser Shell
+Compile and run the modern desktop shell with Tao + Wry (WebView2):
+```cmd
+.\run_rust_browser.bat
+```
+Or manually:
+```cmd
+cd rust_desktop
+cargo run
+```
+
+### 3. Build Core Native Engine (Rust + C++ GDI+)
 Run the automated build script to compile both the Rust Engine DLL and the C++ Native GUI application:
 ```cmd
 .\build.bat

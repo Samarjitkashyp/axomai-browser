@@ -1,0 +1,12 @@
+{
+  "name": "axomai-browser",
+  "version": "0.2.0",
+  "description": "Axomai Browser - Fast, Private, AI-Powered Native Web Browser",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "preview": "node server.js"
+  },
+  "author": "Samarjit Kashyap <samarjitkashyp@gmail.com>",
+  "license": "MIT"
+}
