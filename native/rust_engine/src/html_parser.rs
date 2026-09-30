@@ -565,9 +565,18 @@ impl<'a> HTMLParser<'a> {
         }
     }
 
-    pub fn parse(mut self) -> NodePtr {
+    pub fn parse(self) -> NodePtr {
+        self.parse_interactive(|_, _, _| {})
+    }
+
+    pub fn parse_interactive<F>(mut self, mut on_script: F) -> NodePtr
+    where
+        F: FnMut(&HashMap<String, String>, &str, &mut HTMLTokenizer),
+    {
         let mut tokenizer = HTMLTokenizer::new(self.body);
         let mut char_buffer = String::new();
+        let mut active_script_attrs: Option<HashMap<String, String>> = None;
+        let mut active_script_body = String::new();
 
         loop {
             let token = tokenizer.next_token();
@@ -581,10 +590,49 @@ impl<'a> HTMLParser<'a> {
 
             match token {
                 HTMLToken::Character(c) => {
-                    char_buffer.push(c);
+                    if active_script_attrs.is_some() {
+                        active_script_body.push(c);
+                    } else {
+                        char_buffer.push(c);
+                    }
                 }
                 HTMLToken::Text(txt) => {
-                    char_buffer.push_str(&txt);
+                    if active_script_attrs.is_some() {
+                        active_script_body.push_str(&txt);
+                    } else {
+                        char_buffer.push_str(&txt);
+                    }
+                }
+                HTMLToken::StartTag {
+                    ref name,
+                    ref attributes,
+                    self_closing,
+                } => {
+                    if !char_buffer.is_empty() {
+                        self.insert_text(&char_buffer);
+                        char_buffer.clear();
+                    }
+                    if name == "script" && !self_closing {
+                        active_script_attrs = Some(attributes.clone());
+                        active_script_body.clear();
+                    }
+                    self.handle_start_tag(name, attributes.clone(), self_closing);
+                }
+                HTMLToken::EndTag { ref name } => {
+                    if !char_buffer.is_empty() {
+                        self.insert_text(&char_buffer);
+                        char_buffer.clear();
+                    }
+                    if name == "script" {
+                        if let Some(attrs) = active_script_attrs.take() {
+                            let script_body = std::mem::take(&mut active_script_body);
+                            if !script_body.is_empty() {
+                                self.insert_text(&script_body);
+                            }
+                            on_script(&attrs, &script_body, &mut tokenizer);
+                        }
+                    }
+                    self.handle_end_tag(name);
                 }
                 _ => {
                     if !char_buffer.is_empty() {

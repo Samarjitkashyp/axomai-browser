@@ -482,6 +482,40 @@ impl V8JSEngine {
         );
         self.execute(&js).unwrap_or(false)
     }
+
+    /// Dispatch DOMContentLoaded event when DOM parsing finishes and defer scripts have run
+    pub fn dispatch_dom_content_loaded(&mut self) -> bool {
+        let js = r#"
+            (function() {
+                document.readyState = 'interactive';
+                const ev = new Event('DOMContentLoaded', { bubbles: true, cancelable: false });
+                document.dispatchEvent(ev);
+                if (typeof document.onreadystatechange === 'function') {
+                    try { document.onreadystatechange(ev); } catch(e) { console.error(e); }
+                }
+            })();
+        "#;
+        self.execute(js).unwrap_or(false)
+    }
+
+    /// Dispatch load event when page and all resources have loaded
+    pub fn dispatch_load_event(&mut self) -> bool {
+        let js = r#"
+            (function() {
+                document.readyState = 'complete';
+                const ev = new Event('load', { bubbles: false, cancelable: false });
+                window.dispatchEvent(ev);
+                document.dispatchEvent(ev);
+                if (typeof window.onload === 'function') {
+                    try { window.onload(ev); } catch(e) { console.error(e); }
+                }
+                if (typeof document.onreadystatechange === 'function') {
+                    try { document.onreadystatechange(ev); } catch(e) { console.error(e); }
+                }
+            })();
+        "#;
+        self.execute(js).unwrap_or(false)
+    }
 }
 
 // Recursively register all DOM nodes into the registry map
@@ -1643,6 +1677,7 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
         // Setup EventTarget on window and document
         setupEventTarget(window);
         setupEventTarget(document);
+        document.readyState = 'loading';
 
         // Standard getters/setters definition on Element objects
         window.__setupElementProperties = function(el) {
