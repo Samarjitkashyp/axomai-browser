@@ -42,18 +42,20 @@ impl AxomaiEngine {
         // 1. HTML DOM Parse
         let dom_root = HTMLParser::new(html_content).parse();
 
-        // 2. Extract & Execute <script> via persistent V8 Engine
+        // 2. Extract & Execute <script> via persistent V8 Engine Context
+        let url_str = self
+            .current_url
+            .as_ref()
+            .map(|u| u.raw.as_str())
+            .unwrap_or("about:blank");
+
+        // Establish ONE persistent V8 Context for the page
+        self.js_engine.reset_page_context(Some(&dom_root), url_str);
+
         let mut scripts = Vec::new();
         extract_script_tags(&dom_root, &mut scripts);
-        if !scripts.is_empty() {
-            let url_str = self
-                .current_url
-                .as_ref()
-                .map(|u| u.raw.as_str())
-                .unwrap_or("about:blank");
-            for js in scripts {
-                let _ = self.js_engine.execute(&js, Some(&dom_root), url_str);
-            }
+        for js in scripts {
+            let _ = self.js_engine.execute(&js);
         }
 
         // 3. Extract <style> & Style Tree
@@ -126,6 +128,7 @@ impl AxomaiEngine {
                     x, y, width, height, ..
                 } => {
                     if click_x >= *x && click_x <= *x + *width && abs_y >= *y && abs_y <= *y + *height {
+                        self.js_engine.dispatch_click_event("button");
                         if !query.is_empty() {
                             return Some(format!("https://html.duckduckgo.com/html/?q={}", query));
                         }

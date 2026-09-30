@@ -35,21 +35,24 @@ struct ActiveContext {
 
 thread_local! {
     static CURRENT_CONTEXT: RefCell<Option<ActiveContext>> = RefCell::new(None);
+    static PENDING_TIMERS: RefCell<Vec<TimerTask>> = RefCell::new(Vec::new());
+    static CANCELLED_TIMERS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+    static NEXT_TIMER_ID: RefCell<u32> = RefCell::new(1);
 }
 
 // Timer Task for the Browser Event Loop
-struct TimerTask {
-    id: u32,
-    delay: Duration,
-    created_at: Instant,
-    is_interval: bool,
-    callback: v8::Global<v8::Function>,
+pub struct TimerTask {
+    pub id: u32,
+    pub delay: Duration,
+    pub created_at: Instant,
+    pub is_interval: bool,
+    pub callback: v8::Global<v8::Function>,
 }
 
 pub struct V8JSEngine {
     isolate: Option<v8::OwnedIsolate>,
+    page_context: Option<v8::Global<v8::Context>>,
     timers: Vec<TimerTask>,
-    next_timer_id: u32,
 }
 
 impl V8JSEngine {
@@ -60,21 +63,24 @@ impl V8JSEngine {
 
         Self {
             isolate: Some(isolate),
+            page_context: None,
             timers: Vec::new(),
-            next_timer_id: 1,
         }
     }
 
-    /// Execute a JavaScript snippet against a given DOM tree and URL
-    pub fn execute(
-        &mut self,
-        source: &str,
-        dom_root: Option<&NodePtr>,
-        url_str: &str,
-    ) -> Result<bool, String> {
-        let isolate = self.isolate.as_mut().ok_or("V8 Isolate not available")?;
+    /// Reset and establish a SINGLE PERSISTENT V8 CONTEXT for a new page load
+    pub fn reset_page_context(&mut self, dom_root: Option<&NodePtr>, url_str: &str) {
+        let isolate = match self.isolate.as_mut() {
+            Some(iso) => iso,
+            None => return,
+        };
 
-        // 1. Initialize Thread-Local Context with Node Registry
+        // 1. Clear old timers and cancelled timer lists
+        self.timers.clear();
+        PENDING_TIMERS.with(|q| q.borrow_mut().clear());
+        CANCELLED_TIMERS.with(|q| q.borrow_mut().clear());
+
+        // 2. Set up Thread-Local Node Registry
         CURRENT_CONTEXT.with(|ctx| {
             let mut reg = HashMap::new();
             let mut next_id = 1;
@@ -92,14 +98,14 @@ impl V8JSEngine {
             });
         });
 
-        // 2. Set up V8 HandleScope & ContextScope
+        // 3. Create ONE persistent V8 Context for the page
         let handle_scope = &mut v8::HandleScope::new(isolate);
         let context = v8::Context::new(handle_scope, Default::default());
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
         let global = context.global(scope);
 
-        // 3. Setup Browser Globals & Web APIs
+        // 4. Setup Global APIs & W3C DOM Bindings
         setup_window_global(scope, global);
         setup_console_api(scope, global);
         setup_location_api(scope, global, url_str);
@@ -107,27 +113,51 @@ impl V8JSEngine {
         setup_document_api(scope, global);
         setup_timer_apis(scope, global);
 
-        // 4. Inject DOM Element Prototype Helpers (getters/setters for innerHTML, textContent, appendChild, etc.)
+        // 5. Inject DOM Element Prototype Helpers
         inject_dom_prototype_bootstrap(scope);
 
-        // 5. Compile & Run JavaScript Script
+        // 6. Store persistent Context reference
+        self.page_context = Some(v8::Global::new(handle_scope, context));
+    }
+
+    /// Execute a JavaScript snippet inside the CURRENT PERSISTENT PAGE CONTEXT
+    pub fn execute(&mut self, source: &str) -> Result<bool, String> {
+        let isolate = self.isolate.as_mut().ok_or("V8 Isolate not available")?;
+        let page_context_global = self
+            .page_context
+            .as_ref()
+            .ok_or("No active page context. Call reset_page_context first.")?;
+
+        let handle_scope = &mut v8::HandleScope::new(isolate);
+        let context = v8::Local::new(handle_scope, page_context_global);
+        let scope = &mut v8::ContextScope::new(handle_scope, context);
+
+        // Compile & Run JavaScript Script in the SAME PERSISTENT CONTEXT!
         let code = v8::String::new(scope, source).ok_or("Failed to allocate JS source string")?;
 
         let script = match v8::Script::compile(scope, code, None) {
             Some(s) => s,
-            None => {
-                CURRENT_CONTEXT.with(|ctx| *ctx.borrow_mut() = None);
-                return Err("V8 Compilation failed".to_string());
-            }
+            None => return Err("V8 Compilation failed".to_string()),
         };
 
         let _ = script.run(scope);
 
-        // 6. Check if DOM was mutated during script run
+        // Harvest any timers registered during script execution
+        PENDING_TIMERS.with(|q| {
+            self.timers.append(&mut *q.borrow_mut());
+        });
+
+        // Filter out any timers cancelled via clearTimeout/clearInterval
+        CANCELLED_TIMERS.with(|c| {
+            let cancelled = c.borrow();
+            self.timers.retain(|t| !cancelled.contains(&t.id));
+        });
+
         let was_mutated = CURRENT_CONTEXT.with(|ctx| {
-            let mut opt = ctx.borrow_mut();
-            if let Some(c) = opt.take() {
-                c.dom_mutated
+            if let Some(ref mut c) = *ctx.borrow_mut() {
+                let m = c.dom_mutated;
+                c.dom_mutated = false;
+                m
             } else {
                 false
             }
@@ -136,10 +166,14 @@ impl V8JSEngine {
         Ok(was_mutated)
     }
 
-    /// Process queued timers and microtasks (Event Loop tick)
+    /// Process queued timers and microtasks (Real Browser Event Loop tick)
     pub fn process_event_loop(&mut self) -> bool {
         let isolate = match self.isolate.as_mut() {
             Some(iso) => iso,
+            None => return false,
+        };
+        let page_context_global = match self.page_context.as_ref() {
+            Some(ctx) => ctx,
             None => return false,
         };
 
@@ -147,20 +181,28 @@ impl V8JSEngine {
         let mut executed_any = false;
 
         let handle_scope = &mut v8::HandleScope::new(isolate);
-        let context = v8::Context::new(handle_scope, Default::default());
+        let context = v8::Local::new(handle_scope, page_context_global);
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
-        let mut remaining_timers = Vec::new();
+        let mut remaining = Vec::new();
 
         for timer in self.timers.drain(..) {
+            // Check if timer was cancelled
+            let is_cancelled =
+                CANCELLED_TIMERS.with(|c| c.borrow().contains(&timer.id));
+            if is_cancelled {
+                continue;
+            }
+
             if now.duration_since(timer.created_at) >= timer.delay {
+                // ACTUALLY DELAYED: Executes only after the real elapsed time!
                 let func = timer.callback.open(scope);
-                let recv = v8::undefined(scope).into();
+                let recv = context.global(scope).into();
                 let _ = func.call(scope, recv, &[]);
                 executed_any = true;
 
                 if timer.is_interval {
-                    remaining_timers.push(TimerTask {
+                    remaining.push(TimerTask {
                         id: timer.id,
                         delay: timer.delay,
                         created_at: Instant::now(),
@@ -169,12 +211,46 @@ impl V8JSEngine {
                     });
                 }
             } else {
-                remaining_timers.push(timer);
+                remaining.push(timer);
             }
         }
 
-        self.timers = remaining_timers;
-        executed_any
+        self.timers = remaining;
+
+        // Harvest any newly queued timers from timer callbacks
+        PENDING_TIMERS.with(|q| {
+            self.timers.append(&mut *q.borrow_mut());
+        });
+
+        let was_mutated = CURRENT_CONTEXT.with(|ctx| {
+            if let Some(ref mut c) = *ctx.borrow_mut() {
+                let m = c.dom_mutated;
+                c.dom_mutated = false;
+                m
+            } else {
+                false
+            }
+        });
+
+        executed_any || was_mutated
+    }
+
+    /// Dispatch a native click event to a DOM node in the persistent context
+    pub fn dispatch_click_event(&mut self, target_selector: &str) -> bool {
+        let js = format!(
+            r#"
+            (function() {{
+                const el = document.querySelector("{sel}") || document.getElementById("{sel}");
+                if (el) {{
+                    el.dispatchEvent(new Event('click'));
+                    return true;
+                }}
+                return false;
+            }})();
+            "#,
+            sel = target_selector
+        );
+        self.execute(&js).unwrap_or(false)
     }
 }
 
@@ -301,6 +377,7 @@ fn setup_timer_apis<'s>(
     scope: &mut v8::ContextScope<'s, v8::HandleScope>,
     global: v8::Local<v8::Object>,
 ) {
+    // 1. setTimeout(callback, delay_ms)
     let timeout_key = v8::String::new(scope, "setTimeout").unwrap();
     let timeout_fn = v8::Function::new(
         scope,
@@ -308,18 +385,106 @@ fn setup_timer_apis<'s>(
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() > 0 && args.get(0).is_function() {
-                let func: v8::Local<v8::Function> = args.get(0).try_into().unwrap();
-                let recv = v8::undefined(scope).into();
-                let _ = func.call(scope, recv, &[]);
+                let func_local: v8::Local<v8::Function> = args.get(0).try_into().unwrap();
+                let func_global = v8::Global::new(scope, func_local);
+
+                let delay_ms = if args.length() > 1 {
+                    args.get(1)
+                        .to_integer(scope)
+                        .map(|i| i.value().max(0) as u64)
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let timer_id = NEXT_TIMER_ID.with(|id| {
+                    let mut curr = id.borrow_mut();
+                    let val = *curr;
+                    *curr += 1;
+                    val
+                });
+
+                PENDING_TIMERS.with(|q| {
+                    q.borrow_mut().push(TimerTask {
+                        id: timer_id,
+                        delay: Duration::from_millis(delay_ms),
+                        created_at: Instant::now(),
+                        is_interval: false,
+                        callback: func_global,
+                    });
+                });
+
+                rv.set(v8::Integer::new(scope, timer_id as i32).into());
             }
-            rv.set(v8::Integer::new(scope, 1).into());
         },
     )
     .unwrap();
     global.set(scope, timeout_key.into(), timeout_fn.into());
 
+    // 2. setInterval(callback, delay_ms)
     let interval_key = v8::String::new(scope, "setInterval").unwrap();
-    global.set(scope, interval_key.into(), timeout_fn.into());
+    let interval_fn = v8::Function::new(
+        scope,
+        |scope: &mut v8::HandleScope,
+         args: v8::FunctionCallbackArguments,
+         mut rv: v8::ReturnValue| {
+            if args.length() > 0 && args.get(0).is_function() {
+                let func_local: v8::Local<v8::Function> = args.get(0).try_into().unwrap();
+                let func_global = v8::Global::new(scope, func_local);
+
+                let delay_ms = if args.length() > 1 {
+                    args.get(1)
+                        .to_integer(scope)
+                        .map(|i| i.value().max(1) as u64)
+                        .unwrap_or(1)
+                } else {
+                    1
+                };
+
+                let timer_id = NEXT_TIMER_ID.with(|id| {
+                    let mut curr = id.borrow_mut();
+                    let val = *curr;
+                    *curr += 1;
+                    val
+                });
+
+                PENDING_TIMERS.with(|q| {
+                    q.borrow_mut().push(TimerTask {
+                        id: timer_id,
+                        delay: Duration::from_millis(delay_ms),
+                        created_at: Instant::now(),
+                        is_interval: true,
+                        callback: func_global,
+                    });
+                });
+
+                rv.set(v8::Integer::new(scope, timer_id as i32).into());
+            }
+        },
+    )
+    .unwrap();
+    global.set(scope, interval_key.into(), interval_fn.into());
+
+    // 3. clearTimeout(timer_id) & clearInterval(timer_id)
+    let clear_timeout_k = v8::String::new(scope, "clearTimeout").unwrap();
+    let clear_timeout_fn = v8::Function::new(
+        scope,
+        |scope: &mut v8::HandleScope,
+         args: v8::FunctionCallbackArguments,
+         _rv: v8::ReturnValue| {
+            if args.length() > 0 {
+                if let Some(id_int) = args.get(0).to_integer(scope) {
+                    let tid = id_int.value() as u32;
+                    CANCELLED_TIMERS.with(|c| c.borrow_mut().push(tid));
+                }
+            }
+        },
+    )
+    .unwrap();
+    global.set(scope, clear_timeout_k.into(), clear_timeout_fn.into());
+
+    let clear_interval_k = v8::String::new(scope, "clearInterval").unwrap();
+    global.set(scope, clear_interval_k.into(), clear_timeout_fn.into());
 }
 
 // ============================================================================
@@ -539,7 +704,7 @@ fn wrap_dom_element<'s>(
                         NodeData::add_child(&parent, &child);
                         c.dom_mutated = true;
                         println!(
-                            "[Axomai V8 DOM] appendChild succeeded for Node #{} into Node #{}",
+                            "[Axomai V8 DOM] appendChild: Child Node #{} appended to Parent Node #{}",
                             child_id, parent_id
                         );
                     }
@@ -642,7 +807,6 @@ fn bind_element_accessor_functions<'s>(
     elem_obj: v8::Local<'s, v8::Object>,
     node_id: usize,
 ) {
-    // __getInnerHTML
     let get_html_k = v8::String::new(scope, "__getInnerHTML").unwrap();
     let get_html_fn = v8::Function::new(
         scope,
@@ -664,7 +828,6 @@ fn bind_element_accessor_functions<'s>(
     .unwrap();
     elem_obj.set(scope, get_html_k.into(), get_html_fn.into());
 
-    // __setInnerHTML
     let set_html_k = v8::String::new(scope, "__setInnerHTML").unwrap();
     let set_html_fn = v8::Function::new(
         scope,
@@ -678,7 +841,6 @@ fn bind_element_accessor_functions<'s>(
                         if let Some(node) = c.node_registry.get(&node_id).cloned() {
                             set_node_inner_html(&node, &html_val);
                             c.dom_mutated = true;
-                            // Re-index children into registry
                             register_dom_tree(&node, &mut c.node_registry, &mut c.next_node_id);
                         }
                     }
@@ -689,7 +851,6 @@ fn bind_element_accessor_functions<'s>(
     .unwrap();
     elem_obj.set(scope, set_html_k.into(), set_html_fn.into());
 
-    // __getTextContent
     let get_text_k = v8::String::new(scope, "__getTextContent").unwrap();
     let get_text_fn = v8::Function::new(
         scope,
@@ -711,7 +872,6 @@ fn bind_element_accessor_functions<'s>(
     .unwrap();
     elem_obj.set(scope, get_text_k.into(), get_text_fn.into());
 
-    // __setTextContent
     let set_text_k = v8::String::new(scope, "__setTextContent").unwrap();
     let set_text_fn = v8::Function::new(
         scope,
@@ -735,7 +895,6 @@ fn bind_element_accessor_functions<'s>(
     elem_obj.set(scope, set_text_k.into(), set_text_fn.into());
 }
 
-// Binds getAttribute, setAttribute, hasAttribute
 fn bind_element_attribute_functions<'s>(
     scope: &mut v8::HandleScope<'s>,
     elem_obj: v8::Local<'s, v8::Object>,
@@ -800,7 +959,6 @@ fn bind_element_attribute_functions<'s>(
     elem_obj.set(scope, set_attr_k.into(), set_attr_fn.into());
 }
 
-// Binds addEventListener, removeEventListener, dispatchEvent
 fn bind_element_event_functions<'s>(
     scope: &mut v8::HandleScope<'s>,
     elem_obj: v8::Local<'s, v8::Object>,
@@ -818,7 +976,6 @@ fn bind_element_event_functions<'s>(
 fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::HandleScope>) {
     let bootstrap_js = r#"
     (function() {
-        const proto = Object.prototype;
         // Standard getters/setters definition on Element objects
         window.__setupElementProperties = function(el) {
             if (!el || el.__protoHooked) return el;
