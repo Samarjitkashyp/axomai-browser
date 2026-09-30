@@ -2193,31 +2193,31 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 i++;
             }
 
-            let transformed = cleanSource;
-
+            let importHeaders = '';
+            const identMap = Object.create(null);
             let importIndex = 0;
+
+            let transformed = cleanSource;
 
             // 1. import defaultExport, { a, b as c } from "specifier";
             transformed = transformed.replace(
                 /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*,\s*\{([^}]+)\}\s+from\s*['"]([^'"]+)['"]\s*;?/g,
                 function(m, def, named, spec) {
                     const modVar = '__import_mod_' + (importIndex++);
-                    let decls = 'const ' + modVar + ' = await importModule("' + spec + '");\n';
-                    decls += 'const ' + def + ' = ' + modVar + '.default;\n';
+                    importHeaders += 'const ' + modVar + ' = await importModule("' + spec + '");\n';
+                    identMap[def] = modVar + '.default';
                     const items = named.split(',');
                     for (let p = 0; p < items.length; p++) {
                         const item = items[p].trim();
                         if (!item) continue;
                         if (item.indexOf(' as ') !== -1) {
                             const pair = item.split(' as ');
-                            const src = pair[0].trim();
-                            const local = pair[1].trim();
-                            decls += 'let ' + local + '; Object.defineProperty(globalThis, "' + local + '", { get: () => ' + modVar + '["' + src + '"], configurable: true });\n';
+                            identMap[pair[1].trim()] = modVar + '["' + pair[0].trim() + '"]';
                         } else {
-                            decls += 'let ' + item + '; Object.defineProperty(globalThis, "' + item + '", { get: () => ' + modVar + '["' + item + '"], configurable: true });\n';
+                            identMap[item] = modVar + '["' + item + '"]';
                         }
                     }
-                    return decls;
+                    return '';
                 }
             );
 
@@ -2226,43 +2226,49 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
                 function(m, def, spec) {
                     const modVar = '__import_mod_' + (importIndex++);
-                    return 'const ' + modVar + ' = await importModule("' + spec + '");\nconst ' + def + ' = ' + modVar + '.default;\n';
+                    importHeaders += 'const ' + modVar + ' = await importModule("' + spec + '");\n';
+                    identMap[def] = modVar + '.default';
+                    return '';
                 }
             );
 
             // 3. import * as name from "specifier";
             transformed = transformed.replace(
                 /import\s*\*\s*as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
-                'const $1 = await importModule("$2");'
+                function(m, name, spec) {
+                    importHeaders += 'const ' + name + ' = await importModule("' + spec + '");\n';
+                    return '';
+                }
             );
 
-            // 4. import { a, b as c } from "specifier"; -> LIVE IMPORTER BINDINGS
+            // 4. import { a, b as c } from "specifier";
             transformed = transformed.replace(
                 /import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;?/g,
                 function(m, bindings, specifier) {
                     const modVar = '__import_mod_' + (importIndex++);
-                    let decls = 'const ' + modVar + ' = await importModule("' + specifier + '");\n';
+                    importHeaders += 'const ' + modVar + ' = await importModule("' + specifier + '");\n';
                     const items = bindings.split(',');
                     for (let p = 0; p < items.length; p++) {
                         const item = items[p].trim();
                         if (!item) continue;
                         if (item.indexOf(' as ') !== -1) {
                             const pair = item.split(' as ');
-                            const src = pair[0].trim();
-                            const local = pair[1].trim();
-                            decls += 'let ' + local + '; Object.defineProperty(globalThis, "' + local + '", { get: () => ' + modVar + '["' + src + '"], configurable: true });\n';
+                            identMap[pair[1].trim()] = modVar + '["' + pair[0].trim() + '"]';
                         } else {
-                            decls += 'let ' + item + '; Object.defineProperty(globalThis, "' + item + '", { get: () => ' + modVar + '["' + item + '"], configurable: true });\n';
+                            identMap[item] = modVar + '["' + item + '"]';
                         }
                     }
-                    return decls;
+                    return '';
                 }
             );
 
             // 5. import "specifier";
             transformed = transformed.replace(
                 /import\s*['"]([^'"]+)['"]\s*;?/g,
-                'await importModule("$1");'
+                function(m, spec) {
+                    importHeaders += 'await importModule("' + spec + '");\n';
+                    return '';
+                }
             );
 
             // 6. export default expression;
@@ -2327,7 +2333,70 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
                 }
             );
 
-            return transformed;
+            // Rewrite imported identifiers in module body using token scanner
+            const keys = Object.keys(identMap);
+            if (keys.length > 0) {
+                let rewritten = '';
+                let idx = 0;
+                const tLen = transformed.length;
+                let prevNonSpaceChar = '';
+
+                while (idx < tLen) {
+                    const ch = transformed[idx];
+
+                    // String literal scanning (preserve quotes and escapes)
+                    if (ch === '"' || ch === "'" || ch === '`') {
+                        const quote = ch;
+                        rewritten += ch;
+                        idx++;
+                        while (idx < tLen) {
+                            const sc = transformed[idx];
+                            rewritten += sc;
+                            if (sc === '\\' && idx + 1 < tLen) {
+                                rewritten += transformed[++idx];
+                            } else if (sc === quote) {
+                                idx++;
+                                break;
+                            }
+                            idx++;
+                        }
+                        prevNonSpaceChar = quote;
+                        continue;
+                    }
+
+                    // Identifier scanning
+                    if (/[a-zA-Z_$]/.test(ch)) {
+                        let idStart = idx;
+                        while (idx < tLen && /[a-zA-Z0-9_$]/.test(transformed[idx])) {
+                            idx++;
+                        }
+                        const idText = transformed.slice(idStart, idx);
+
+                        if (prevNonSpaceChar !== '.' && identMap[idText]) {
+                            let peek = idx;
+                            while (peek < tLen && /\s/.test(transformed[peek])) peek++;
+                            if (peek < tLen && transformed[peek] === ':' && (prevNonSpaceChar === '{' || prevNonSpaceChar === ',')) {
+                                rewritten += idText;
+                            } else {
+                                rewritten += identMap[idText];
+                            }
+                        } else {
+                            rewritten += idText;
+                        }
+                        prevNonSpaceChar = idText[idText.length - 1];
+                        continue;
+                    }
+
+                    if (!/\s/.test(ch)) {
+                        prevNonSpaceChar = ch;
+                    }
+                    rewritten += ch;
+                    idx++;
+                }
+                transformed = rewritten;
+            }
+
+            return importHeaders + transformed;
         };
 
         window.__executeModule = async function(source, moduleUrl) {

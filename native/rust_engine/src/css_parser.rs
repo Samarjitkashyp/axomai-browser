@@ -1,19 +1,38 @@
 use crate::html_parser::{NodePtr, NodeType};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AttributeOp {
+    Exists,
+    Equals,
+    StartsWith,
+    EndsWith,
+    Contains,
+}
+
 #[derive(Debug, Clone)]
 pub enum Selector {
+    Universal,
     Tag(String),
     Class(String),
     ID(String),
+    Attribute {
+        name: String,
+        op: AttributeOp,
+        value: String,
+    },
     Compound(Vec<Selector>),
     Descendant(Box<Selector>, Box<Selector>),
+    DirectChild(Box<Selector>, Box<Selector>),
 }
 
 impl Selector {
     pub fn matches(&self, node: &NodePtr) -> bool {
         let node_borrow = node.borrow();
         match self {
+            Selector::Universal => {
+                matches!(node_borrow.node_type, NodeType::Element { .. })
+            }
             Selector::Tag(tag_name) => {
                 if let NodeType::Element { ref tag, .. } = node_borrow.node_type {
                     tag == tag_name
@@ -43,7 +62,37 @@ impl Selector {
                     false
                 }
             }
+            Selector::Attribute { name, op, value } => {
+                if let NodeType::Element { ref attributes, .. } = node_borrow.node_type {
+                    if let Some(attr_val) = attributes.get(name) {
+                        let attr_lower = attr_val.to_lowercase();
+                        let target_lower = value.to_lowercase();
+                        match op {
+                            AttributeOp::Exists => true,
+                            AttributeOp::Equals => attr_lower == target_lower,
+                            AttributeOp::StartsWith => attr_lower.starts_with(&target_lower),
+                            AttributeOp::EndsWith => attr_lower.ends_with(&target_lower),
+                            AttributeOp::Contains => attr_lower.contains(&target_lower),
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
             Selector::Compound(selectors) => selectors.iter().all(|s| s.matches(node)),
+            Selector::DirectChild(parent_sel, child_sel) => {
+                if !child_sel.matches(node) {
+                    return false;
+                }
+                if let Some(parent_weak) = &node_borrow.parent {
+                    if let Some(parent_rc) = parent_weak.upgrade() {
+                        return parent_sel.matches(&parent_rc);
+                    }
+                }
+                false
+            }
             Selector::Descendant(ancestor_sel, descendant_sel) => {
                 if !descendant_sel.matches(node) {
                     return false;
@@ -66,8 +115,9 @@ impl Selector {
 
     pub fn specificity(&self) -> (usize, usize, usize) {
         match self {
+            Selector::Universal => (0, 0, 0),
             Selector::ID(_) => (1, 0, 0),
-            Selector::Class(_) => (0, 1, 0),
+            Selector::Class(_) | Selector::Attribute { .. } => (0, 1, 0),
             Selector::Tag(_) => (0, 0, 1),
             Selector::Compound(list) => {
                 let mut ids = 0;
@@ -81,9 +131,9 @@ impl Selector {
                 }
                 (ids, classes, tags)
             }
-            Selector::Descendant(ancestor, descendant) => {
-                let (i1, c1, t1) = ancestor.specificity();
-                let (i2, c2, t2) = descendant.specificity();
+            Selector::DirectChild(parent, child) | Selector::Descendant(parent, child) => {
+                let (i1, c1, t1) = parent.specificity();
+                let (i2, c2, t2) = child.specificity();
                 (i1 + i2, c1 + c2, t1 + t2)
             }
         }
@@ -175,30 +225,92 @@ impl<'a> CSSParser<'a> {
 
 pub fn parse_selector(sel_str: &str) -> Option<Selector> {
     let sel_str = sel_str.trim();
-    let parts: Vec<&str> = sel_str.split_whitespace().collect();
-    if parts.is_empty() {
+    if sel_str.is_empty() {
         return None;
     }
 
-    let selectors: Vec<Selector> = parts.into_iter().filter_map(parse_single_selector).collect();
-    if selectors.is_empty() {
+    let mut normalized = String::new();
+    for ch in sel_str.chars() {
+        if ch == '>' {
+            normalized.push(' ');
+            normalized.push('>');
+            normalized.push(' ');
+        } else {
+            normalized.push(ch);
+        }
+    }
+
+    let tokens: Vec<&str> = normalized.split_whitespace().collect();
+    if tokens.is_empty() {
         return None;
     }
 
-    if selectors.len() == 1 {
-        return Some(selectors[0].clone());
+    let mut current_sel: Option<Selector> = None;
+    let mut next_combinator = ' ';
+
+    for tok in tokens {
+        if tok == ">" {
+            next_combinator = '>';
+            continue;
+        }
+
+        if let Some(parsed) = parse_single_selector(tok) {
+            match current_sel {
+                None => {
+                    current_sel = Some(parsed);
+                }
+                Some(prev) => {
+                    if next_combinator == '>' {
+                        current_sel = Some(Selector::DirectChild(Box::new(prev), Box::new(parsed)));
+                    } else {
+                        current_sel = Some(Selector::Descendant(Box::new(prev), Box::new(parsed)));
+                    }
+                    next_combinator = ' ';
+                }
+            }
+        }
     }
 
-    let mut current = selectors[0].clone();
-    for sel in selectors.into_iter().skip(1) {
-        current = Selector::Descendant(Box::new(current), Box::new(sel));
-    }
-    Some(current)
+    current_sel
 }
 
 fn parse_single_selector(part: &str) -> Option<Selector> {
     let mut sub_selectors = Vec::new();
     let mut curr_part = part.to_string();
+
+    while let Some(start_bracket) = curr_part.find('[') {
+        if let Some(end_bracket) = curr_part[start_bracket..].find(']') {
+            let full_end = start_bracket + end_bracket;
+            let attr_expr = &curr_part[start_bracket + 1..full_end];
+            let attr_sel = if let Some(eq_idx) = attr_expr.find("^=") {
+                let name = attr_expr[..eq_idx].trim().to_lowercase();
+                let val = attr_expr[eq_idx + 2..].trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                Some(Selector::Attribute { name, op: AttributeOp::StartsWith, value: val })
+            } else if let Some(eq_idx) = attr_expr.find("$=") {
+                let name = attr_expr[..eq_idx].trim().to_lowercase();
+                let val = attr_expr[eq_idx + 2..].trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                Some(Selector::Attribute { name, op: AttributeOp::EndsWith, value: val })
+            } else if let Some(eq_idx) = attr_expr.find("*=") {
+                let name = attr_expr[..eq_idx].trim().to_lowercase();
+                let val = attr_expr[eq_idx + 2..].trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                Some(Selector::Attribute { name, op: AttributeOp::Contains, value: val })
+            } else if let Some(eq_idx) = attr_expr.find('=') {
+                let name = attr_expr[..eq_idx].trim().to_lowercase();
+                let val = attr_expr[eq_idx + 1..].trim().trim_matches(|c| c == '"' || c == '\'').to_string();
+                Some(Selector::Attribute { name, op: AttributeOp::Equals, value: val })
+            } else {
+                let name = attr_expr.trim().to_lowercase();
+                Some(Selector::Attribute { name, op: AttributeOp::Exists, value: String::new() })
+            };
+
+            if let Some(sel) = attr_sel {
+                sub_selectors.push(sel);
+            }
+            curr_part = format!("{}{}", &curr_part[..start_bracket], &curr_part[full_end + 1..]);
+        } else {
+            break;
+        }
+    }
 
     if let Some(id_idx) = curr_part.find('#') {
         let id_part = curr_part[id_idx + 1..].to_string();
@@ -206,14 +318,18 @@ fn parse_single_selector(part: &str) -> Option<Selector> {
         curr_part = curr_part[..id_idx].to_string();
     }
 
-    if let Some(cls_idx) = curr_part.find('.') {
+    while let Some(cls_idx) = curr_part.find('.') {
         let class_part = curr_part[cls_idx + 1..].to_string();
         sub_selectors.push(Selector::Class(class_part.to_lowercase()));
         curr_part = curr_part[..cls_idx].to_string();
     }
 
     if !curr_part.is_empty() {
-        sub_selectors.push(Selector::Tag(curr_part.to_lowercase()));
+        if curr_part == "*" {
+            sub_selectors.push(Selector::Universal);
+        } else {
+            sub_selectors.push(Selector::Tag(curr_part.to_lowercase()));
+        }
     }
 
     if sub_selectors.is_empty() {
