@@ -33,6 +33,7 @@ static FETCH_RESULT_QUEUE: Mutex<Option<Vec<FetchResult>>> = Mutex::new(None);
 
 #[derive(Debug, Clone)]
 pub struct FetchResult {
+    pub engine_id: usize,
     pub request_id: u64,
     pub status: u16,
     pub status_text: String,
@@ -53,13 +54,15 @@ fn push_fetch_result(result: FetchResult) {
     HAS_PENDING_FETCH_RESULTS.store(true, Ordering::SeqCst);
 }
 
-fn drain_fetch_results() -> Vec<FetchResult> {
-    if !HAS_PENDING_FETCH_RESULTS.swap(false, Ordering::SeqCst) {
-        return Vec::new();
-    }
+fn drain_fetch_results_for_engine(engine_id: usize) -> Vec<FetchResult> {
     let mut lock = FETCH_RESULT_QUEUE.lock().unwrap();
     if let Some(ref mut q) = *lock {
-        std::mem::take(q)
+        let (matching, remaining): (Vec<_>, Vec<_>) = q.drain(..).partition(|r| r.engine_id == engine_id);
+        *q = remaining;
+        if q.is_empty() {
+            HAS_PENDING_FETCH_RESULTS.store(false, Ordering::SeqCst);
+        }
+        matching
     } else {
         Vec::new()
     }
@@ -97,6 +100,7 @@ pub struct TimerTask {
 }
 
 pub struct V8JSEngine {
+    pub engine_id: usize,
     isolate: Option<v8::OwnedIsolate>,
     page_context: Option<v8::Global<v8::Context>>,
     timers: Vec<TimerTask>,
@@ -109,6 +113,7 @@ impl V8JSEngine {
         let isolate = v8::Isolate::new(Default::default());
 
         Self {
+            engine_id: 0,
             isolate: Some(isolate),
             page_context: None,
             timers: Vec::new(),
@@ -160,7 +165,7 @@ impl V8JSEngine {
         setup_navigator_api(scope, global);
         setup_document_api(scope, global);
         setup_timer_apis(scope, global);
-        setup_async_fetch_api(scope, global, url_str);
+        setup_async_fetch_api(scope, global, url_str, self.engine_id);
 
         // 5. Inject DOM & EventTarget Prototype Helpers
         inject_dom_prototype_bootstrap(scope);
@@ -262,7 +267,7 @@ impl V8JSEngine {
         let scope = &mut v8::ContextScope::new(handle_scope, context);
 
         // 1. Process Completed Async Fetch Requests (Non-blocking network thread)
-        let completed_fetches = drain_fetch_results();
+        let completed_fetches = drain_fetch_results_for_engine(self.engine_id);
 
         for fetch_res in completed_fetches {
             let resolver_opt = PENDING_FETCH_RESOLVERS.with(|map| {
@@ -740,6 +745,7 @@ fn setup_async_fetch_api<'s>(
     scope: &mut v8::ContextScope<'s, v8::HandleScope>,
     global: v8::Local<v8::Object>,
     base_url_str: &str,
+    engine_id: usize,
 ) {
     let base_url = base_url_str.to_string();
     let fetch_key = v8::String::new(scope, "fetch").unwrap();
@@ -855,6 +861,7 @@ fn setup_async_fetch_api<'s>(
                         }
                         let body = resp.into_string().unwrap_or_default();
                         push_fetch_result(FetchResult {
+                            engine_id,
                             request_id,
                             status,
                             status_text,
@@ -866,6 +873,7 @@ fn setup_async_fetch_api<'s>(
                     }
                     Err(err) => {
                         push_fetch_result(FetchResult {
+                            engine_id,
                             request_id,
                             status: 500,
                             status_text: "Internal Error".to_string(),

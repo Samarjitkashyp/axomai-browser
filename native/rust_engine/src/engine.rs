@@ -4,11 +4,15 @@ use crate::js_engine::V8JSEngine;
 use crate::layout::{build_layout_tree, LayoutBox};
 use crate::network::URL;
 use crate::painter::{build_display_list, DisplayCommand};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
+
+static NEXT_ENGINE_ID: AtomicUsize = AtomicUsize::new(1);
 
 pub struct NavigationResponse {
+    pub engine_id: usize,
     pub url: URL,
     pub body: String,
     pub error: Option<String>,
@@ -28,19 +32,22 @@ fn push_navigation_response(resp: NavigationResponse) {
     HAS_PENDING_NAVIGATION.store(true, Ordering::SeqCst);
 }
 
-fn drain_navigation_responses() -> Vec<NavigationResponse> {
-    if !HAS_PENDING_NAVIGATION.swap(false, Ordering::SeqCst) {
-        return Vec::new();
-    }
+fn drain_navigation_responses_for_engine(engine_id: usize) -> Vec<NavigationResponse> {
     let mut lock = NAVIGATION_QUEUE.lock().unwrap();
     if let Some(ref mut q) = *lock {
-        std::mem::take(q)
+        let (matching, remaining): (Vec<_>, Vec<_>) = q.drain(..).partition(|r| r.engine_id == engine_id);
+        *q = remaining;
+        if q.is_empty() {
+            HAS_PENDING_NAVIGATION.store(false, Ordering::SeqCst);
+        }
+        matching
     } else {
         Vec::new()
     }
 }
 
 pub struct AxomaiEngine {
+    pub engine_id: usize,
     pub current_url: Option<URL>,
     pub dom_root: Option<NodePtr>,
     pub layout_root: Option<LayoutBox>,
@@ -54,7 +61,12 @@ pub struct AxomaiEngine {
 
 impl AxomaiEngine {
     pub fn new() -> Self {
+        let engine_id = NEXT_ENGINE_ID.fetch_add(1, Ordering::SeqCst);
+        let mut js_engine = V8JSEngine::new();
+        js_engine.engine_id = engine_id;
+
         AxomaiEngine {
+            engine_id,
             current_url: None,
             dom_root: None,
             layout_root: None,
@@ -62,7 +74,7 @@ impl AxomaiEngine {
             max_scroll_y: 0.0,
             focused_input_idx: None,
             status_message: "Ready".to_string(),
-            js_engine: V8JSEngine::new(),
+            js_engine,
             active_css_rules: Vec::new(),
         }
     }
@@ -78,12 +90,14 @@ impl AxomaiEngine {
             return self.load_html(&body, viewport_w, viewport_h);
         }
 
-        // Network schemes (http/https): execute non-blocking in background worker thread
+        // Network schemes (http/https): execute non-blocking in background worker thread with engine_id
         self.status_message = format!("Connecting to {}...", url.host);
         let url_clone = url.clone();
+        let engine_id = self.engine_id;
         thread::spawn(move || {
             let (_headers, body) = url_clone.request();
             push_navigation_response(NavigationResponse {
+                engine_id,
                 url: url_clone,
                 body,
                 error: None,
@@ -122,9 +136,24 @@ impl AxomaiEngine {
                     };
                     println!("[Axomai Engine] Fetching external script: {}", resolved_url);
                     if let Ok(url_obj) = URL::parse(&resolved_url) {
-                        let (_headers, js_code) = url_obj.request();
-                        if !js_code.is_empty() {
-                            let _ = self.js_engine.execute(&js_code);
+                        if url_obj.scheme == "file" || url_obj.scheme == "data" {
+                            let (_headers, js_code) = url_obj.request();
+                            if !js_code.is_empty() {
+                                let _ = self.js_engine.execute(&js_code);
+                            }
+                        } else {
+                            // Non-hanging script download: timeout-bounded network fetch
+                            let handle = thread::spawn(move || {
+                                match ureq::get(&resolved_url).timeout(Duration::from_secs(3)).call() {
+                                    Ok(resp) => resp.into_string().unwrap_or_default(),
+                                    Err(_) => String::new(),
+                                }
+                            });
+                            if let Ok(js_code) = handle.join() {
+                                if !js_code.is_empty() {
+                                    let _ = self.js_engine.execute(&js_code);
+                                }
+                            }
                         }
                     }
                 }
@@ -314,8 +343,8 @@ impl AxomaiEngine {
     pub fn process_event_loop(&mut self, viewport_w: f32, viewport_h: f32) -> bool {
         let mut executed = false;
 
-        // 1. Process completed non-blocking page navigations
-        let completed_navs = drain_navigation_responses();
+        // 1. Process completed non-blocking page navigations for THIS engine instance
+        let completed_navs = drain_navigation_responses_for_engine(self.engine_id);
         for nav in completed_navs {
             self.current_url = Some(nav.url);
             let _ = self.load_html(&nav.body, viewport_w, viewport_h);
@@ -332,6 +361,78 @@ impl AxomaiEngine {
         }
 
         executed
+    }
+
+    /// Serialize current display list commands to JSON for desktop WebView/canvas rendering bridge
+    pub fn get_display_list_json(&self) -> String {
+        let mut json = String::from("[");
+        for (i, cmd) in self.display_list.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            match cmd {
+                DisplayCommand::DrawRect { x1, y1, x2, y2, color } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"rect","x1":{},"y1":{},"x2":{},"y2":{},"color":"{}"}}"#,
+                        x1, y1, x2, y2, color
+                    ));
+                }
+                DisplayCommand::DrawText {
+                    x,
+                    y,
+                    width,
+                    height,
+                    text,
+                    font_size,
+                    font_weight,
+                    font_style,
+                    color,
+                    href,
+                } => {
+                    let escaped_text = text.replace('\\', "\\\\").replace('"', "\\\"");
+                    json.push_str(&format!(
+                        r#"{{"type":"text","x":{},"y":{},"width":{},"height":{},"text":"{}","fontSize":{},"fontWeight":"{}","fontStyle":"{}","color":"{}","href":"{}"}}"#,
+                        x, y, width, height, escaped_text, font_size, font_weight, font_style, color, href
+                    ));
+                }
+                DisplayCommand::DrawInput {
+                    x,
+                    y,
+                    width,
+                    height,
+                    value,
+                    placeholder,
+                    is_focused,
+                } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"input","x":{},"y":{},"width":{},"height":{},"value":"{}","placeholder":"{}","isFocused":{}}}"#,
+                        x, y, width, height, value, placeholder, is_focused
+                    ));
+                }
+                DisplayCommand::DrawButton {
+                    x,
+                    y,
+                    width,
+                    height,
+                    label,
+                } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"button","x":{},"y":{},"width":{},"height":{},"label":"{}"}}"#,
+                        x, y, width, height, label
+                    ));
+                }
+                DisplayCommand::DrawImage {
+                    x, y, width, height, ..
+                } => {
+                    json.push_str(&format!(
+                        r#"{{"type":"image","x":{},"y":{},"width":{},"height":{}}}"#,
+                        x, y, width, height
+                    ));
+                }
+            }
+        }
+        json.push(']');
+        json
     }
 
     /// Check if there are pending async fetch responses, background navigations, or timers ready for event loop processing
