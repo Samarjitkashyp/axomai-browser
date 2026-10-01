@@ -86,6 +86,8 @@ pub struct AxomaiEngine {
     pub drag_initial_scroll: f32,
     pub drag_initial_scroll_x: f32,
     pub drag_container_pos: Option<(f32, f32)>,
+    pub adblock_engine: crate::adblock_engine::AdBlockEngine,
+    pub theme_engine: crate::theme_engine::ThemeEngine,
 }
 
 impl AxomaiEngine {
@@ -136,11 +138,18 @@ impl AxomaiEngine {
             drag_initial_scroll: 0.0,
             drag_initial_scroll_x: 0.0,
             drag_container_pos: None,
+            adblock_engine: crate::adblock_engine::AdBlockEngine::new(),
+            theme_engine: crate::theme_engine::ThemeEngine::new(),
         }
     }
 
     /// Load URL with non-blocking asynchronous network fetching for http/https
     pub fn load_url(&mut self, url_str: &str, viewport_w: f32, viewport_h: f32) -> Result<(), String> {
+        if self.adblock_engine.should_block_url(url_str) {
+            self.status_message = format!("Blocked by Privacy Shield: {}", url_str);
+            return Err(format!("URL blocked by AdBlockEngine: {}", url_str));
+        }
+
         let url = URL::parse(url_str)?;
         self.current_url = Some(url.clone());
         self.scroll_y = 0.0;
@@ -1221,6 +1230,20 @@ impl AxomaiEngine {
             || !self.ordered_scripts_buffer.is_empty()
             || !self.ordered_defer_buffer.is_empty()
             || self.js_engine.has_pending_events()
+    }
+
+    /// Set theme preset and regenerate dynamic CSS variables
+    pub fn set_theme_preset(&mut self, preset: crate::theme_engine::HeritagePreset) -> String {
+        self.theme_engine.apply_preset(preset);
+        self.is_dirty = true;
+        self.theme_engine.generate_theme_css()
+    }
+
+    /// Extract reader mode article from currently loaded DOM
+    pub fn extract_reader_mode(&self) -> Option<crate::reader_mode::ReaderArticle> {
+        self.dom_root.as_ref().and_then(|dom| {
+            crate::reader_mode::ReaderModeEngine::parse(dom, &self.current_title)
+        })
     }
 }
 

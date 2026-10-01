@@ -120,12 +120,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else if msg.starts_with("set_theme:") {
                     let preset_name = &msg[10..];
-                    println!("[Axomai Desktop] Theme switched to: {}", preset_name);
+                    let preset = match preset_name {
+                        "kaziranga" => axomai_engine::HeritagePreset::KazirangaGreen,
+                        "bihu" => axomai_engine::HeritagePreset::BihuGold,
+                        "muga" => axomai_engine::HeritagePreset::MugaSilk,
+                        "majuli" => axomai_engine::HeritagePreset::MajuliSunset,
+                        "cyberpunk" => axomai_engine::HeritagePreset::CyberpunkNeon,
+                        _ => axomai_engine::HeritagePreset::BrahmaputraBlue,
+                    };
+                    let css = eng.set_theme_preset(preset);
+                    println!("[Axomai Desktop] Theme switched to: {} -> {}", preset_name, css);
                 } else if msg == "toggle_reader" {
-                    if let Some(ref dom) = eng.dom_root {
-                        if let Some(article) = axomai_engine::ReaderModeEngine::parse(dom, &eng.current_title) {
-                            println!("[Axomai Desktop] Extracted Reader Article: {}", article.title);
-                        }
+                    if let Some(article) = eng.extract_reader_mode() {
+                        println!("[Axomai Desktop] Extracted Reader Article: {} ({} mins read)", article.title, article.estimated_reading_time_mins);
                     }
                 } else if msg == "back" {
                     let _ = eng.go_back(1380.0, 860.0);
