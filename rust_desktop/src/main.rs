@@ -529,8 +529,8 @@ fn render_text_centered(
 
 // ===== CHROME (Tab bar + Toolbar + Sidebar) =====
 
-fn rq(x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) -> GpuQuad {
-    NativeGpuCompositor::rounded_quad(x, y, w, h, r, color)
+fn rq(x: f32, y: f32, w: f32, h: f32, _r: f32, color: [f32; 4]) -> GpuQuad {
+    NativeGpuCompositor::solid_quad(x, y, w, h, color)
 }
 
 fn build_chrome_quads(
