@@ -48,5 +48,5 @@ fn test_assamese_matra_reordering_and_conjuncts() {
 fn test_indic_shaper_glyph_run_extraction() {
     let sample = "অসমীয়া ব্ৰাউজাৰ (Axomai Browser)";
     let glyphs = TextShaper::shape_text(sample, 16.0);
-    assert!(!glyphs.is_empty());
+    assert!(!glyphs.clusters.is_empty());
 }

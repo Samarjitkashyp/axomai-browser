@@ -29,7 +29,7 @@ fn test_cdp_inspector_protocol() {
     assert!(doc_res.contains(r#""id":1"#));
     assert!(doc_res.contains("CDP Test Page"));
 
-    let query_res = CdpInspector::handle_command(&mut engine, 2, "DOM.querySelector", r#"{"selector":"#target-div"}"#);
+    let query_res = CdpInspector::handle_command(&mut engine, 2, "DOM.querySelector", "{\"selector\":\"#target-div\"}");
     assert!(query_res.contains(r#""id":2"#));
 
     let eval_res = CdpInspector::handle_command(&mut engine, 3, "Runtime.evaluate", r#"{"expression":"1 + 1"}"#);
@@ -47,8 +47,7 @@ fn test_media_elements_dom_parsing() {
         </html>
     "#;
 
-    let mut parser = HTMLParser::new();
-    let root = parser.parse(html);
+    let root = HTMLParser::new(html).parse();
 
     let vid = find_element_by_id(&root, "player");
     assert!(vid.is_some(), "Video element should be parsed");

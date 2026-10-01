@@ -43,7 +43,7 @@ fn test_wikipedia_infobox_and_article_structure() {
     // 1. Verify heading lookup
     let heading = query_selector(&dom, "#firstHeading");
     assert!(heading.is_some());
-    assert_eq!(heading.unwrap().borrow().text_content.as_deref().unwrap().trim(), "Assam");
+    assert_eq!(heading.unwrap().borrow().text_content().as_deref().unwrap().trim(), "Assam");
 
     // 2. Verify table infobox lookup
     let infobox = query_selector(&dom, "table.infobox");
@@ -120,7 +120,7 @@ fn test_stackoverflow_question_and_answer_layout() {
     
     let vote_count = query_selector(&dom, ".js-vote-count");
     assert!(vote_count.is_some());
-    assert_eq!(vote_count.unwrap().borrow().text_content.as_deref().unwrap().trim(), "42");
+    assert_eq!(vote_count.unwrap().borrow().text_content().as_deref().unwrap().trim(), "42");
 
     let question_link = query_selector(&dom, "h1 a.question-hyperlink");
     assert!(question_link.is_some());

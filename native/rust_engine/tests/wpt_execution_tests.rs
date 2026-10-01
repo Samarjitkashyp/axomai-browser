@@ -12,7 +12,7 @@ fn test_w3c_wpt_automated_execution_matrix() {
     let html_fixture = "<!DOCTYPE html><html><head><title>WPT DOM</title></head><body><div id='test' data-wpt='pass'><span>Content</span></div></body></html>";
     let dom = HTMLParser::new(html_fixture).parse();
     let node = query_selector(&dom, "#test span");
-    let dom_pass = node.is_some() && node.unwrap().borrow().text_content.as_deref() == Some("Content");
+    let dom_pass = node.is_some() && node.unwrap().borrow().text_content().as_deref() == Some("Content");
 
     runner.record_test(
         "/html/dom/documents/dom-tree-001.html",
@@ -28,7 +28,7 @@ fn test_w3c_wpt_automated_execution_matrix() {
     // 2. W3C CSS Selectors Level 4 Specificity Assertion
     let css_fixture = "#header .nav > li:first-child { color: red; }";
     let rules = CSSParser::new(css_fixture).parse();
-    let css_pass = rules.len() == 1 && rules[0].selectors.len() == 1;
+    let css_pass = rules.len() == 1 && rules[0].selector.len() == 1;
 
     runner.record_test(
         "/css/selectors/selectors-4-specificity-001.html",

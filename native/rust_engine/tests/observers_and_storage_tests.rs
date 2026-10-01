@@ -18,8 +18,7 @@ fn test_select_and_option_dom_parsing() {
         </html>
     "#;
 
-    let mut parser = HTMLParser::new();
-    let root = parser.parse(html);
+    let root = HTMLParser::new(html).parse();
 
     let select_node = find_element_by_id(&root, "country-select");
     assert!(select_node.is_some(), "Select element should be found by ID");
@@ -28,8 +27,8 @@ fn test_select_and_option_dom_parsing() {
     let sn_borrow = sn.borrow();
     assert_eq!(sn_borrow.children.len(), 3, "Select should have 3 option children");
 
-    if let NodeType::Element { ref tag_name, ref attributes, .. } = sn_borrow.node_type {
-        assert_eq!(tag_name, "select");
+    if let NodeType::Element { ref tag, ref attributes, .. } = sn_borrow.node_type {
+        assert_eq!(tag, "select");
         assert_eq!(attributes.get("name").map(|s| s.as_str()), Some("country"));
     } else {
         panic!("Expected select to be an element");
@@ -48,8 +47,7 @@ fn test_textarea_dom_and_layout() {
         </html>
     "#;
 
-    let mut parser = HTMLParser::new();
-    let root = parser.parse(html);
+    let root = HTMLParser::new(html).parse();
 
     let ta_node = find_element_by_id(&root, "comments");
     assert!(ta_node.is_some());
@@ -72,9 +70,9 @@ fn test_form_inputs_css_pseudoclasses() {
         }
     "#;
 
-    let mut parser = CSSParser::new(css);
-    let stylesheet = parser.parse();
-    assert_eq!(stylesheet.rules.len(), 3);
+    let parser = CSSParser::new(css);
+    let rules = parser.parse();
+    assert_eq!(rules.len(), 3);
 }
 
 #[test]
@@ -100,8 +98,7 @@ fn test_nested_form_table_structure() {
         </html>
     "#;
 
-    let mut parser = HTMLParser::new();
-    let root = parser.parse(html);
+    let root = HTMLParser::new(html).parse();
     let form_node = find_element_by_id(&root, "order-form");
     assert!(form_node.is_some());
 

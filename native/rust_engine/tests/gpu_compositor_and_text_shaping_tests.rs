@@ -11,7 +11,7 @@ fn test_layer_tree_and_damage_regions() {
     root_box.height = 768.0;
 
     let mut transformed_child = LayoutBox::new(BoxType::Block, HashMap::new(), String::new());
-    transformed_child.transform = Some("rotate(45deg)".to_string());
+    transformed_child.transform = "rotate(45deg)".to_string();
     transformed_child.x = 50.0;
     transformed_child.y = 50.0;
     transformed_child.width = 200.0;
