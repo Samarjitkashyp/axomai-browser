@@ -1,15 +1,13 @@
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
 use axomai_engine::WgpuRenderer;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tao::{
     dpi::{LogicalSize, PhysicalSize},
-    event::{Event, WindowEvent},
+    event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
-use wry::WebViewBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle subprocess worker mode: `axomai_browser --subprocess <role>`
@@ -22,155 +20,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Initialize Axomai Core Rust Engine
     let engine = Arc::new(Mutex::new(AxomaiEngine::new()));
 
-    // 2. Create two windows: one for WebView UI shell, one for native GPU rendering
+    // 2. Create single native window — no WebView dependency
     let event_loop = EventLoop::new();
 
-    // Primary UI window (WebView shell for browser chrome)
-    let ui_window = WindowBuilder::new()
+    let window = WindowBuilder::new()
         .with_title("Axomai Browser")
         .with_inner_size(LogicalSize::new(1380.0, 860.0))
-        .with_min_inner_size(LogicalSize::new(1024.0, 680.0))
+        .with_min_inner_size(LogicalSize::new(800.0, 500.0))
         .build(&event_loop)?;
 
-    // GPU render window (native wgpu surface for page content)
-    let gpu_window = WindowBuilder::new()
-        .with_title("Axomai GPU Compositor")
-        .with_inner_size(LogicalSize::new(1380.0, 860.0))
-        .with_visible(true)
-        .build(&event_loop)?;
-
-    let gpu_window_id = gpu_window.id();
-
-    // 3. Initialize real wgpu GPU renderer on the GPU window
+    // 3. Initialize real wgpu GPU renderer on the native window
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
     });
 
-    let gpu_size: PhysicalSize<u32> = gpu_window.inner_size();
+    let size: PhysicalSize<u32> = window.inner_size();
 
-    // Safety: gpu_window lives for 'static in the event loop
     let surface = unsafe {
         instance.create_surface_unsafe(
-            wgpu::SurfaceTargetUnsafe::from_window(&gpu_window)
+            wgpu::SurfaceTargetUnsafe::from_window(&window)
                 .expect("Failed to create surface target"),
         )
     }?;
 
-    let mut gpu_renderer = WgpuRenderer::new(&instance, surface, gpu_size.width, gpu_size.height);
+    let mut gpu_renderer = WgpuRenderer::new(&instance, surface, size.width, size.height);
     println!(
-        "[Axomai] GPU renderer initialized: {}x{}, {} frames presented",
-        gpu_size.width, gpu_size.height, gpu_renderer.presented_frames
+        "[Axomai] GPU renderer initialized: {}x{} — fully native, no WebView",
+        size.width, size.height
     );
 
-    // 4. Resolve path to Axomai Browser UI bundle
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let mut ui_path = current_dir.join("ui").join("index.html");
-    if !ui_path.exists() {
-        ui_path = current_dir.join("..").join("ui").join("index.html");
+    // 4. Load initial page
+    if let Ok(mut eng) = engine.lock() {
+        let _ = eng.load_html(
+            "<html><body style='margin:0;padding:40px;font-family:system-ui;background:#f8fafc'>\
+             <h1 style='color:#0f172a;font-size:32px'>Axomai Browser</h1>\
+             <p style='color:#475569;font-size:18px'>Native GPU-rendered browser engine. No WebView.</p>\
+             <p style='color:#64748b;font-size:14px'>Type a URL in the address bar to navigate.</p>\
+             </body></html>",
+            size.width as f32,
+            size.height as f32,
+        );
     }
-    let url = format!(
-        "file:///{}",
-        ui_path.canonicalize()?.to_string_lossy().replace('\\', "/")
-    );
 
-    // 5. Connect UI IPC to Native Rust Engine Pipeline
-    let engine_ipc = Arc::clone(&engine);
-    let builder = WebViewBuilder::new()
-        .with_url(&url)
-        .with_devtools(true)
-        .with_ipc_handler(move |msg| {
-            if let Ok(mut eng) = engine_ipc.lock() {
-                if msg.starts_with("navigate:") {
-                    let nav_url = &msg[9..];
-                    let _ = eng.load_url(nav_url, 1380.0, 860.0);
-                } else if msg.starts_with("pointer:") {
-                    let parts: Vec<&str> = msg[8..].split(',').collect();
-                    if parts.len() == 4 {
-                        let action = parts[0];
-                        let btn = parts[1].parse::<i32>().unwrap_or(0);
-                        if let (Ok(x), Ok(y)) = (parts[2].parse::<f32>(), parts[3].parse::<f32>()) {
-                            match action {
-                                "down" => {
-                                    if let Some(nav_url) = eng.handle_pointer_down(x, y, btn) {
-                                        let _ = eng.load_url(&nav_url, 1380.0, 860.0);
-                                    }
-                                }
-                                "move" => { let _ = eng.handle_pointer_move(x, y); }
-                                "up" => { let _ = eng.handle_pointer_up(x, y, btn); }
-                                _ => {}
-                            }
-                        }
-                    }
-                } else if msg.starts_with("click:") {
-                    let coords = &msg[6..];
-                    if let Some(comma) = coords.find(',') {
-                        if let (Ok(x), Ok(y)) = (coords[..comma].parse::<f32>(), coords[comma + 1..].parse::<f32>()) {
-                            if let Some(nav_url) = eng.handle_click(x, y, 0.0) {
-                                let _ = eng.load_url(&nav_url, 1380.0, 860.0);
-                            }
-                        }
-                    }
-                } else if msg.starts_with("key:") {
-                    let payload = &msg[4..];
-                    let parts: Vec<&str> = payload.split(',').collect();
-                    if parts.len() >= 9 {
-                        let ev_type = parts[0];
-                        let key_str = parts[1];
-                        let code_str = parts[2];
-                        let key_code = parts[3].parse::<u32>().unwrap_or(0);
-                        let ctrl = parts[4] == "1";
-                        let alt = parts[5] == "1";
-                        let shift = parts[6] == "1";
-                        let meta = parts[7] == "1";
-                        let repeat = parts[8] == "1";
-                        if let Some(nav_url) = eng.handle_key_event(
-                            ev_type, key_str, code_str, key_code, ctrl, alt, shift, meta, repeat,
-                        ) {
-                            let _ = eng.load_url(&nav_url, 1380.0, 860.0);
-                        }
-                    } else if let Some(nav_url) = eng.handle_key(payload) {
-                        let _ = eng.load_url(&nav_url, 1380.0, 860.0);
-                    }
-                } else if msg.starts_with("wheel:") {
-                    let parts: Vec<&str> = msg[6..].split(',').collect();
-                    if parts.len() == 4 {
-                        if let (Ok(dy), Ok(dx), Ok(cx), Ok(cy)) = (
-                            parts[0].parse::<f32>(), parts[1].parse::<f32>(),
-                            parts[2].parse::<f32>(), parts[3].parse::<f32>(),
-                        ) {
-                            let _ = eng.handle_scroll_at(cx, cy, dx, dy, 1380.0, 860.0);
-                        }
-                    } else if let Ok(dy) = msg[6..].parse::<f32>() {
-                        let _ = eng.handle_scroll(dy);
-                    }
-                } else if msg.starts_with("set_theme:") {
-                    let preset_name = &msg[10..];
-                    let preset = match preset_name {
-                        "kaziranga" => axomai_engine::HeritagePreset::KazirangaGreen,
-                        "bihu" => axomai_engine::HeritagePreset::BihuGold,
-                        "muga" => axomai_engine::HeritagePreset::MugaSilk,
-                        "majuli" => axomai_engine::HeritagePreset::MajuliSunset,
-                        "cyberpunk" => axomai_engine::HeritagePreset::CyberpunkNeon,
-                        _ => axomai_engine::HeritagePreset::BrahmaputraBlue,
-                    };
-                    let _css = eng.set_theme_preset(preset);
-                } else if msg == "toggle_reader" {
-                    let _ = eng.extract_reader_mode();
-                } else if msg == "back" {
-                    let _ = eng.go_back(1380.0, 860.0);
-                } else if msg == "forward" {
-                    let _ = eng.go_forward(1380.0, 860.0);
-                } else if msg == "reload" {
-                    let _ = eng.reload(1380.0, 860.0);
-                }
-            }
-        });
+    let mut mouse_x: f32 = 0.0;
+    let mut mouse_y: f32 = 0.0;
 
-    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-    let webview = builder.build(&ui_window)?;
-
-    // 6. Run Event Loop — tick engine, render via real wgpu, and sync UI shell
+    // 5. Run Event Loop — all rendering via real wgpu, no WebView
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
             std::time::Instant::now() + std::time::Duration::from_millis(16),
@@ -185,31 +81,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::WindowEvent {
                 event: WindowEvent::Resized(new_size),
-                window_id,
-            } if window_id == gpu_window_id => {
-                gpu_renderer.resize(new_size.width, new_size.height);
+                ..
+            } => {
+                if new_size.width > 0 && new_size.height > 0 {
+                    gpu_renderer.resize(new_size.width, new_size.height);
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                mouse_x = position.x as f32;
+                mouse_y = position.y as f32;
+                if let Ok(mut eng) = engine.lock() {
+                    let _ = eng.handle_pointer_move(mouse_x, mouse_y);
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::MouseInput { state, button, .. },
+                ..
+            } => {
+                let btn = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 2,
+                    MouseButton::Middle => 1,
+                    _ => 0,
+                };
+                if let Ok(mut eng) = engine.lock() {
+                    match state {
+                        ElementState::Pressed => {
+                            if let Some(nav_url) = eng.handle_pointer_down(mouse_x, mouse_y, btn) {
+                                let w = gpu_renderer.surface_config.width as f32;
+                                let h = gpu_renderer.surface_config.height as f32;
+                                let _ = eng.load_url(&nav_url, w, h);
+                            }
+                        }
+                        ElementState::Released => {
+                            let _ = eng.handle_pointer_up(mouse_x, mouse_y, btn);
+                        }
+                    }
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::MouseWheel { delta, .. },
+                ..
+            } => {
+                let dy = match delta {
+                    tao::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
+                    tao::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                };
+                if let Ok(mut eng) = engine.lock() {
+                    let w = gpu_renderer.surface_config.width as f32;
+                    let h = gpu_renderer.surface_config.height as f32;
+                    let _ = eng.handle_scroll_at(mouse_x, mouse_y, 0.0, dy, w, h);
+                }
             }
             Event::MainEventsCleared => {
                 if let Ok(mut eng) = engine.lock() {
-                    let updated = eng.process_event_loop(1380.0, 860.0);
+                    let w = gpu_renderer.surface_config.width as f32;
+                    let h = gpu_renderer.surface_config.height as f32;
+                    let updated = eng.process_event_loop(w, h);
+
                     if updated {
-                        // Generate GPU quads from the display list
-                        let mut compositor = NativeGpuCompositor::new(1380, 860);
+                        let mut compositor = NativeGpuCompositor::new(w as u32, h as u32);
                         let quads = compositor.extract_gpu_quads(&eng.display_list);
 
-                        // Real GPU render pass via wgpu
                         match gpu_renderer.render_frame(&quads) {
                             Ok(frame_idx) => {
                                 if frame_idx % 300 == 1 {
                                     println!(
-                                        "[Axomai GPU] Frame #{} presented via hardware GPU",
-                                        frame_idx
+                                        "[Axomai GPU] Frame #{} — {} quads rendered via hardware GPU",
+                                        frame_idx,
+                                        quads.len()
                                     );
                                 }
                             }
                             Err(wgpu::SurfaceError::Lost) => {
-                                let size = gpu_renderer.surface_config.clone();
-                                gpu_renderer.resize(size.width, size.height);
+                                let cfg = &gpu_renderer.surface_config;
+                                gpu_renderer.resize(cfg.width, cfg.height);
                             }
                             Err(wgpu::SurfaceError::OutOfMemory) => {
                                 *control_flow = ControlFlow::Exit;
@@ -219,23 +168,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
 
-                        // Also sync display list to WebView UI shell for the browser chrome overlay
-                        let json = eng.get_display_list_json();
-                        let script = format!(
-                            "if (window.__axomai_render_display_list) {{ window.__axomai_render_display_list({}); }}",
-                            json
-                        );
-                        let _ = webview.evaluate_script(&script);
-
-                        let url_str = eng.current_url.as_ref().map(|u| u.as_string()).unwrap_or_default();
-                        let title_str = eng.current_title.replace('\\', "\\\\").replace('"', "\\\"");
-                        let can_back = eng.can_go_back();
-                        let can_fwd = eng.can_go_forward();
-                        let sync_script = format!(
-                            "if (window.__axomai_sync_navigation) {{ window.__axomai_sync_navigation(\"{}\", \"{}\", {}, {}); }}",
-                            url_str, title_str, can_back, can_fwd
-                        );
-                        let _ = webview.evaluate_script(&sync_script);
+                        window.set_title(&format!(
+                            "Axomai Browser — {}",
+                            eng.current_title
+                        ));
                     }
                 }
             }
