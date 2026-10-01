@@ -23,6 +23,8 @@ pub struct GpuQuad {
     pub clip_rect: Option<[f32; 4]>,
     pub opacity: f32,
     pub is_textured: bool,
+    pub rect_bounds: Option<[f32; 4]>,
+    pub corner_radius: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -173,7 +175,7 @@ impl GpuSwapchainPresenter {
 
 // ─── Real wgpu GPU Renderer (behind wgpu-backend feature) ───
 
-/// Vertex layout: position(2) + uv(2) + color(4) + mode(1) = 9 floats = 36 bytes
+/// Vertex layout: position(2) + uv(2) + color(4) + mode(1) + rect_bounds(4) + corner_radius(1) = 14 floats = 56 bytes
 #[cfg(feature = "wgpu-backend")]
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -182,6 +184,8 @@ pub struct WgpuVertex {
     pub uv: [f32; 2],
     pub color: [f32; 4],
     pub mode: f32,
+    pub rect_bounds: [f32; 4],
+    pub corner_radius: f32,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -211,6 +215,16 @@ impl WgpuVertex {
                     shader_location: 3,
                     format: wgpu::VertexFormat::Float32,
                 },
+                wgpu::VertexAttribute {
+                    offset: 36,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: 52,
+                    shader_location: 5,
+                    format: wgpu::VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -230,6 +244,8 @@ struct VertexInput {
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
     @location(3) mode: f32,
+    @location(4) rect_bounds: vec4<f32>,
+    @location(5) corner_radius: f32,
 };
 
 struct VertexOutput {
@@ -237,6 +253,9 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) mode: f32,
+    @location(3) pixel_pos: vec2<f32>,
+    @location(4) rect_bounds: vec4<f32>,
+    @location(5) corner_radius: f32,
 };
 
 @vertex
@@ -246,14 +265,37 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.uv = input.uv;
     output.color = input.color;
     output.mode = input.mode;
+    output.pixel_pos = input.position;
+    output.rect_bounds = input.rect_bounds;
+    output.corner_radius = input.corner_radius;
     return output;
 }
 
+fn rounded_rect_sdf(pixel: vec2<f32>, bounds: vec4<f32>, radius: f32) -> f32 {
+    let center = vec2<f32>((bounds.x + bounds.z) * 0.5, (bounds.y + bounds.w) * 0.5);
+    let half_size = vec2<f32>((bounds.z - bounds.x) * 0.5, (bounds.w - bounds.y) * 0.5);
+    let r = min(radius, min(half_size.x, half_size.y));
+    let d = abs(pixel - center) - half_size + vec2<f32>(r, r);
+    return length(max(d, vec2<f32>(0.0, 0.0))) + min(max(d.x, d.y), 0.0) - r;
+}
+
 @fragment
-fn fs_main(@location(0) uv: vec2<f32>, @location(1) color: vec4<f32>, @location(2) mode: f32) -> @location(0) vec4<f32> {
+fn fs_main(
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) mode: f32,
+    @location(3) pixel_pos: vec2<f32>,
+    @location(4) rect_bounds: vec4<f32>,
+    @location(5) corner_radius: f32,
+) -> @location(0) vec4<f32> {
     if (mode > 0.5) {
         let alpha = textureSample(glyph_texture, glyph_sampler, uv).r;
         return vec4<f32>(color.rgb, color.a * alpha);
+    }
+    if (corner_radius > 0.0) {
+        let dist = rounded_rect_sdf(pixel_pos, rect_bounds, corner_radius);
+        let aa = 1.0 - smoothstep(-1.0, 1.0, dist);
+        return vec4<f32>(color.rgb, color.a * aa);
     }
     return color;
 }
@@ -549,12 +591,16 @@ impl WgpuRenderer {
 
         for quad in quads {
             let mode = if quad.is_textured { 1.0f32 } else { 0.0f32 };
+            let rb = quad.rect_bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
+            let cr = quad.corner_radius;
             for v in &quad.vertices {
                 vertices.push(WgpuVertex {
                     position: v.position,
                     uv: v.uv,
                     color: v.color,
                     mode,
+                    rect_bounds: rb,
+                    corner_radius: cr,
                 });
             }
             for idx in &quad.indices {
@@ -734,6 +780,25 @@ impl NativeGpuCompositor {
             clip_rect: None,
             opacity: 1.0,
             is_textured: false,
+            rect_bounds: None,
+            corner_radius: 0.0,
+        }
+    }
+
+    pub fn rounded_quad(x: f32, y: f32, w: f32, h: f32, radius: f32, color: [f32; 4]) -> GpuQuad {
+        GpuQuad {
+            vertices: [
+                GpuVertex { position: [x, y], uv: [0.0, 0.0], color },
+                GpuVertex { position: [x + w, y], uv: [1.0, 0.0], color },
+                GpuVertex { position: [x + w, y + h], uv: [1.0, 1.0], color },
+                GpuVertex { position: [x, y + h], uv: [0.0, 1.0], color },
+            ],
+            indices: [0, 1, 2, 0, 2, 3],
+            clip_rect: None,
+            opacity: 1.0,
+            is_textured: false,
+            rect_bounds: Some([x, y, x + w, y + h]),
+            corner_radius: radius,
         }
     }
 
@@ -749,6 +814,8 @@ impl NativeGpuCompositor {
             clip_rect: None,
             opacity: 1.0,
             is_textured: true,
+            rect_bounds: None,
+            corner_radius: 0.0,
         }
     }
 
@@ -783,6 +850,8 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        rect_bounds: None,
+                        corner_radius: 0.0,
                     };
                     self.quads.push(quad);
                 }
@@ -812,6 +881,8 @@ impl NativeGpuCompositor {
                                 clip_rect: None,
                                 opacity: 1.0,
                                 is_textured: true,
+                                rect_bounds: None,
+                                corner_radius: 0.0,
                             };
                             self.quads.push(quad);
                         }
@@ -834,6 +905,8 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        rect_bounds: None,
+                        corner_radius: 0.0,
                     };
                     self.quads.push(quad);
                 }
@@ -852,6 +925,8 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        rect_bounds: None,
+                        corner_radius: 0.0,
                     };
                     self.quads.push(quad);
                 }
