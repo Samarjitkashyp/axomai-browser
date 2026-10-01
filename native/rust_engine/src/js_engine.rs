@@ -4153,8 +4153,106 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
             this.name = String(name);
             this.lastModified = options && options.lastModified ? options.lastModified : Date.now();
         }
-        File.prototype = Object.create(Blob.prototype);
-        window.File = File;
+        // WebExtensions Manifest v3 Foundation
+        const _extStorage = new Map();
+        const chromeExt = {
+            runtime: {
+                id: 'axomai-extension-core',
+                sendMessage: function(msg, callback) {
+                    if (typeof callback === 'function') callback({ status: 'ok', received: msg });
+                    return Promise.resolve({ status: 'ok', received: msg });
+                },
+                getURL: function(path) {
+                    return 'chrome-extension://axomai-extension-core/' + String(path).replace(/^\//, '');
+                },
+                onMessage: {
+                    addListener: function(fn) {},
+                    removeListener: function(fn) {}
+                }
+            },
+            storage: {
+                local: {
+                    get: function(keys, callback) {
+                        const result = {};
+                        if (typeof keys === 'string') {
+                            result[keys] = _extStorage.get(keys);
+                        } else if (Array.isArray(keys)) {
+                            for (const k of keys) result[k] = _extStorage.get(k);
+                        }
+                        if (typeof callback === 'function') callback(result);
+                        return Promise.resolve(result);
+                    },
+                    set: function(items, callback) {
+                        for (const k in items) _extStorage.set(k, items[k]);
+                        if (typeof callback === 'function') callback();
+                        return Promise.resolve();
+                    },
+                    remove: function(keys, callback) {
+                        const arr = Array.isArray(keys) ? keys : [keys];
+                        for (const k of arr) _extStorage.delete(k);
+                        if (typeof callback === 'function') callback();
+                        return Promise.resolve();
+                    },
+                    clear: function(callback) {
+                        _extStorage.clear();
+                        if (typeof callback === 'function') callback();
+                        return Promise.resolve();
+                    }
+                }
+            },
+            tabs: {
+                query: function(queryInfo, callback) {
+                    const tabs = [{ id: 1, url: window.location ? window.location.href : '', active: true, title: document.title || '' }];
+                    if (typeof callback === 'function') callback(tabs);
+                    return Promise.resolve(tabs);
+                },
+                create: function(createProperties, callback) {
+                    const newTab = { id: Date.now(), url: createProperties.url || 'about:blank', active: true };
+                    if (typeof callback === 'function') callback(newTab);
+                    return Promise.resolve(newTab);
+                }
+            }
+        };
+
+        window.chrome = chromeExt;
+        window.browser = chromeExt;
+
+        // HTMLMediaElement (Video / Audio) Foundation
+        const hookMediaElement = function(el) {
+            el.paused = true;
+            el.currentTime = 0;
+            el.duration = 0;
+            el.volume = 1.0;
+            el.muted = false;
+
+            el.play = function() {
+                this.paused = false;
+                const evt = new Event('play', { bubbles: false, cancelable: false });
+                this.dispatchEvent(evt);
+                return Promise.resolve();
+            };
+
+            el.pause = function() {
+                this.paused = true;
+                const evt = new Event('pause', { bubbles: false, cancelable: false });
+                this.dispatchEvent(evt);
+            };
+
+            el.load = function() {};
+        };
+
+        // Attach Media hooks in __setupElementProperties
+        const prevSetup = window.__setupElementProperties;
+        window.__setupElementProperties = function(el) {
+            const res = prevSetup(el);
+            if (res && res.tagName) {
+                const tag = res.tagName.toLowerCase();
+                if (tag === 'video' || tag === 'audio') {
+                    hookMediaElement(res);
+                }
+            }
+            return res;
+        };
 
         window.FormData = FormData;
 

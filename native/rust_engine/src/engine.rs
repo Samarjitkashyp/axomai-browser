@@ -1366,5 +1366,118 @@ fn apply_node_animations(
     }
 }
 
+// ============================================================================
+// MULTI-PROCESS SANDBOX ARCHITECTURE & IPC BUS
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessKind {
+    BrowserMain,
+    RendererSandbox,
+    NetworkProcess,
+    GpuCompositor,
+}
+
+#[derive(Debug, Clone)]
+pub struct SandboxPolicy {
+    pub disallow_disk_io: bool,
+    pub disallow_raw_sockets: bool,
+    pub isolated_origin: Option<String>,
+    pub max_memory_mb: usize,
+}
+
+impl Default for SandboxPolicy {
+    fn default() -> Self {
+        SandboxPolicy {
+            disallow_disk_io: true,
+            disallow_raw_sockets: true,
+            isolated_origin: None,
+            max_memory_mb: 512,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum IpcMessage {
+    Navigate { url: String },
+    RenderFrame { width: f32, height: f32 },
+    EvalScript { script: String },
+    CdpCommand { id: u64, method: String, params: String },
+    CdpResponse { id: u64, result: String, error: Option<String> },
+}
+
+pub struct IpcBus {
+    pub process_kind: ProcessKind,
+    pub sandbox_policy: SandboxPolicy,
+    message_queue: Vec<IpcMessage>,
+}
+
+impl IpcBus {
+    pub fn new(kind: ProcessKind, policy: SandboxPolicy) -> Self {
+        IpcBus {
+            process_kind: kind,
+            sandbox_policy: policy,
+            message_queue: Vec::new(),
+        }
+    }
+
+    pub fn send(&mut self, msg: IpcMessage) {
+        self.message_queue.push(msg);
+    }
+
+    pub fn drain_messages(&mut self) -> Vec<IpcMessage> {
+        self.message_queue.drain(..).collect()
+    }
+}
+
+// ============================================================================
+// CHROME DEVTOOLS PROTOCOL (CDP) INSPECTOR ENGINE
+// ============================================================================
+
+pub struct CdpInspector;
+
+impl CdpInspector {
+    pub fn handle_command(engine: &mut AxomaiEngine, id: u64, method: &str, params: &str) -> String {
+        match method {
+            "Page.navigate" => {
+                let target_url = params.trim().trim_matches('"');
+                engine.load_url(target_url);
+                format!(r#"{{"id":{},"result":{{"frameId":"main","loaderId":"1"}}}}"#, id)
+            }
+            "DOM.getDocument" => {
+                let title = &engine.current_title;
+                let url = engine.current_url.as_ref().map(|u| u.as_string()).unwrap_or_default();
+                format!(
+                    r#"{{"id":{},"result":{{"root":{{"nodeId":1,"nodeType":9,"nodeName":"#document","documentURL":"{}","title":"{}"}}}}}}"#,
+                    id, url, title
+                )
+            }
+            "DOM.querySelector" => {
+                let sel = params.trim().trim_matches('"');
+                if let Some(ref root) = engine.dom_root {
+                    if let Some(matched) = crate::html_parser::query_selector(root, sel) {
+                        let node_id = matched.borrow().node_id;
+                        return format!(r#"{{"id":{},"result":{{"nodeId":{}}}}}"#, id, node_id);
+                    }
+                }
+                format!(r#"{{"id":{},"result":{{"nodeId":0}}}}"#, id)
+            }
+            "Runtime.evaluate" => {
+                let script = params.trim().trim_matches('"');
+                engine.js_engine.execute(script);
+                format!(r#"{{"id":{},"result":{{"result":{{"type":"string","value":"evaluated"}}}}}}"#, id)
+            }
+            "Network.getResponseBody" => {
+                let title = &engine.current_title;
+                format!(r#"{{"id":{},"result":{{"body":"<html><title>{}</title></html>","base64Encoded":false}}}}"#, id, title)
+            }
+            _ => {
+                format!(r#"{{"id":{},"error":{{"code":-32601,"message":"Method not found"}}}}"#, id)
+            }
+        }
+    }
+}
+
+
 
 
