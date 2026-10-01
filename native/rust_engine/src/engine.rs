@@ -88,6 +88,10 @@ pub struct AxomaiEngine {
     pub drag_container_pos: Option<(f32, f32)>,
     pub adblock_engine: crate::adblock_engine::AdBlockEngine,
     pub theme_engine: crate::theme_engine::ThemeEngine,
+    pub ai_assistant: crate::ai_assistant::AiAssistant,
+    pub reader_mode_active: bool,
+    pub reader_article: Option<crate::reader_mode::ReaderArticle>,
+    pub page_summary: Option<String>,
 }
 
 impl AxomaiEngine {
@@ -140,6 +144,10 @@ impl AxomaiEngine {
             drag_container_pos: None,
             adblock_engine: crate::adblock_engine::AdBlockEngine::new(),
             theme_engine: crate::theme_engine::ThemeEngine::new(),
+            ai_assistant: crate::ai_assistant::AiAssistant::new(),
+            reader_mode_active: false,
+            reader_article: None,
+            page_summary: None,
         }
     }
 
@@ -1244,6 +1252,51 @@ impl AxomaiEngine {
         self.dom_root.as_ref().and_then(|dom| {
             crate::reader_mode::ReaderModeEngine::parse(dom, &self.current_title)
         })
+    }
+
+    pub fn toggle_reader_mode(&mut self, viewport_w: f32, viewport_h: f32) {
+        if self.reader_mode_active {
+            self.reader_mode_active = false;
+            self.reader_article = None;
+            if let Some(url) = self.current_url.as_ref().map(|u| u.as_string()) {
+                let _ = self.load_url(&url, viewport_w, viewport_h);
+            }
+        } else if let Some(article) = self.extract_reader_mode() {
+            self.reader_mode_active = true;
+            let reader_html = format!(
+                "<html><body style='margin:0 auto;max-width:680px;padding:40px 20px;font-family:Georgia,serif;background:#fefefe;color:#1a1a1a;line-height:1.8'>\
+                 <h1 style='font-size:28px;margin-bottom:8px'>{}</h1>\
+                 <p style='color:#666;font-size:14px;margin-bottom:24px'>{} min read</p>\
+                 {}</body></html>",
+                article.title, article.estimated_reading_time_mins, article.content_html
+            );
+            self.reader_article = Some(article);
+            let _ = self.load_html(&reader_html, viewport_w, viewport_h);
+        }
+    }
+
+    pub fn summarize_page(&mut self) -> String {
+        if let Some(ref article) = self.reader_article {
+            self.ai_assistant.summarize(&article.text_content, 3)
+        } else if let Some(ref dom) = self.dom_root {
+            if let Some(article) = crate::reader_mode::ReaderModeEngine::parse(dom, &self.current_title) {
+                let summary = self.ai_assistant.summarize(&article.text_content, 3);
+                self.page_summary = Some(summary.clone());
+                summary
+            } else {
+                "No readable content found to summarize.".to_string()
+            }
+        } else {
+            "No page loaded.".to_string()
+        }
+    }
+
+    pub fn extract_keywords(&self) -> Vec<String> {
+        if let Some(ref article) = self.reader_article {
+            self.ai_assistant.extract_keywords(&article.text_content)
+        } else {
+            Vec::new()
+        }
     }
 }
 
