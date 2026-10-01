@@ -1,3 +1,5 @@
+pub mod credentials_engine;
+pub mod crypto_engine;
 pub mod css_parser;
 pub mod engine;
 pub mod ffi;
@@ -8,9 +10,14 @@ pub mod media_decoder;
 pub mod network;
 pub mod painter;
 pub mod wasm_engine;
+pub mod web_audio;
 pub mod webgpu_engine;
 pub mod webrtc_engine;
+pub mod worker_engine;
+pub mod wpt_runner;
 
+pub use credentials_engine::{CredentialsManager, PublicKeyCredential};
+pub use crypto_engine::{CryptoDigestAlgorithm, CryptoEngine, CryptoKey};
 pub use css_parser::CSSParser;
 pub use engine::AxomaiEngine;
 pub use ffi::*;
@@ -18,8 +25,11 @@ pub use html_parser::HTMLParser;
 pub use js_engine::V8JSEngine;
 pub use media_decoder::{MediaDemuxer, MediaPlaybackPipeline};
 pub use wasm_engine::{WasmInstance, WasmModule, WasmVal};
+pub use web_audio::{AudioContext, AudioNode, OscillatorType};
 pub use webgpu_engine::{GpuCanvasContext, GpuDevice, WebGl2Context};
 pub use webrtc_engine::{RtcDataChannel, RtcPeerConnection};
+pub use worker_engine::{DedicatedWorker, OffscreenCanvas, WorkerThreadPool};
+pub use wpt_runner::{WptReport, WptRunner, WptStatus};
 
 #[no_mangle]
 pub extern "C" fn rust_parse_css_count(css_text: *const std::os::raw::c_char) -> usize {

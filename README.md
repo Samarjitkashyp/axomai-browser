@@ -1,8 +1,8 @@
-# 🚀 Axomai Browser `v1.1.0`
+# 🚀 Axomai Browser `v1.2.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
@@ -18,8 +18,13 @@ A modern, high-performance web browser designed with an independent Rust engine 
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
 - Google V8 Runtime (DOM, Web APIs, Workers, IndexedDB, WebSocket)
+- Web Cryptography API (SHA-256/512, AES-GCM, CSPRNG)
+- Web Audio API (AudioContext, Oscillator, Filter, Gain nodes)
+- Multithreaded Web Workers & OffscreenCanvas
+- WebAuthn / FIDO2 Passkeys Credential Engine
 - WebAssembly (WASM) Bytecode Engine (LEB128 decoder, stack VM)
 - WebRTC Subsystem (RTCPeerConnection, RTCDataChannel, SDP exchange)
+- W3C Web Platform Tests (WPT) Automated Test Harness Runner
 - Chrome DevTools Protocol (CDP) Server
 - WebExtensions Runtime (chrome.runtime, chrome.storage, chrome.tabs)
             │
@@ -37,15 +42,20 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.1.0`)
+## 📊 Subsystem Status Overview (`v1.2.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
-| **WebAssembly (WASM) Engine** | 🟢 **NEW** | Binary parser (`\0asm\1`), LEB128 decoder, linear memory pages, stack bytecode VM (`i32.add/sub/mul/div`, `local.get/set`, `call`) |
-| **WebGPU 3D Engine** | 🟢 **NEW** | `GpuDevice`, `GpuBuffer`, `GpuShaderModule` (WGSL), `GpuRenderPipeline`, `GpuCommandEncoder` |
-| **WebGL 2.0 State Machine** | 🟢 **NEW** | `WebGl2Context`, VAO, shader compile, `bindBuffer`, `drawArrays`, `drawElements` |
-| **WebRTC Peer-to-Peer** | 🟢 **NEW** | `RTCPeerConnection`, `RTCDataChannel`, ICE candidates, SDP offer/answer exchange state machine |
-| **Media Demuxer & Codecs** | 🟢 **NEW** | Container demuxing (MP4 ISO-BMFF / WebM EBML), AV1/VP9/H.264/AAC/Opus pipeline, playback lifecycle |
+| **Web Cryptography API** | 🟢 **NEW** | `window.crypto.subtle` (SHA-1/256/384/512, AES-GCM cipher, CSPRNG `getRandomValues`, HMAC) |
+| **Web Audio API Graph** | 🟢 **NEW** | `AudioContext`, `GainNode`, `OscillatorNode`, `BiquadFilterNode`, `AnalyserNode`, node connection routing |
+| **Web Workers & OffscreenCanvas**| 🟢 **NEW** | `WorkerThreadPool`, background thread isolate dispatch, transferable buffers, `OffscreenCanvas` rendering |
+| **WebAuthn & Passkeys** | 🟢 **NEW** | `navigator.credentials` (FIDO2 / WebAuthn Level 3 public key attestation & assertion) |
+| **W3C WPT Test Runner** | 🟢 **NEW** | `WptRunner` automated suite execution, assertion validation, compliance score reporting |
+| **WebAssembly (WASM) Engine** | 🟢 | Binary parser (`\0asm\1`), LEB128 decoder, linear memory pages, stack bytecode VM |
+| **WebGPU 3D Engine** | 🟢 | `GpuDevice`, `GpuBuffer`, `GpuShaderModule` (WGSL), `GpuRenderPipeline`, `GpuCommandEncoder` |
+| **WebGL 2.0 State Machine** | 🟢 | `WebGl2Context`, VAO, shader compile, `bindBuffer`, `drawArrays`, `drawElements` |
+| **WebRTC Peer-to-Peer** | 🟢 | `RTCPeerConnection`, `RTCDataChannel`, ICE candidates, SDP offer/answer exchange state machine |
+| **Media Demuxer & Codecs** | 🟢 | Container demuxing (MP4 ISO-BMFF / WebM EBML), AV1/VP9/H.264/AAC/Opus pipeline, playback lifecycle |
 | **V8 ECMAScript Engine** | 🟢 | Full Google V8 isolate, closures, microtasks, Promise lifecycle |
 | **HTML5 Parser** | 🟢 | Tokenizer, entity decoding, implicit `<tbody>`, void tags, template parsing |
 | **CSS Selectors** | 🟢 | `#id`, `.class`, tags, combinators (`>`, `+`, `~`, ` `), pseudo-classes (`:first-child`, `:last-child`, `:nth-child`, `:not`, `:disabled`, `:checked`) |
