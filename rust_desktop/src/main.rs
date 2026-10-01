@@ -10,10 +10,13 @@ use tao::{
     window::WindowBuilder,
 };
 
-const CHROME_HEIGHT: f32 = 48.0;
+const CHROME_HEIGHT: f32 = 76.0;
+const TAB_BAR_H: f32 = 36.0;
+const TOOLBAR_H: f32 = 40.0;
 const ADDR_BAR_X: f32 = 140.0;
-const ADDR_BAR_Y: f32 = 8.0;
-const ADDR_BAR_H: f32 = 32.0;
+const ADDR_BAR_Y: f32 = TAB_BAR_H + 6.0;
+const ADDR_BAR_H: f32 = 28.0;
+const SIDEBAR_W: f32 = 160.0;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -91,16 +94,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Ok(mut eng) = engine.lock() {
         let _ = eng.load_html(
-            "<html><body style='margin:0;padding:40px;font-family:system-ui;background:#f8fafc'>\
-             <h1 style='color:#0f172a;font-size:32px'>Axomai Browser</h1>\
-             <p style='color:#475569;font-size:18px'>Native GPU-rendered browser engine. No WebView.</p>\
-             <div style='margin-top:16px;padding:16px;border:2px solid #3b82f6;background:#eff6ff'>\
-               <p style='color:#1e40af;font-size:16px'>Borders, backgrounds, and text rendering work!</p>\
+            "<html><body style='margin:0;padding:0;font-family:system-ui;background:#0f1729'>\
+             <div style='padding:60px 40px 30px 40px;background:#0f1729'>\
+               <h1 style='color:#60a5fa;font-size:36px;margin:0'>Axomai Browser</h1>\
+               <p style='color:#94a3b8;font-size:16px;margin-top:4px'>Fast. Private. AI-Powered. Built for Everyone.</p>\
              </div>\
-             <div style='margin-top:12px;padding:12px;background:#fef2f2;border:1px solid #fca5a5'>\
-               <p style='color:#991b1b;font-size:14px'>Red-themed box with border.</p>\
+             <div style='margin:0 40px;padding:14px 20px;background:#1e293b;border:1px solid #334155'>\
+               <p style='color:#94a3b8;font-size:15px'>Search the web with Axomai...</p>\
              </div>\
-             <p style='color:#64748b;font-size:14px;margin-top:12px'>Type a URL in the address bar to navigate.</p>\
+             <div style='padding:30px 40px'>\
+               <p style='color:#cbd5e1;font-size:14px;margin-bottom:12px'>Quick Links</p>\
+               <div style='display:flex'>\
+                 <div style='padding:14px 24px;background:#1e293b;border:1px solid #334155;margin-right:12px'>\
+                   <p style='color:#f8fafc;font-size:14px'>Google</p>\
+                 </div>\
+                 <div style='padding:14px 24px;background:#1e293b;border:1px solid #334155;margin-right:12px'>\
+                   <p style='color:#f8fafc;font-size:14px'>YouTube</p>\
+                 </div>\
+                 <div style='padding:14px 24px;background:#1e293b;border:1px solid #334155;margin-right:12px'>\
+                   <p style='color:#f8fafc;font-size:14px'>Facebook</p>\
+                 </div>\
+                 <div style='padding:14px 24px;background:#1e293b;border:1px solid #334155;margin-right:12px'>\
+                   <p style='color:#f8fafc;font-size:14px'>Amazon</p>\
+                 </div>\
+                 <div style='padding:14px 24px;background:#1e293b;border:1px solid #334155'>\
+                   <p style='color:#f8fafc;font-size:14px'>Flipkart</p>\
+                 </div>\
+               </div>\
+             </div>\
+             <div style='padding:20px 40px'>\
+               <p style='color:#cbd5e1;font-size:14px;margin-bottom:12px'>AI Assistant</p>\
+               <div style='padding:16px 20px;background:#172554;border:1px solid #1e40af'>\
+                 <p style='color:#93c5fd;font-size:15px'>Hello! I am Axomai AI</p>\
+                 <p style='color:#64748b;font-size:13px;margin-top:4px'>Your intelligent browsing assistant for a better web experience.</p>\
+               </div>\
+               <div style='margin-top:8px;padding:10px 16px;background:#1e293b;border:1px solid #334155'>\
+                 <p style='color:#94a3b8;font-size:13px'>Summarize this page</p>\
+               </div>\
+               <div style='margin-top:6px;padding:10px 16px;background:#1e293b;border:1px solid #334155'>\
+                 <p style='color:#94a3b8;font-size:13px'>Translate to Assamese</p>\
+               </div>\
+               <div style='margin-top:6px;padding:10px 16px;background:#1e293b;border:1px solid #334155'>\
+                 <p style='color:#94a3b8;font-size:13px'>Find similar content</p>\
+               </div>\
+             </div>\
+             <div style='padding:20px 40px'>\
+               <p style='color:#cbd5e1;font-size:14px;margin-bottom:12px'>Quick Tools</p>\
+               <div style='display:flex'>\
+                 <div style='padding:12px 20px;background:#1e293b;border:1px solid #334155;margin-right:10px'>\
+                   <p style='color:#f8fafc;font-size:12px'>Reader Mode</p>\
+                 </div>\
+                 <div style='padding:12px 20px;background:#1e293b;border:1px solid #334155;margin-right:10px'>\
+                   <p style='color:#f8fafc;font-size:12px'>AI Notes</p>\
+                 </div>\
+                 <div style='padding:12px 20px;background:#1e293b;border:1px solid #334155;margin-right:10px'>\
+                   <p style='color:#f8fafc;font-size:12px'>Bookmarks</p>\
+                 </div>\
+                 <div style='padding:12px 20px;background:#1e293b;border:1px solid #334155'>\
+                   <p style='color:#f8fafc;font-size:12px'>History</p>\
+                 </div>\
+               </div>\
+             </div>\
+             <div style='padding:30px 40px'>\
+               <p style='color:#475569;font-size:12px'>Axomai Browser v1.6 - Native GPU-Rendered Engine - No WebView</p>\
+             </div>\
              </body></html>",
             size.width as f32,
             size.height as f32 - CHROME_HEIGHT,
@@ -156,7 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let w = gpu_renderer.surface_config.width as f32;
                     if mouse_y < CHROME_HEIGHT {
                         // Chrome area clicks
-                        let addr_bar_w = w - ADDR_BAR_X - 16.0;
+                        let addr_bar_w = w - ADDR_BAR_X - 120.0;
                         if mouse_x >= ADDR_BAR_X
                             && mouse_x <= ADDR_BAR_X + addr_bar_w
                             && mouse_y >= ADDR_BAR_Y
@@ -392,6 +449,32 @@ fn c(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
     [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
 }
 
+fn render_text(
+    compositor: &mut NativeGpuCompositor,
+    quads: &mut Vec<GpuQuad>,
+    text: &str,
+    mut x: f32,
+    y: f32,
+    size: f32,
+    color: [f32; 4],
+    max_x: f32,
+) -> f32 {
+    for ch in text.chars() {
+        if x > max_x { break; }
+        let g = compositor.glyph_atlas.rasterize(ch, size);
+        if g.width > 0.0 {
+            quads.push(NativeGpuCompositor::text_quad(
+                x + g.offset_x,
+                y - g.offset_y - g.height,
+                &g,
+                color,
+            ));
+        }
+        x += g.advance_width;
+    }
+    x
+}
+
 fn build_chrome_quads(
     compositor: &mut NativeGpuCompositor,
     viewport_w: f32,
@@ -401,40 +484,70 @@ fn build_chrome_quads(
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
-    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, viewport_w, CHROME_HEIGHT, c(240, 240, 245, 255)));
-    quads.push(NativeGpuCompositor::solid_quad(0.0, CHROME_HEIGHT - 1.0, viewport_w, 1.0, c(200, 200, 210, 255)));
+    // Tab bar background (dark)
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, viewport_w, TAB_BAR_H, c(30, 32, 44, 255)));
 
-    let back_color = if engine.history_index > 0 { c(60, 60, 60, 255) } else { c(180, 180, 180, 255) };
-    let back_glyph = compositor.glyph_atlas.rasterize('<', 18.0);
-    quads.push(NativeGpuCompositor::text_quad(16.0, 14.0, &back_glyph, back_color));
+    // Active tab
+    let tab_title = if engine.current_title.is_empty() { "New Tab" } else { &engine.current_title };
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, 220.0, TAB_BAR_H, c(45, 48, 62, 255)));
+    // Tab bottom highlight
+    quads.push(NativeGpuCompositor::solid_quad(0.0, TAB_BAR_H - 2.0, 220.0, 2.0, c(96, 165, 250, 255)));
+    // Tab text
+    render_text(compositor, &mut quads, tab_title, 12.0, 23.0, 12.0, c(230, 230, 240, 255), 200.0);
+    // Tab close X
+    render_text(compositor, &mut quads, "x", 200.0, 23.0, 11.0, c(140, 140, 160, 255), 220.0);
 
-    let fwd_color = if engine.history_index + 1 < engine.history.len() { c(60, 60, 60, 255) } else { c(180, 180, 180, 255) };
-    let fwd_glyph = compositor.glyph_atlas.rasterize('>', 18.0);
-    quads.push(NativeGpuCompositor::text_quad(52.0, 14.0, &fwd_glyph, fwd_color));
+    // + button for new tab
+    quads.push(NativeGpuCompositor::solid_quad(224.0, 4.0, 28.0, 28.0, c(40, 42, 54, 255)));
+    render_text(compositor, &mut quads, "+", 232.0, 23.0, 14.0, c(140, 140, 160, 255), 260.0);
 
-    let reload_glyph = compositor.glyph_atlas.rasterize('R', 14.0);
-    quads.push(NativeGpuCompositor::text_quad(96.0, 16.0, &reload_glyph, c(80, 80, 80, 255)));
+    // Toolbar background
+    quads.push(NativeGpuCompositor::solid_quad(0.0, TAB_BAR_H, viewport_w, TOOLBAR_H, c(38, 40, 54, 255)));
+    // Toolbar bottom border
+    quads.push(NativeGpuCompositor::solid_quad(0.0, CHROME_HEIGHT - 1.0, viewport_w, 1.0, c(55, 58, 72, 255)));
 
-    let addr_bar_w = viewport_w - ADDR_BAR_X - 16.0;
-    let border_color = if focused { c(59, 130, 246, 255) } else { c(200, 200, 210, 255) };
+    // Navigation buttons
+    let nav_y = TAB_BAR_H + 10.0;
+    let back_color = if engine.history_index > 0 { c(200, 200, 220, 255) } else { c(80, 82, 96, 255) };
+    render_text(compositor, &mut quads, "<", 16.0, nav_y + 12.0, 16.0, back_color, 40.0);
+
+    let fwd_color = if engine.history_index + 1 < engine.history.len() { c(200, 200, 220, 255) } else { c(80, 82, 96, 255) };
+    render_text(compositor, &mut quads, ">", 44.0, nav_y + 12.0, 16.0, fwd_color, 70.0);
+
+    // Reload
+    render_text(compositor, &mut quads, "R", 76.0, nav_y + 12.0, 13.0, c(160, 162, 180, 255), 100.0);
+
+    // Shield icon placeholder
+    render_text(compositor, &mut quads, "O", 108.0, nav_y + 12.0, 13.0, c(96, 165, 250, 255), 130.0);
+
+    // Address bar (dark themed)
+    let addr_bar_w = viewport_w - ADDR_BAR_X - 120.0;
+    let border_color = if focused { c(96, 165, 250, 255) } else { c(55, 58, 72, 255) };
     quads.push(NativeGpuCompositor::solid_quad(ADDR_BAR_X, ADDR_BAR_Y, addr_bar_w, ADDR_BAR_H, border_color));
-    quads.push(NativeGpuCompositor::solid_quad(ADDR_BAR_X + 1.0, ADDR_BAR_Y + 1.0, addr_bar_w - 2.0, ADDR_BAR_H - 2.0, c(255, 255, 255, 255)));
+    quads.push(NativeGpuCompositor::solid_quad(ADDR_BAR_X + 1.0, ADDR_BAR_Y + 1.0, addr_bar_w - 2.0, ADDR_BAR_H - 2.0, c(24, 26, 38, 255)));
 
-    let mut text_x = ADDR_BAR_X + 8.0;
-    let text_y = ADDR_BAR_Y + 22.0;
-    let max_x = ADDR_BAR_X + addr_bar_w - 8.0;
-    for ch in address_text.chars() {
-        if text_x > max_x { break; }
-        let g = compositor.glyph_atlas.rasterize(ch, 14.0);
-        if g.width > 0.0 {
-            quads.push(NativeGpuCompositor::text_quad(text_x + g.offset_x, text_y - g.offset_y - g.height, &g, c(30, 30, 30, 255)));
-        }
-        text_x += g.advance_width;
-    }
+    // Address bar text
+    let text_x = ADDR_BAR_X + 10.0;
+    let text_y = ADDR_BAR_Y + 20.0;
+    let max_x = ADDR_BAR_X + addr_bar_w - 10.0;
+    let end_x = render_text(compositor, &mut quads, address_text, text_x, text_y, 13.0, c(200, 205, 220, 255), max_x);
 
+    // Cursor
     if focused {
-        quads.push(NativeGpuCompositor::solid_quad(text_x, ADDR_BAR_Y + 6.0, 1.0, ADDR_BAR_H - 12.0, c(59, 130, 246, 255)));
+        quads.push(NativeGpuCompositor::solid_quad(end_x, ADDR_BAR_Y + 5.0, 1.0, ADDR_BAR_H - 10.0, c(96, 165, 250, 255)));
     }
+
+    // Right side toolbar buttons
+    let right_x = viewport_w - 110.0;
+    // Bookmark star
+    render_text(compositor, &mut quads, "*", right_x, nav_y + 12.0, 16.0, c(140, 142, 160, 255), right_x + 24.0);
+    // Download arrow
+    render_text(compositor, &mut quads, "v", right_x + 28.0, nav_y + 12.0, 14.0, c(140, 142, 160, 255), right_x + 52.0);
+    // AI button
+    quads.push(NativeGpuCompositor::solid_quad(right_x + 54.0, nav_y - 2.0, 26.0, 22.0, c(96, 165, 250, 255)));
+    render_text(compositor, &mut quads, "AI", right_x + 57.0, nav_y + 11.0, 11.0, c(255, 255, 255, 255), right_x + 80.0);
+    // Menu
+    render_text(compositor, &mut quads, "=", right_x + 86.0, nav_y + 12.0, 14.0, c(140, 142, 160, 255), right_x + 110.0);
 
     quads
 }
