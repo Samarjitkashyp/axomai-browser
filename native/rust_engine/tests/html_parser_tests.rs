@@ -13,17 +13,19 @@ fn test_html_entity_decoding() {
         }
     }).expect("Body should exist");
 
-    let p = body.borrow().children.iter().find(|c| {
+    let body_borrow = body.borrow();
+    let p = body_borrow.children.iter().find(|c| {
         if let NodeType::Element { ref tag, .. } = c.borrow().node_type {
             tag == "p"
         } else {
             false
         }
-    }).expect("Paragraph should exist").clone();
+    }).expect("Paragraph should exist");
 
     let p_borrow = p.borrow();
     let text_child = p_borrow.children.first().expect("Text child should exist");
-    if let NodeType::Text { ref text } = text_child.borrow().node_type {
+    let tc_borrow = text_child.borrow();
+    if let NodeType::Text { ref text } = tc_borrow.node_type {
         assert_eq!(text, "<Hello & World> 'Test' \"Quotes\"");
     } else {
         panic!("Expected text node");
@@ -43,17 +45,19 @@ fn test_implicit_tbody_insertion() {
         }
     }).expect("Body should exist");
 
-    let table = body.borrow().children.iter().find(|c| {
+    let body_borrow = body.borrow();
+    let table = body_borrow.children.iter().find(|c| {
         if let NodeType::Element { ref tag, .. } = c.borrow().node_type {
             tag == "table"
         } else {
             false
         }
-    }).expect("Table should exist").clone();
+    }).expect("Table should exist");
 
     let table_borrow = table.borrow();
     let tbody = table_borrow.children.first().expect("Table should have tbody child");
-    if let NodeType::Element { ref tag, .. } = tbody.borrow().node_type {
+    let tbody_borrow = tbody.borrow();
+    if let NodeType::Element { ref tag, .. } = tbody_borrow.node_type {
         assert_eq!(tag, "tbody");
     } else {
         panic!("Expected tbody element");

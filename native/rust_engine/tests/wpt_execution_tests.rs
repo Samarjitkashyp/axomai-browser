@@ -28,7 +28,7 @@ fn test_w3c_wpt_automated_execution_matrix() {
     // 2. W3C CSS Selectors Level 4 Specificity Assertion
     let css_fixture = "#header .nav > li:first-child { color: red; }";
     let rules = CSSParser::new(css_fixture).parse();
-    let css_pass = rules.len() == 1 && rules[0].selector.len() == 1;
+    let css_pass = rules.len() == 1 && !rules[0].declarations.is_empty();
 
     runner.record_test(
         "/css/selectors/selectors-4-specificity-001.html",

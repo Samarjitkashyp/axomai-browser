@@ -23,7 +23,7 @@ fn test_sandbox_policy_and_ipc_bus() {
 #[test]
 fn test_cdp_inspector_protocol() {
     let mut engine = AxomaiEngine::new();
-    engine.load_html("<html><head><title>CDP Test Page</title></head><body><div id='target-div'>Inspect Me</div></body></html>", "http://localhost/");
+    engine.load_html("<html><head><title>CDP Test Page</title></head><body><div id='target-div'>Inspect Me</div></body></html>", 1920.0, 1080.0).unwrap();
 
     let doc_res = CdpInspector::handle_command(&mut engine, 1, "DOM.getDocument", "{}");
     assert!(doc_res.contains(r#""id":1"#));

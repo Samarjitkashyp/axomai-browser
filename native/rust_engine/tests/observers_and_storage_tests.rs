@@ -1,6 +1,7 @@
 use axomai_engine::css_parser::CSSParser;
 use axomai_engine::html_parser::{find_element_by_id, HTMLParser, NodeType};
 use axomai_engine::layout::build_layout_tree;
+use axomai_engine::network::URL;
 
 #[test]
 fn test_select_and_option_dom_parsing() {
@@ -52,7 +53,8 @@ fn test_textarea_dom_and_layout() {
     let ta_node = find_element_by_id(&root, "comments");
     assert!(ta_node.is_some());
 
-    let layout = build_layout_tree(&root, "http://localhost/");
+    let url = URL::parse("http://localhost/").unwrap();
+    let layout = build_layout_tree(&root, Some(&url));
     assert!(layout.is_some());
 }
 
@@ -102,6 +104,7 @@ fn test_nested_form_table_structure() {
     let form_node = find_element_by_id(&root, "order-form");
     assert!(form_node.is_some());
 
-    let layout = build_layout_tree(&root, "http://localhost/");
+    let url = URL::parse("http://localhost/").unwrap();
+    let layout = build_layout_tree(&root, Some(&url));
     assert!(layout.is_some(), "Layout tree should be generated for form with table");
 }

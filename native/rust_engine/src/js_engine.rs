@@ -74,7 +74,7 @@ fn drain_fetch_results_for_engine(engine_id: usize) -> Vec<FetchResult> {
 
 struct ActiveContext {
     dom_root: Option<NodePtr>,
-    current_url: String,
+    _current_url: String,
     dom_mutated: bool,
     is_parsing: bool,
     written_html_buffer: String,
@@ -149,7 +149,7 @@ impl V8JSEngine {
 
             *ctx.borrow_mut() = Some(ActiveContext {
                 dom_root: dom_root.map(Rc::clone),
-                current_url: url_str.to_string(),
+                _current_url: url_str.to_string(),
                 dom_mutated: false,
                 is_parsing: false,
                 written_html_buffer: String::new(),
