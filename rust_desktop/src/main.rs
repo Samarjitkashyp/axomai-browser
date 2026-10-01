@@ -165,6 +165,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Ok(mut eng) = engine.lock() {
                     let updated = eng.process_event_loop(1380.0, 860.0);
                     if updated {
+                        // 1. Direct Native GPU Compositor Framebuffer Rasterization
+                        let mut compositor = axomai_engine::NativeGpuCompositor::new(1380, 860);
+                        let _fb = compositor.rasterize(&eng.display_list);
+
+                        // 2. Dispatch DisplayList and Navigation state to UI Shell
                         let json = eng.get_display_list_json();
                         let script = format!(
                             "if (window.__axomai_render_display_list) {{ window.__axomai_render_display_list({}); }}",

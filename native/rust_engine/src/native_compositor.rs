@@ -1,16 +1,16 @@
 //! Native GPU Compositor & Direct Pixel Surface Rasterizer for Axomai Browser.
-//! Renders DisplayLists directly to RGBA hardware surface framebuffers without external browser engines.
+//! Renders DisplayLists directly to RGBA hardware surface framebuffers and GPU quad vertex streams.
 
 use crate::painter::DisplayCommand;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GpuVertex {
     pub position: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GpuQuad {
     pub vertices: [GpuVertex; 4],
     pub indices: [u32; 6],
@@ -18,6 +18,7 @@ pub struct GpuQuad {
     pub opacity: f32,
 }
 
+#[derive(Debug, Clone)]
 pub struct NativeFramebuffer {
     pub width: u32,
     pub height: u32,
@@ -80,7 +81,19 @@ impl NativeGpuCompositor {
         }
     }
 
-    /// Convert DisplayCommand list into GPU hardware quad primitives
+    /// Rasterizes display list commands into the internal pixel framebuffer
+    pub fn rasterize(&mut self, display_list: &[DisplayCommand]) -> &NativeFramebuffer {
+        self.composite_display_list(display_list, 0.0);
+        &self.framebuffer
+    }
+
+    /// Extracts GPU vertex quad primitives from the display list
+    pub fn extract_gpu_quads(&mut self, display_list: &[DisplayCommand]) -> Vec<GpuQuad> {
+        self.composite_display_list(display_list, 0.0);
+        self.quads.clone()
+    }
+
+    /// Convert DisplayCommand list into GPU hardware quad primitives & rasterize to framebuffer
     pub fn composite_display_list(&mut self, display_list: &[DisplayCommand], scroll_y: f32) {
         self.quads.clear();
         self.framebuffer.clear(255, 255, 255, 255);
@@ -95,7 +108,7 @@ impl NativeGpuCompositor {
                     // Rasterize directly to pixel framebuffer
                     self.framebuffer.draw_solid_rect(*x1, y1_adj, *x2, y2_adj, (r, g, b, a));
 
-                    // And record GPU vertex quad for hardware GPU pipelines (wgpu / DirectX / Vulkan)
+                    // Record GPU vertex quad for hardware GPU pipelines (wgpu / DirectX / Vulkan)
                     let quad = GpuQuad {
                         vertices: [
                             GpuVertex { position: [*x1, y1_adj], uv: [0.0, 0.0], color: [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0] },
@@ -108,6 +121,18 @@ impl NativeGpuCompositor {
                         opacity: 1.0,
                     };
                     self.quads.push(quad);
+                }
+                DisplayCommand::DrawBorder { x1, y1, x2, y2, color, .. } => {
+                    let (r, g, b, a) = Self::parse_color_hex(color);
+                    let y1_adj = y1 - scroll_y;
+                    let y2_adj = y2 - scroll_y;
+                    self.framebuffer.draw_solid_rect(*x1, y1_adj, *x2, y2_adj, (r, g, b, a));
+                }
+                DisplayCommand::DrawText { x, y, text: _, font_size, color, .. } => {
+                    let (r, g, b, a) = Self::parse_color_hex(color);
+                    let y_adj = y - scroll_y;
+                    // Render bounding placeholder for text glyph rasterization
+                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + (*font_size * 4.0), y_adj + *font_size, (r, g, b, a));
                 }
                 _ => {}
             }

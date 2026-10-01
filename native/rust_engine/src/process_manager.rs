@@ -126,12 +126,25 @@ impl ProcessSupervisor {
                                 blocked: true,
                             }
                         } else {
-                            // Synthesize/Fetch response
-                            IpcMessage::FetchResponse {
-                                req_id,
-                                status: 200,
-                                body: format!("<!DOCTYPE html><html><body><h1>Loaded {}</h1></body></html>", url),
-                                blocked: false,
+                            // Perform real network / URI fetch
+                            match crate::network::URL::parse(&url) {
+                                Ok(parsed_url) => {
+                                    let (_headers, body) = parsed_url.request();
+                                    IpcMessage::FetchResponse {
+                                        req_id,
+                                        status: 200,
+                                        body,
+                                        blocked: false,
+                                    }
+                                }
+                                Err(err) => {
+                                    IpcMessage::FetchResponse {
+                                        req_id,
+                                        status: 400,
+                                        body: format!("<html><body><h1>URL Parse Error</h1><p>{}</p></body></html>", err),
+                                        blocked: false,
+                                    }
+                                }
                             }
                         };
                         let _ = main_tx.send(response);
