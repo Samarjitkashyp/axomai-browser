@@ -225,26 +225,43 @@ impl URL {
         }
 
         let target_url = self.request_url();
+
+        // Check HTTP Cache before making a network call
+        if let Some(cached) = get_cached_response(&target_url) {
+            return (cached.headers, cached.body);
+        }
+
         let agent = ureq::AgentBuilder::new()
             .redirects(5)
             .timeout(Duration::from_secs(10))
             .build();
 
-        match agent
-            .get(&target_url)
-            .set("User-Agent", "AxomaiBrowser/1.0 (Rust Engine)")
-            .call()
-        {
+        let mut req = agent.get(&target_url).set("User-Agent", "AxomaiBrowser/1.0 (Rust Engine)");
+        if let Some(etag) = get_cached_etag(&target_url) {
+            req = req.set("If-None-Match", &etag);
+        }
+
+        match req.call() {
             Ok(response) => {
+                let status_code = response.status();
+                if status_code == 304 {
+                    if let Some(cached) = get_cached_response_ignoring_expiry(&target_url) {
+                        return (cached.headers, cached.body);
+                    }
+                }
+
                 let mut headers = HashMap::new();
-                headers.insert("status".to_string(), response.status().to_string());
+                headers.insert("status".to_string(), status_code.to_string());
                 for key in response.headers_names() {
                     if let Some(val) = response.header(&key) {
                         headers.insert(key.to_lowercase(), val.to_string());
                     }
                 }
                 match response.into_string() {
-                    Ok(body) => (headers, body),
+                    Ok(body) => {
+                        cache_response_if_eligible(&target_url, status_code, &headers, &body);
+                        (headers, body)
+                    }
                     Err(e) => (headers, format!("<html><body><h1>Error reading response body</h1><p>{}</p></body></html>", e)),
                 }
             }
@@ -385,3 +402,198 @@ pub fn base64_decode(input: &str) -> Option<Vec<u8>> {
     }
     Some(out)
 }
+
+// ============================================================================
+// HTTP CACHE & CACHE-CONTROL SPECIFICATION ENGINE
+// ============================================================================
+
+use std::sync::Mutex;
+use std::time::Instant;
+
+#[derive(Debug, Clone)]
+pub struct HttpCacheEntry {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+    pub etag: Option<String>,
+    pub max_age_secs: Option<u64>,
+    pub cached_at: Instant,
+    pub no_cache: bool,
+}
+
+static HTTP_CACHE: Mutex<Option<HashMap<String, HttpCacheEntry>>> = Mutex::new(None);
+
+pub fn get_cached_response(url: &str) -> Option<HttpCacheEntry> {
+    let lock = HTTP_CACHE.lock().unwrap();
+    if let Some(ref map) = *lock {
+        if let Some(entry) = map.get(url) {
+            if entry.no_cache {
+                return None;
+            }
+            if let Some(max_age) = entry.max_age_secs {
+                if entry.cached_at.elapsed().as_secs() > max_age {
+                    return None; // Expired, needs revalidation
+                }
+            }
+            return Some(entry.clone());
+        }
+    }
+    None
+}
+
+pub fn get_cached_etag(url: &str) -> Option<String> {
+    let lock = HTTP_CACHE.lock().unwrap();
+    if let Some(ref map) = *lock {
+        if let Some(entry) = map.get(url) {
+            return entry.etag.clone();
+        }
+    }
+    None
+}
+
+pub fn get_cached_response_ignoring_expiry(url: &str) -> Option<HttpCacheEntry> {
+    let lock = HTTP_CACHE.lock().unwrap();
+    if let Some(ref map) = *lock {
+        return map.get(url).cloned();
+    }
+    None
+}
+
+pub fn cache_response_if_eligible(url: &str, status: u16, headers: &HashMap<String, String>, body: &str) {
+    if status != 200 && status != 203 && status != 300 && status != 301 {
+        return;
+    }
+
+    let cache_control = headers.get("cache-control").map(|s| s.as_str()).unwrap_or("");
+    let parsed_cc = CacheControl::parse(cache_control);
+
+    if parsed_cc.no_store {
+        return;
+    }
+
+    let etag = headers.get("etag").cloned();
+    let entry = HttpCacheEntry {
+        status,
+        headers: headers.clone(),
+        body: body.to_string(),
+        etag,
+        max_age_secs: parsed_cc.max_age,
+        cached_at: Instant::now(),
+        no_cache: parsed_cc.no_cache,
+    };
+
+    let mut lock = HTTP_CACHE.lock().unwrap();
+    if lock.is_none() {
+        *lock = Some(HashMap::new());
+    }
+    if let Some(ref mut map) = *lock {
+        map.insert(url.to_string(), entry);
+    }
+}
+
+pub fn clear_http_cache() {
+    let mut lock = HTTP_CACHE.lock().unwrap();
+    if let Some(ref mut map) = *lock {
+        map.clear();
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CacheControl {
+    pub no_store: bool,
+    pub no_cache: bool,
+    pub must_revalidate: bool,
+    pub max_age: Option<u64>,
+}
+
+impl CacheControl {
+    pub fn parse(header_value: &str) -> Self {
+        let mut cc = CacheControl::default();
+        for directive in header_value.split(',') {
+            let part = directive.trim().to_lowercase();
+            if part == "no-store" {
+                cc.no_store = true;
+            } else if part == "no-cache" {
+                cc.no_cache = true;
+            } else if part == "must-revalidate" {
+                cc.must_revalidate = true;
+            } else if part.starts_with("max-age=") {
+                if let Ok(secs) = part[8..].trim().parse::<u64>() {
+                    cc.max_age = Some(secs);
+                }
+            }
+        }
+        cc
+    }
+}
+
+// ============================================================================
+// CONTENT SECURITY POLICY (CSP) SPECIFICATION ENGINE
+// ============================================================================
+
+#[derive(Debug, Clone, Default)]
+pub struct CspPolicy {
+    pub default_src: Vec<String>,
+    pub script_src: Vec<String>,
+    pub style_src: Vec<String>,
+    pub connect_src: Vec<String>,
+    pub img_src: Vec<String>,
+}
+
+impl CspPolicy {
+    pub fn parse(header_value: &str) -> Self {
+        let mut policy = CspPolicy::default();
+        for directive in header_value.split(';') {
+            let parts: Vec<&str> = directive.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+            let name = parts[0].to_lowercase();
+            let sources: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+            match name.as_str() {
+                "default-src" => policy.default_src = sources,
+                "script-src" => policy.script_src = sources,
+                "style-src" => policy.style_src = sources,
+                "connect-src" => policy.connect_src = sources,
+                "img-src" => policy.img_src = sources,
+                _ => {}
+            }
+        }
+        policy
+    }
+
+    pub fn is_allowed(&self, directive_name: &str, target_url: &str, current_origin: &str) -> bool {
+        let sources = match directive_name {
+            "script-src" => if !self.script_src.is_empty() { &self.script_src } else { &self.default_src },
+            "style-src" => if !self.style_src.is_empty() { &self.style_src } else { &self.default_src },
+            "connect-src" => if !self.connect_src.is_empty() { &self.connect_src } else { &self.default_src },
+            "img-src" => if !self.img_src.is_empty() { &self.img_src } else { &self.default_src },
+            _ => &self.default_src,
+        };
+
+        if sources.is_empty() {
+            return true; // No policy restriction
+        }
+
+        for src in sources {
+            let s = src.trim().to_lowercase();
+            if s == "*" {
+                return true;
+            }
+            if s == "'self'" {
+                if let Ok(parsed_target) = URL::parse(target_url) {
+                    if parsed_target.origin() == current_origin {
+                        return true;
+                    }
+                }
+            }
+            if target_url.starts_with(&s) {
+                return true;
+            }
+        }
+
+        false
+    }
+}
+

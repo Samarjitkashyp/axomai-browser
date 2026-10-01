@@ -3994,9 +3994,168 @@ fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::Handl
         FormData.prototype.has = function(name) {
             return this._data.has(String(name));
         };
-        FormData.prototype.delete = function(name) {
-            this._data.delete(String(name));
+        // ServiceWorker & ServiceWorkerRegistration Foundation
+        function ServiceWorker(scriptUrl) {
+            this.scriptURL = scriptUrl;
+            this.state = 'activated';
+            this.onstatechange = null;
+            setupEventTarget(this);
+        }
+
+        function ServiceWorkerRegistration(scope, activeWorker) {
+            this.scope = scope;
+            this.installing = null;
+            this.waiting = null;
+            this.active = activeWorker;
+            this.onupdatefound = null;
+            setupEventTarget(this);
+        }
+        ServiceWorkerRegistration.prototype.unregister = function() {
+            return Promise.resolve(true);
         };
+        ServiceWorkerRegistration.prototype.update = function() {
+            return Promise.resolve();
+        };
+
+        function ServiceWorkerContainer() {
+            this.controller = null;
+            this.ready = Promise.resolve(new ServiceWorkerRegistration('/', new ServiceWorker('sw.js')));
+            this.oncontrollerchange = null;
+            this.onmessage = null;
+            setupEventTarget(this);
+        }
+        ServiceWorkerContainer.prototype.register = function(scriptUrl, options) {
+            const scope = options && options.scope ? options.scope : '/';
+            const worker = new ServiceWorker(scriptUrl);
+            const reg = new ServiceWorkerRegistration(scope, worker);
+            this.controller = worker;
+            this.ready = Promise.resolve(reg);
+            return Promise.resolve(reg);
+        };
+        ServiceWorkerContainer.prototype.getRegistration = function(scope) {
+            return Promise.resolve(new ServiceWorkerRegistration(scope || '/', new ServiceWorker('sw.js')));
+        };
+        ServiceWorkerContainer.prototype.getRegistrations = function() {
+            return Promise.resolve([new ServiceWorkerRegistration('/', new ServiceWorker('sw.js'))]);
+        };
+
+        if (window.navigator) {
+            window.navigator.serviceWorker = new ServiceWorkerContainer();
+        }
+
+        // WebSocket API
+        function WebSocket(url, protocols) {
+            this.url = url;
+            this.protocols = protocols || '';
+            this.readyState = 0; // CONNECTING
+            this.onopen = null;
+            this.onmessage = null;
+            this.onerror = null;
+            this.onclose = null;
+            setupEventTarget(this);
+
+            const self = this;
+            setTimeout(function() {
+                self.readyState = 1; // OPEN
+                const evt = new Event('open', { bubbles: false, cancelable: false });
+                if (typeof self.onopen === 'function') self.onopen(evt);
+                self.dispatchEvent(evt);
+            }, 10);
+        }
+        WebSocket.CONNECTING = 0;
+        WebSocket.OPEN = 1;
+        WebSocket.CLOSING = 2;
+        WebSocket.CLOSED = 3;
+
+        WebSocket.prototype.send = function(data) {
+            if (this.readyState !== 1) {
+                throw new Error('WebSocket is not open');
+            }
+        };
+        WebSocket.prototype.close = function(code, reason) {
+            this.readyState = 2; // CLOSING
+            const self = this;
+            setTimeout(function() {
+                self.readyState = 3; // CLOSED
+                const evt = new Event('close', { bubbles: false, cancelable: false });
+                if (typeof self.onclose === 'function') self.onclose(evt);
+                self.dispatchEvent(evt);
+            }, 0);
+        };
+        window.WebSocket = WebSocket;
+
+        // BroadcastChannel API
+        const _broadcastChannels = new Map();
+
+        function BroadcastChannel(name) {
+            this.name = String(name);
+            this.onmessage = null;
+            this.onmessageerror = null;
+            this.closed = false;
+            setupEventTarget(this);
+
+            if (!_broadcastChannels.has(this.name)) {
+                _broadcastChannels.set(this.name, new Set());
+            }
+            _broadcastChannels.get(this.name).add(this);
+        }
+        BroadcastChannel.prototype.postMessage = function(message) {
+            if (this.closed) throw new Error('BroadcastChannel is closed');
+            const set = _broadcastChannels.get(this.name);
+            if (!set) return;
+            const self = this;
+            setTimeout(function() {
+                for (const ch of set) {
+                    if (ch !== self && !ch.closed) {
+                        const evt = new MessageEvent('message', { data: message, origin: window.location ? window.location.origin : '' });
+                        if (typeof ch.onmessage === 'function') ch.onmessage(evt);
+                        ch.dispatchEvent(evt);
+                    }
+                }
+            }, 0);
+        };
+        BroadcastChannel.prototype.close = function() {
+            this.closed = true;
+            const set = _broadcastChannels.get(this.name);
+            if (set) {
+                set.delete(this);
+                if (set.size === 0) _broadcastChannels.delete(this.name);
+            }
+        };
+        window.BroadcastChannel = BroadcastChannel;
+
+        // Blob & File API
+        function Blob(parts, options) {
+            this._parts = parts || [];
+            this.type = options && options.type ? String(options.type) : '';
+            let size = 0;
+            for (const p of this._parts) {
+                if (typeof p === 'string') size += p.length;
+                else if (p && p.size !== undefined) size += p.size;
+                else if (p && p.byteLength !== undefined) size += p.byteLength;
+            }
+            this.size = size;
+        }
+        Blob.prototype.text = function() {
+            let str = '';
+            for (const p of this._parts) {
+                str += String(p);
+            }
+            return Promise.resolve(str);
+        };
+        Blob.prototype.slice = function(start, end, contentType) {
+            return new Blob(this._parts, { type: contentType || this.type });
+        };
+        window.Blob = Blob;
+
+        function File(parts, name, options) {
+            Blob.call(this, parts, options);
+            this.name = String(name);
+            this.lastModified = options && options.lastModified ? options.lastModified : Date.now();
+        }
+        File.prototype = Object.create(Blob.prototype);
+        window.File = File;
+
         window.FormData = FormData;
 
         if (document.body) {
