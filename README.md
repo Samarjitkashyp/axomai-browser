@@ -1,8 +1,8 @@
-# 🚀 Axomai Browser `v1.3.0`
+# 🚀 Axomai Browser `v1.4.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Built-in AdBlocker & Privacy Shield, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
@@ -12,11 +12,14 @@ A modern, high-performance web browser designed with an independent Rust engine 
 [ Browser UI / Tab / Android Shell ] ◄──( IPC Bus / Sandbox Boundary )──► [ Network Process ]
             │                                                              │
             ▼                                                              ▼
-[ Sandboxed Renderer Process ] ◄──( AdBlock / EasyList Filter )─── [ HTTP Cache / Stream ]
+[ Sandboxed Renderer Process ] ◄──( AdBlock / EasyList Filter )─── [ Multi-Threaded Range Downloader ]
 - HTML5 Tree Builder (Implicit <tbody>, Tables, Forms)
 - CSS Engine (Cascade, Custom Properties var(--*), calc/clamp)
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
+- Distraction-Free Reader Mode Engine
+- Native SVG Path & PDF Document Vector Engine
+- End-to-End Encrypted Sync Engine (Bookmarks, Tabs, History)
 - Accessibility (a11y) & ARIA Tree Engine
 - Permissions & Geolocation Manager
 - On-Device AI & Multilingual Translator (Assamese, Hindi, English)
@@ -45,15 +48,19 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.3.0`)
+## 📊 Subsystem Status Overview (`v1.4.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
-| **AdBlocker & Privacy Shield** | 🟢 **NEW** | EasyList network filter engine, tracker blocking, cosmetic CSS injection (`##.ad-banner`) |
-| **Accessibility (a11y) & ARIA** | 🟢 **NEW** | `AccessibilityTree`, Accessible Object Model (AOM), ARIA roles (`button`, `link`, `banner`, `alert`) |
-| **Permissions & Geolocation** | 🟢 **NEW** | `PermissionsManager`, W3C Permissions API, Geolocation GPS coordinates, DeviceOrientation sensors |
-| **On-Device AI & Translator** | 🟢 **NEW** | `AiAssistant`, native page text summarizer, keyword extractor, offline Assamese/Hindi/English translation |
-| **Android NDK Bridge** | 🟢 **NEW** | C-ABI / JNI functions (`axomai_android_init`, `axomai_android_load_html`) for Android APK mobile compilation |
+| **Reader Mode Engine** | 🟢 **NEW** | Readability scoring algorithm, declutters ads/navigation, calculates estimated reading time |
+| **Download Manager** | 🟢 **NEW** | Multi-threaded range chunk downloader (`Range: bytes=X-Y`), pause, resume, speed estimation |
+| **SVG & PDF Vector Engine** | 🟢 **NEW** | SVG Path syntax parser (`M`, `L`, `C`, `Z`), 2D bezier curves rasterizer, native PDF stream viewer |
+| **Encrypted Sync Engine** | 🟢 **NEW** | End-to-end encrypted client storage & sync for bookmarks, history, tabs, and LWW merge resolution |
+| **AdBlocker & Privacy Shield** | 🟢 | EasyList network filter engine, tracker blocking, cosmetic CSS injection (`##.ad-banner`) |
+| **Accessibility (a11y) & ARIA** | 🟢 | `AccessibilityTree`, Accessible Object Model (AOM), ARIA roles (`button`, `link`, `banner`, `alert`) |
+| **Permissions & Geolocation** | 🟢 | `PermissionsManager`, W3C Permissions API, Geolocation GPS coordinates, DeviceOrientation sensors |
+| **On-Device AI & Translator** | 🟢 | `AiAssistant`, native page text summarizer, keyword extractor, offline Assamese/Hindi/English translation |
+| **Android NDK Bridge** | 🟢 | C-ABI / JNI functions (`axomai_android_init`, `axomai_android_load_html`) for Android APK mobile compilation |
 | **Web Cryptography API** | 🟢 | `window.crypto.subtle` (SHA-1/256/384/512, AES-GCM cipher, CSPRNG `getRandomValues`, HMAC) |
 | **Web Audio API Graph** | 🟢 | `AudioContext`, `GainNode`, `OscillatorNode`, `BiquadFilterNode`, `AnalyserNode`, node connection routing |
 | **Web Workers & OffscreenCanvas**| 🟢 | `WorkerThreadPool`, background thread isolate dispatch, transferable buffers, `OffscreenCanvas` rendering |
