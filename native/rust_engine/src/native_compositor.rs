@@ -337,7 +337,8 @@ impl WgpuRenderer {
             &wgpu::DeviceDescriptor {
                 label: Some("Axomai GPU Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                    .using_resolution(adapter.limits()),
             },
             None,
         ))
