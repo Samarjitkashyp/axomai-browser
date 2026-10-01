@@ -111,12 +111,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         size.width, size.height
     );
 
-    if let Ok(mut eng) = engine.lock() {
-        let content_w = size.width as f32 - SIDEBAR_W;
-        let content_h = size.height as f32 - CHROME_TOP;
-        let _ = eng.load_html(HOME_PAGE_HTML, content_w, content_h);
-    }
-
     let mut mouse_x: f32 = 0.0;
     let mut mouse_y: f32 = 0.0;
     let mut compositor = NativeGpuCompositor::new(size.width, size.height);
@@ -125,6 +119,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut address_bar_focused = false;
     let mut needs_chrome_redraw = true;
     let mut sidebar_active: usize = 0;
+    let mut is_home_page = true;
+    let mut home_scroll_y: f32 = 0.0;
+    let mut hover_sidebar_idx: Option<usize> = None;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
@@ -153,12 +150,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 mouse_x = position.x as f32;
                 mouse_y = position.y as f32;
-                if mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
+                // Sidebar hover tracking
+                let old_hover = hover_sidebar_idx;
+                hover_sidebar_idx = None;
+                if mouse_x < SIDEBAR_W && mouse_y > CHROME_TOP {
+                    let rel_y = mouse_y - CHROME_TOP - 16.0;
+                    let mut y_off = 0.0f32;
+                    for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
+                        let item_h = if item.is_section { 36.0 } else { 34.0 };
+                        if rel_y >= y_off && rel_y < y_off + item_h && !item.is_section {
+                            hover_sidebar_idx = Some(i);
+                            break;
+                        }
+                        y_off += item_h;
+                    }
+                }
+                if old_hover != hover_sidebar_idx {
+                    needs_chrome_redraw = true;
+                }
+                if !is_home_page && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
                     if let Ok(mut eng) = engine.lock() {
-                        let _ = eng.handle_pointer_move(
-                            mouse_x - SIDEBAR_W,
-                            mouse_y - CHROME_TOP,
-                        );
+                        let _ = eng.handle_pointer_move(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP);
                     }
                 }
             }
@@ -169,20 +181,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let w = gpu_renderer.surface_config.width as f32;
                 if state == ElementState::Pressed && button == MouseButton::Left {
                     if mouse_x < SIDEBAR_W && mouse_y > CHROME_TOP {
-                        // Sidebar click
                         let rel_y = mouse_y - CHROME_TOP - 16.0;
                         let mut y_off = 0.0f32;
                         for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
                             let item_h = if item.is_section { 36.0 } else { 34.0 };
                             if rel_y >= y_off && rel_y < y_off + item_h && !item.is_section {
                                 sidebar_active = i;
+                                if i == 0 {
+                                    is_home_page = true;
+                                    address_bar_text = String::from("about:home");
+                                    home_scroll_y = 0.0;
+                                }
                                 needs_chrome_redraw = true;
                                 break;
                             }
                             y_off += item_h;
                         }
                     } else if mouse_y < CHROME_TOP {
-                        // Chrome area
                         let addr_x = SIDEBAR_W + 140.0;
                         let addr_y = TAB_BAR_H + 8.0;
                         let addr_h = 30.0;
@@ -193,15 +208,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             && mouse_y <= addr_y + addr_h
                         {
                             address_bar_focused = true;
+                            if is_home_page {
+                                address_bar_text.clear();
+                            }
                             needs_chrome_redraw = true;
-                        } else if mouse_y < TAB_BAR_H {
-                            // Tab bar clicks handled here
-                            address_bar_focused = false;
-                        } else {
-                            // Toolbar nav button clicks
+                        } else if mouse_y >= TAB_BAR_H {
                             let nav_base_x = SIDEBAR_W + 8.0;
                             if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 32.0 {
-                                // Back
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index > 0 {
                                         eng.history_index -= 1;
@@ -210,11 +223,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
                                         let _ = eng.load_url(&entry.url, content_w, content_h);
                                         address_bar_text = entry.url;
+                                        is_home_page = false;
                                         needs_chrome_redraw = true;
                                     }
                                 }
                             } else if mouse_x >= nav_base_x + 36.0 && mouse_x <= nav_base_x + 68.0 {
-                                // Forward
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index + 1 < eng.history.len() {
                                         eng.history_index += 1;
@@ -223,24 +236,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
                                         let _ = eng.load_url(&entry.url, content_w, content_h);
                                         address_bar_text = entry.url;
+                                        is_home_page = false;
                                         needs_chrome_redraw = true;
                                     }
                                 }
                             } else if mouse_x >= nav_base_x + 72.0 && mouse_x <= nav_base_x + 104.0 {
-                                // Reload
-                                if let Ok(mut eng) = engine.lock() {
-                                    let content_w = w - SIDEBAR_W;
-                                    let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                    if let Some(url) = eng.current_url.as_ref().map(|u| u.as_string()) {
-                                        let _ = eng.load_url(&url, content_w, content_h);
+                                if !is_home_page {
+                                    if let Ok(mut eng) = engine.lock() {
+                                        let content_w = w - SIDEBAR_W;
+                                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
+                                        if let Some(url) = eng.current_url.as_ref().map(|u| u.as_string()) {
+                                            let _ = eng.load_url(&url, content_w, content_h);
+                                        }
                                     }
                                 }
                             }
                             address_bar_focused = false;
                             needs_chrome_redraw = true;
                         }
-                    } else {
-                        // Content area click
+                    } else if !is_home_page {
                         address_bar_focused = false;
                         let btn = match button {
                             MouseButton::Left => 0,
@@ -250,9 +264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         if let Ok(mut eng) = engine.lock() {
                             if let Some(nav_url) = eng.handle_pointer_down(
-                                mouse_x - SIDEBAR_W,
-                                mouse_y - CHROME_TOP,
-                                btn,
+                                mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, btn,
                             ) {
                                 let content_w = w - SIDEBAR_W;
                                 let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
@@ -263,7 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                if state == ElementState::Released && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
+                if state == ElementState::Released && !is_home_page && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
                     let btn = match button {
                         MouseButton::Left => 0,
                         MouseButton::Right => 2,
@@ -271,11 +283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => 0,
                     };
                     if let Ok(mut eng) = engine.lock() {
-                        let _ = eng.handle_pointer_up(
-                            mouse_x - SIDEBAR_W,
-                            mouse_y - CHROME_TOP,
-                            btn,
-                        );
+                        let _ = eng.handle_pointer_up(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, btn);
                     }
                 }
             }
@@ -305,54 +313,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         address_bar_text.clone()
                                     }
                                 } else if !address_bar_text.is_empty() {
-                                    format!(
-                                        "https://html.duckduckgo.com/html/?q={}",
-                                        address_bar_text
-                                    )
+                                    format!("https://html.duckduckgo.com/html/?q={}", address_bar_text)
                                 } else {
                                     return;
                                 };
                                 if let Ok(mut eng) = engine.lock() {
-                                    let w = gpu_renderer.surface_config.width as f32;
-                                    let content_w = w - SIDEBAR_W;
-                                    let content_h =
-                                        gpu_renderer.surface_config.height as f32 - CHROME_TOP;
+                                    let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
+                                    let content_h = h_of(&gpu_renderer) - CHROME_TOP;
                                     let _ = eng.load_url(&url, content_w, content_h);
                                     address_bar_text = url;
+                                    is_home_page = false;
                                 }
                                 needs_chrome_redraw = true;
                             }
                             Key::Escape => {
                                 address_bar_focused = false;
+                                if is_home_page {
+                                    address_bar_text = String::from("about:home");
+                                }
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
                         }
                     } else {
-                        let key_str = match key_event.logical_key {
-                            Key::Character(ref ch) => ch.to_string(),
-                            Key::Backspace => "BackSpace".to_string(),
-                            Key::Enter => "Enter".to_string(),
-                            Key::Tab => "Tab".to_string(),
-                            Key::Escape => "Escape".to_string(),
-                            Key::Space => " ".to_string(),
-                            Key::ArrowUp => "ArrowUp".to_string(),
-                            Key::ArrowDown => "ArrowDown".to_string(),
-                            Key::ArrowLeft => "ArrowLeft".to_string(),
-                            Key::ArrowRight => "ArrowRight".to_string(),
-                            _ => return,
-                        };
-                        if let Ok(mut eng) = engine.lock() {
-                            if let Some(nav_url) = eng.handle_key_event(
-                                "keydown", &key_str, "", 0, false, false, false, false, false,
-                            ) {
-                                let w = gpu_renderer.surface_config.width as f32;
-                                let content_w = w - SIDEBAR_W;
-                                let content_h =
-                                    gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                let _ = eng.load_url(&nav_url, content_w, content_h);
-                                address_bar_text = nav_url;
-                                needs_chrome_redraw = true;
+                        if !is_home_page {
+                            let key_str = match key_event.logical_key {
+                                Key::Character(ref ch) => ch.to_string(),
+                                Key::Backspace => "BackSpace".to_string(),
+                                Key::Enter => "Enter".to_string(),
+                                Key::Tab => "Tab".to_string(),
+                                Key::Escape => "Escape".to_string(),
+                                Key::Space => " ".to_string(),
+                                Key::ArrowUp => "ArrowUp".to_string(),
+                                Key::ArrowDown => "ArrowDown".to_string(),
+                                Key::ArrowLeft => "ArrowLeft".to_string(),
+                                Key::ArrowRight => "ArrowRight".to_string(),
+                                _ => return,
+                            };
+                            if let Ok(mut eng) = engine.lock() {
+                                if let Some(nav_url) = eng.handle_key_event(
+                                    "keydown", &key_str, "", 0, false, false, false, false, false,
+                                ) {
+                                    let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
+                                    let content_h = h_of(&gpu_renderer) - CHROME_TOP;
+                                    let _ = eng.load_url(&nav_url, content_w, content_h);
+                                    address_bar_text = nav_url;
+                                    needs_chrome_redraw = true;
+                                }
                             }
                         }
                     }
@@ -368,82 +375,103 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tao::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
                         _ => 0.0,
                     };
-                    if let Ok(mut eng) = engine.lock() {
-                        let w = gpu_renderer.surface_config.width as f32;
-                        let content_w = w - SIDEBAR_W;
-                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
+                    if is_home_page {
+                        home_scroll_y = (home_scroll_y + dy).min(0.0).max(-800.0);
+                        needs_chrome_redraw = true;
+                    } else if let Ok(mut eng) = engine.lock() {
+                        let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
+                        let content_h = h_of(&gpu_renderer) - CHROME_TOP;
                         let _ = eng.handle_scroll_at(
-                            mouse_x - SIDEBAR_W,
-                            mouse_y - CHROME_TOP,
-                            0.0,
-                            dy,
-                            content_w,
-                            content_h,
+                            mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, 0.0, dy, content_w, content_h,
                         );
                     }
                 }
             }
             Event::MainEventsCleared => {
-                if let Ok(mut eng) = engine.lock() {
-                    let w = gpu_renderer.surface_config.width as f32;
-                    let h = gpu_renderer.surface_config.height as f32;
-                    let content_w = w - SIDEBAR_W;
-                    let content_h = h - CHROME_TOP;
+                let w = w_of(&gpu_renderer);
+                let h = h_of(&gpu_renderer);
+                let content_w = w - SIDEBAR_W;
+                let content_h = h - CHROME_TOP;
+
+                let should_render = if is_home_page {
+                    needs_chrome_redraw || gpu_renderer.presented_frames < 3
+                } else if let Ok(mut eng) = engine.lock() {
                     let updated = eng.process_event_loop(content_w, content_h);
+                    updated || needs_chrome_redraw || gpu_renderer.presented_frames < 3
+                } else {
+                    false
+                };
 
-                    if updated || needs_chrome_redraw || gpu_renderer.presented_frames < 3 {
-                        needs_chrome_redraw = false;
-                        compositor.width = content_w as u32;
-                        compositor.height = content_h as u32;
+                if should_render {
+                    needs_chrome_redraw = false;
+                    compositor.width = content_w as u32;
+                    compositor.height = content_h as u32;
 
-                        let mut quads = build_chrome_quads(
-                            &mut compositor,
-                            w,
-                            h,
-                            &address_bar_text,
-                            address_bar_focused,
-                            &eng,
-                            sidebar_active,
+                    let title = if is_home_page {
+                        "Axomai Browser".to_string()
+                    } else if let Ok(eng) = engine.lock() {
+                        eng.current_title.clone()
+                    } else {
+                        String::new()
+                    };
+
+                    let history_back = if let Ok(eng) = engine.lock() { eng.history_index > 0 } else { false };
+                    let history_fwd = if let Ok(eng) = engine.lock() { eng.history_index + 1 < eng.history.len() } else { false };
+
+                    let mut quads = build_chrome_quads(
+                        &mut compositor, w, h, &address_bar_text, address_bar_focused,
+                        &title, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
+                    );
+
+                    if is_home_page {
+                        let home_quads = build_home_page_quads(
+                            &mut compositor, content_w, content_h, home_scroll_y,
                         );
-
-                        let mut page_quads = compositor.extract_gpu_quads(&eng.display_list);
-                        for q in &mut page_quads {
+                        // Offset home quads to content area
+                        for mut q in home_quads {
                             for v in &mut q.vertices {
                                 v.position[0] += SIDEBAR_W;
                                 v.position[1] += CHROME_TOP;
                             }
+                            quads.push(q);
                         }
-                        quads.extend(page_quads);
-
-                        if compositor.glyph_atlas.dirty {
-                            gpu_renderer.upload_glyph_atlas(&compositor.glyph_atlas);
-                            compositor.glyph_atlas.dirty = false;
-                        }
-
-                        match gpu_renderer.render_frame(&quads) {
-                            Ok(frame_idx) => {
-                                if frame_idx % 300 == 1 {
-                                    println!(
-                                        "[Axomai GPU] Frame #{} — {} quads rendered",
-                                        frame_idx,
-                                        quads.len()
-                                    );
+                    } else {
+                        if let Ok(eng) = engine.lock() {
+                            let mut page_quads = compositor.extract_gpu_quads(&eng.display_list);
+                            for q in &mut page_quads {
+                                for v in &mut q.vertices {
+                                    v.position[0] += SIDEBAR_W;
+                                    v.position[1] += CHROME_TOP;
                                 }
                             }
-                            Err(wgpu::SurfaceError::Lost) => {
-                                let cfg = &gpu_renderer.surface_config;
-                                gpu_renderer.resize(cfg.width, cfg.height);
-                            }
-                            Err(wgpu::SurfaceError::OutOfMemory) => {
-                                *control_flow = ControlFlow::Exit;
-                            }
-                            Err(e) => {
-                                eprintln!("[Axomai GPU] Render error: {:?}", e);
+                            quads.extend(page_quads);
+                        }
+                    }
+
+                    if compositor.glyph_atlas.dirty {
+                        gpu_renderer.upload_glyph_atlas(&compositor.glyph_atlas);
+                        compositor.glyph_atlas.dirty = false;
+                    }
+
+                    match gpu_renderer.render_frame(&quads) {
+                        Ok(frame_idx) => {
+                            if frame_idx % 300 == 1 {
+                                println!("[Axomai GPU] Frame #{} — {} quads", frame_idx, quads.len());
                             }
                         }
-
-                        window.set_title(&format!("Axomai Browser — {}", eng.current_title));
+                        Err(wgpu::SurfaceError::Lost) => {
+                            let cfg = &gpu_renderer.surface_config;
+                            gpu_renderer.resize(cfg.width, cfg.height);
+                        }
+                        Err(wgpu::SurfaceError::OutOfMemory) => {
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        Err(e) => {
+                            eprintln!("[Axomai GPU] Render error: {:?}", e);
+                        }
                     }
+
+                    window.set_title(&format!("Axomai Browser — {}", title));
                 }
             }
             _ => {}
@@ -451,15 +479,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 }
 
+fn w_of(r: &WgpuRenderer) -> f32 { r.surface_config.width as f32 }
+fn h_of(r: &WgpuRenderer) -> f32 { r.surface_config.height as f32 }
+
 use axomai_engine::GpuQuad;
 
 fn c(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
-    [
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-        a as f32 / 255.0,
-    ]
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
 }
 
 fn render_text(
@@ -473,21 +499,38 @@ fn render_text(
     max_x: f32,
 ) -> f32 {
     for ch in text.chars() {
-        if x > max_x {
-            break;
-        }
+        if x > max_x { break; }
         let g = compositor.glyph_atlas.rasterize(ch, size);
         if g.width > 0.0 {
-            quads.push(NativeGpuCompositor::text_quad(
-                x + g.offset_x,
-                y - g.offset_y - g.height,
-                &g,
-                color,
-            ));
+            quads.push(NativeGpuCompositor::text_quad(x + g.offset_x, y - g.offset_y - g.height, &g, color));
         }
         x += g.advance_width;
     }
     x
+}
+
+fn render_text_centered(
+    compositor: &mut NativeGpuCompositor,
+    quads: &mut Vec<GpuQuad>,
+    text: &str,
+    center_x: f32,
+    y: f32,
+    size: f32,
+    color: [f32; 4],
+) {
+    let mut total_w = 0.0f32;
+    for ch in text.chars() {
+        let g = compositor.glyph_atlas.rasterize(ch, size);
+        total_w += g.advance_width;
+    }
+    let start_x = center_x - total_w / 2.0;
+    render_text(compositor, quads, text, start_x, y, size, color, center_x + total_w);
+}
+
+// ===== CHROME (Tab bar + Toolbar + Sidebar) =====
+
+fn rq(x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) -> GpuQuad {
+    NativeGpuCompositor::rounded_quad(x, y, w, h, r, color)
 }
 
 fn build_chrome_quads(
@@ -496,270 +539,313 @@ fn build_chrome_quads(
     viewport_h: f32,
     address_text: &str,
     focused: bool,
-    engine: &AxomaiEngine,
+    title: &str,
+    history_back: bool,
+    history_fwd: bool,
     sidebar_active: usize,
+    hover_sidebar: Option<usize>,
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
-    // === SIDEBAR (full height, left side) ===
-    let sb_bg = c(17, 20, 33, 255);
-    let sb_active_bg = c(37, 99, 235, 255);
-    let _sb_hover_bg = c(30, 35, 52, 255);
-    let sb_text = c(180, 185, 200, 255);
-    let sb_text_active = c(255, 255, 255, 255);
-    let sb_section_text = c(100, 105, 120, 255);
+    // Chrome light theme colors
+    let white = c(255, 255, 255, 255);
+    let tab_bar_bg = c(222, 225, 230, 255);
+    let toolbar_bg = white;
+    let sidebar_bg = c(248, 249, 250, 255);
+    let border = c(218, 220, 224, 255);
+    let text_primary = c(32, 33, 36, 255);
+    let text_secondary = c(95, 99, 104, 255);
+    let text_disabled = c(155, 160, 168, 255);
+    let blue = c(26, 115, 232, 255);
+    let hover_bg = c(232, 234, 237, 255);
+    let active_bg = c(210, 227, 252, 255);
 
-    // Sidebar background
-    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, sb_bg));
-    // Sidebar right border
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, c(40, 44, 60, 255)));
+    // === SIDEBAR ===
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, sidebar_bg));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, border));
 
-    // Logo area at top of sidebar
-    let logo_color = c(96, 165, 250, 255);
-    render_text(compositor, &mut quads, "Axomai", 16.0, 30.0, 16.0, logo_color, SIDEBAR_W - 8.0);
-    render_text(compositor, &mut quads, "Browser", 86.0, 30.0, 10.0, c(140, 145, 165, 255), SIDEBAR_W - 8.0);
+    // Logo
+    render_text(compositor, &mut quads, "Axomai", 16.0, 28.0, 16.0, blue, SIDEBAR_W);
+    render_text(compositor, &mut quads, "Browser", 88.0, 28.0, 10.0, text_secondary, SIDEBAR_W);
+    quads.push(NativeGpuCompositor::solid_quad(12.0, 40.0, SIDEBAR_W - 24.0, 1.0, border));
 
-    // Sidebar divider after logo
-    quads.push(NativeGpuCompositor::solid_quad(12.0, 42.0, SIDEBAR_W - 24.0, 1.0, c(40, 44, 60, 255)));
-
-    // Sidebar items
-    let mut item_y = 52.0;
+    let mut item_y = 50.0;
     for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
         if item.is_section {
-            // Section header
             item_y += 8.0;
-            quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, c(40, 44, 60, 255)));
-            item_y += 8.0;
-            render_text(compositor, &mut quads, item.label, 16.0, item_y + 14.0, 10.0, sb_section_text, SIDEBAR_W - 8.0);
-            item_y += 24.0;
+            quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, border));
+            item_y += 10.0;
+            render_text(compositor, &mut quads, item.label, 16.0, item_y + 12.0, 10.0, text_disabled, SIDEBAR_W);
+            item_y += 22.0;
         } else {
             let is_active = i == sidebar_active;
-            let item_h = 32.0;
+            let is_hovered = hover_sidebar == Some(i);
+            let h = 32.0;
             if is_active {
-                quads.push(NativeGpuCompositor::solid_quad(8.0, item_y, SIDEBAR_W - 16.0, item_h, sb_active_bg));
+                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, active_bg));
+            } else if is_hovered {
+                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, hover_bg));
             }
-            let text_color = if is_active { sb_text_active } else { sb_text };
-            // Icon placeholder
-            render_text(compositor, &mut quads, item.icon, 20.0, item_y + 21.0, 13.0, text_color, 40.0);
-            // Label
-            render_text(compositor, &mut quads, item.label, 40.0, item_y + 21.0, 13.0, text_color, SIDEBAR_W - 8.0);
-            item_y += item_h + 2.0;
+            let tc = if is_active { blue } else { text_primary };
+            render_text(compositor, &mut quads, item.icon, 18.0, item_y + 21.0, 13.0, tc, 36.0);
+            render_text(compositor, &mut quads, item.label, 38.0, item_y + 21.0, 13.0, tc, SIDEBAR_W - 8.0);
+            item_y += h + 1.0;
         }
     }
+    item_y += 6.0;
+    render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, blue, SIDEBAR_W);
 
-    // + Add Workspace at bottom of sidebar items
-    item_y += 4.0;
-    render_text(compositor, &mut quads, "+ Add Workspace", 20.0, item_y + 14.0, 11.0, c(96, 165, 250, 255), SIDEBAR_W - 8.0);
+    // === TAB BAR ===
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, 0.0, viewport_w - SIDEBAR_W, TAB_BAR_H, tab_bar_bg));
 
-    // === TAB BAR (right of sidebar, at top) ===
-    let tab_bg = c(22, 25, 38, 255);
-    let tab_active_bg = c(32, 36, 52, 255);
-
-    // Tab bar background
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, 0.0, viewport_w - SIDEBAR_W, TAB_BAR_H, tab_bg));
-    // Tab bar bottom border
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, TAB_BAR_H - 1.0, viewport_w - SIDEBAR_W, 1.0, c(40, 44, 60, 255)));
-
-    // Active tab
-    let tab_title = if engine.current_title.is_empty() {
-        "New Tab"
-    } else {
-        &engine.current_title
-    };
-    let tab_x = SIDEBAR_W + 4.0;
-    let tab_w = 200.0;
-    quads.push(NativeGpuCompositor::solid_quad(tab_x, 4.0, tab_w, TAB_BAR_H - 4.0, tab_active_bg));
-    // Active tab bottom accent
-    quads.push(NativeGpuCompositor::solid_quad(tab_x, TAB_BAR_H - 2.0, tab_w, 2.0, c(96, 165, 250, 255)));
-    // Tab icon placeholder (circle)
-    quads.push(NativeGpuCompositor::solid_quad(tab_x + 10.0, 14.0, 14.0, 14.0, c(96, 165, 250, 255)));
-    // Tab title
-    render_text(
-        compositor, &mut quads, tab_title,
-        tab_x + 30.0, 26.0, 12.0, c(220, 225, 240, 255), tab_x + tab_w - 24.0,
-    );
-    // Tab close X
-    render_text(
-        compositor, &mut quads, "x",
-        tab_x + tab_w - 18.0, 26.0, 11.0, c(120, 125, 140, 255), tab_x + tab_w,
-    );
+    let tab_title = if title.is_empty() { "New Tab" } else { title };
+    let tab_x = SIDEBAR_W + 6.0;
+    let tab_w = 220.0;
+    // Active tab (white, rounded top)
+    quads.push(rq(tab_x, 6.0, tab_w, TAB_BAR_H - 4.0, 10.0, white));
+    // Tab icon dot
+    quads.push(rq(tab_x + 14.0, 16.0, 12.0, 12.0, 6.0, blue));
+    render_text(compositor, &mut quads, tab_title, tab_x + 32.0, 28.0, 12.0, text_primary, tab_x + tab_w - 24.0);
+    render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 11.0, text_secondary, tab_x + tab_w);
 
     // + New tab button
-    let plus_x = tab_x + tab_w + 8.0;
-    quads.push(NativeGpuCompositor::solid_quad(plus_x, 8.0, 28.0, 26.0, c(28, 32, 48, 255)));
-    render_text(compositor, &mut quads, "+", plus_x + 8.0, 26.0, 14.0, c(120, 125, 140, 255), plus_x + 28.0);
+    let plus_x = tab_x + tab_w + 6.0;
+    quads.push(rq(plus_x, 10.0, 28.0, 22.0, 11.0, c(0, 0, 0, 0)));
+    render_text(compositor, &mut quads, "+", plus_x + 8.0, 26.0, 16.0, text_secondary, plus_x + 28.0);
 
-    // === TOOLBAR (below tab bar, right of sidebar) ===
-    let toolbar_bg = c(26, 29, 44, 255);
-    let toolbar_y = TAB_BAR_H;
+    // === TOOLBAR ===
+    let ty = TAB_BAR_H;
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, viewport_w - SIDEBAR_W, TOOLBAR_H, toolbar_bg));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.0, viewport_w - SIDEBAR_W, 1.0, border));
 
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, toolbar_y, viewport_w - SIDEBAR_W, TOOLBAR_H, toolbar_bg));
-    // Toolbar bottom border
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.0, viewport_w - SIDEBAR_W, 1.0, c(45, 48, 64, 255)));
-
-    // Navigation buttons
-    let nav_y = toolbar_y + 8.0;
-    let nav_base_x = SIDEBAR_W + 12.0;
-
-    // Back arrow
-    let back_color = if engine.history_index > 0 { c(200, 205, 220, 255) } else { c(60, 64, 80, 255) };
-    render_text(compositor, &mut quads, "<", nav_base_x + 8.0, nav_y + 18.0, 16.0, back_color, nav_base_x + 32.0);
-
-    // Forward arrow
-    let fwd_color = if engine.history_index + 1 < engine.history.len() { c(200, 205, 220, 255) } else { c(60, 64, 80, 255) };
-    render_text(compositor, &mut quads, ">", nav_base_x + 44.0, nav_y + 18.0, 16.0, fwd_color, nav_base_x + 68.0);
-
-    // Reload
-    render_text(compositor, &mut quads, "R", nav_base_x + 80.0, nav_y + 18.0, 14.0, c(140, 145, 165, 255), nav_base_x + 104.0);
-
-    // Shield icon
-    quads.push(NativeGpuCompositor::solid_quad(nav_base_x + 108.0, nav_y + 4.0, 20.0, 20.0, c(96, 165, 250, 80)));
-    render_text(compositor, &mut quads, "S", nav_base_x + 112.0, nav_y + 18.0, 12.0, c(96, 165, 250, 255), nav_base_x + 130.0);
+    let ny = ty + 7.0;
+    let nb = SIDEBAR_W + 10.0;
+    let back_c = if history_back { text_primary } else { text_disabled };
+    let fwd_c = if history_fwd { text_primary } else { text_disabled };
+    render_text(compositor, &mut quads, "<", nb + 6.0, ny + 19.0, 18.0, back_c, nb + 28.0);
+    render_text(compositor, &mut quads, ">", nb + 36.0, ny + 19.0, 18.0, fwd_c, nb + 58.0);
+    render_text(compositor, &mut quads, "R", nb + 68.0, ny + 18.0, 14.0, text_secondary, nb + 88.0);
 
     // Address bar
-    let addr_x = SIDEBAR_W + 140.0;
-    let addr_y = toolbar_y + 7.0;
-    let addr_h = 30.0;
-    let addr_w = viewport_w - addr_x - 170.0;
+    let ax = SIDEBAR_W + 120.0;
+    let ay = ty + 7.0;
+    let ah = 32.0;
+    let aw = viewport_w - ax - 180.0;
+    let addr_bg = if focused { white } else { c(241, 243, 244, 255) };
+    let addr_border = if focused { blue } else { c(241, 243, 244, 255) };
+    quads.push(rq(ax, ay, aw, ah, 16.0, addr_border));
+    quads.push(rq(ax + 1.5, ay + 1.5, aw - 3.0, ah - 3.0, 15.0, addr_bg));
 
-    // Address bar border
-    let border_c = if focused { c(96, 165, 250, 255) } else { c(50, 54, 70, 255) };
-    quads.push(NativeGpuCompositor::solid_quad(addr_x, addr_y, addr_w, addr_h, border_c));
-    // Address bar inner fill
-    quads.push(NativeGpuCompositor::solid_quad(addr_x + 1.0, addr_y + 1.0, addr_w - 2.0, addr_h - 2.0, c(18, 21, 34, 255)));
+    // Search/lock icon
+    render_text(compositor, &mut quads, "O", ax + 12.0, ay + 22.0, 12.0, text_secondary, ax + 28.0);
 
-    // Search icon placeholder in address bar
-    render_text(compositor, &mut quads, "O", addr_x + 10.0, addr_y + 21.0, 12.0, c(96, 165, 250, 255), addr_x + 28.0);
+    let display = if address_text == "about:home" && !focused { "Search Axomai or enter address" } else { address_text };
+    let dtc = if address_text == "about:home" && !focused { text_disabled } else { text_primary };
+    let end_x = render_text(compositor, &mut quads, display, ax + 30.0, ay + 22.0, 13.0, dtc, ax + aw - 12.0);
 
-    // Address bar text
-    let text_x = addr_x + 28.0;
-    let text_max_x = addr_x + addr_w - 10.0;
-    let display_text = if address_text == "about:home" && !focused {
-        "Search Axomai or enter address"
-    } else {
-        address_text
-    };
-    let text_color = if address_text == "about:home" && !focused {
-        c(100, 105, 125, 255)
-    } else {
-        c(200, 205, 225, 255)
-    };
-    let end_x = render_text(compositor, &mut quads, display_text, text_x, addr_y + 21.0, 13.0, text_color, text_max_x);
-
-    // Cursor blink
     if focused {
-        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, addr_y + 6.0, 1.5, addr_h - 12.0, c(96, 165, 250, 255)));
+        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 7.0, 1.5, ah - 14.0, blue));
     }
 
-    // Right-side toolbar buttons
-    let right_base = viewport_w - 160.0;
-
-    // Bookmark star
-    render_text(compositor, &mut quads, "*", right_base, nav_y + 18.0, 18.0, c(130, 135, 155, 255), right_base + 24.0);
-
-    // Capture icon
-    render_text(compositor, &mut quads, "C", right_base + 30.0, nav_y + 18.0, 13.0, c(130, 135, 155, 255), right_base + 50.0);
-
-    // Download icon
-    render_text(compositor, &mut quads, "v", right_base + 56.0, nav_y + 18.0, 14.0, c(130, 135, 155, 255), right_base + 74.0);
-
-    // AI button (highlighted)
-    quads.push(NativeGpuCompositor::solid_quad(right_base + 80.0, nav_y + 2.0, 30.0, 24.0, c(96, 165, 250, 255)));
-    render_text(compositor, &mut quads, "AI", right_base + 84.0, nav_y + 17.0, 11.0, c(255, 255, 255, 255), right_base + 110.0);
-
-    // Profile circle
-    quads.push(NativeGpuCompositor::solid_quad(right_base + 116.0, nav_y + 2.0, 24.0, 24.0, c(60, 64, 80, 255)));
-    render_text(compositor, &mut quads, "U", right_base + 121.0, nav_y + 17.0, 12.0, c(180, 185, 200, 255), right_base + 140.0);
-
-    // Menu (hamburger)
-    render_text(compositor, &mut quads, "=", right_base + 146.0, nav_y + 18.0, 14.0, c(130, 135, 155, 255), right_base + 166.0);
+    // Right toolbar buttons
+    let rx = viewport_w - 170.0;
+    render_text(compositor, &mut quads, "*", rx, ny + 18.0, 18.0, text_secondary, rx + 22.0);
+    render_text(compositor, &mut quads, "C", rx + 30.0, ny + 18.0, 13.0, text_secondary, rx + 48.0);
+    render_text(compositor, &mut quads, "v", rx + 56.0, ny + 18.0, 14.0, text_secondary, rx + 74.0);
+    // AI button (blue pill)
+    quads.push(rq(rx + 82.0, ny + 3.0, 32.0, 24.0, 12.0, blue));
+    render_text(compositor, &mut quads, "AI", rx + 87.0, ny + 17.0, 11.0, white, rx + 114.0);
+    // Profile
+    quads.push(rq(rx + 120.0, ny + 3.0, 24.0, 24.0, 12.0, c(232, 234, 237, 255)));
+    render_text(compositor, &mut quads, "U", rx + 125.0, ny + 17.0, 12.0, text_secondary, rx + 144.0);
+    // Menu
+    render_text(compositor, &mut quads, "=", rx + 150.0, ny + 18.0, 14.0, text_secondary, rx + 170.0);
 
     quads
 }
 
-const HOME_PAGE_HTML: &str = "\
-<html><body style='margin:0;padding:0;font-family:system-ui;background:#0d1117'>\
-<div style='padding:48px 40px 24px 40px;background:#0d1117'>\
-  <div style='padding:0 0 0 0'>\
-    <p style='color:#60a5fa;font-size:42px;margin:0'>Axomai Browser</p>\
-    <p style='color:#7c8ba1;font-size:16px;margin-top:6px'>Fast. Private. AI-Powered. Built for Everyone.</p>\
-  </div>\
-</div>\
-<div style='margin:0 40px;padding:14px 20px;background:#161b28;border:1px solid #2a3040'>\
-  <p style='color:#6b7a8d;font-size:15px'>Search the web with Axomai AI...</p>\
-</div>\
-<div style='padding:28px 40px 8px 40px'>\
-  <p style='color:#8b95a5;font-size:13px;margin-bottom:14px'>Quick Links</p>\
-  <div style='display:flex'>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>YouTube</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>Google</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>Facebook</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>Instagram</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>Amazon</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:14px'>Flipkart</p>\
-    </div>\
-    <div style='padding:16px 26px;background:#161b28;border:1px solid #2a3040'>\
-      <p style='color:#e2e8f0;font-size:14px'>X</p>\
-    </div>\
-  </div>\
-</div>\
-<div style='padding:24px 40px'>\
-  <p style='color:#8b95a5;font-size:13px;margin-bottom:14px'>Axomai AI Assistant</p>\
-  <div style='padding:18px 22px;background:#0c1a3a;border:1px solid #1e3a6e'>\
-    <p style='color:#60a5fa;font-size:17px;margin:0'>Hello! I am Axomai AI</p>\
-    <p style='color:#5a6a80;font-size:13px;margin-top:6px'>Your intelligent browsing assistant for a better web experience.</p>\
-  </div>\
-  <div style='margin-top:8px;padding:11px 18px;background:#161b28;border:1px solid #2a3040'>\
-    <p style='color:#8b95a5;font-size:13px'>Summarize this page</p>\
-  </div>\
-  <div style='margin-top:6px;padding:11px 18px;background:#161b28;border:1px solid #2a3040'>\
-    <p style='color:#8b95a5;font-size:13px'>Explain like 5 year old</p>\
-  </div>\
-  <div style='margin-top:6px;padding:11px 18px;background:#161b28;border:1px solid #2a3040'>\
-    <p style='color:#8b95a5;font-size:13px'>Translate to Assamese</p>\
-  </div>\
-  <div style='margin-top:6px;padding:11px 18px;background:#161b28;border:1px solid #2a3040'>\
-    <p style='color:#8b95a5;font-size:13px'>Find similar content</p>\
-  </div>\
-  <div style='margin-top:6px;padding:11px 18px;background:#161b28;border:1px solid #2a3040'>\
-    <p style='color:#8b95a5;font-size:13px'>Generate notes</p>\
-  </div>\
-</div>\
-<div style='padding:20px 40px'>\
-  <p style='color:#8b95a5;font-size:13px;margin-bottom:14px'>Quick Tools</p>\
-  <div style='display:flex'>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:12px'>Reader Mode</p>\
-    </div>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:12px'>AI Notes</p>\
-    </div>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:12px'>Bookmarks</p>\
-    </div>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:12px'>History</p>\
-    </div>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040;margin-right:10px'>\
-      <p style='color:#e2e8f0;font-size:12px'>QR Code</p>\
-    </div>\
-    <div style='padding:14px 20px;background:#161b28;border:1px solid #2a3040'>\
-      <p style='color:#e2e8f0;font-size:12px'>More Tools</p>\
-    </div>\
-  </div>\
-</div>\
-<div style='padding:30px 40px'>\
-  <p style='color:#3a4050;font-size:11px'>Axomai Browser v1.7.0 - Native GPU Engine - No WebView - Built with Rust</p>\
-</div>\
-</body></html>";
+// ===== HOME PAGE (drawn entirely via GPU quads — no HTML engine) =====
+
+fn build_home_page_quads(
+    compositor: &mut NativeGpuCompositor,
+    content_w: f32,
+    content_h: f32,
+    scroll_y: f32,
+) -> Vec<GpuQuad> {
+    let mut quads = Vec::new();
+
+    // Light theme colors
+    let white = c(255, 255, 255, 255);
+    let page_bg = c(246, 247, 248, 255);
+    let text_dark = c(32, 33, 36, 255);
+    let text_secondary = c(95, 99, 104, 255);
+    let text_light = c(155, 160, 168, 255);
+    let blue = c(26, 115, 232, 255);
+    let card_bg = white;
+    let border = c(218, 220, 224, 255);
+
+    // Background
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, page_bg));
+
+    let cx = content_w / 2.0;
+    let base_y = scroll_y;
+
+    // ---- Hero section (white) ----
+    quads.push(NativeGpuCompositor::solid_quad(0.0, base_y, content_w, 280.0, white));
+    quads.push(NativeGpuCompositor::solid_quad(0.0, base_y + 279.0, content_w, 1.0, border));
+
+    // Location / weather widget (top right of hero)
+    let wr_x = content_w - 200.0;
+    render_text(compositor, &mut quads, "Guwahati", wr_x, base_y + 30.0, 12.0, text_secondary, content_w);
+    render_text(compositor, &mut quads, "28 C  Partly Cloudy", wr_x, base_y + 48.0, 11.0, text_light, content_w);
+
+    // Logo icon
+    let logo_size = 56.0;
+    let logo_x = cx - logo_size / 2.0;
+    quads.push(rq(logo_x, base_y + 40.0, logo_size, logo_size, 14.0, blue));
+    render_text_centered(compositor, &mut quads, "A", cx, base_y + 82.0, 28.0, white);
+
+    // Title
+    render_text_centered(compositor, &mut quads, "Axomai Browser", cx, base_y + 125.0, 26.0, text_dark);
+    render_text_centered(compositor, &mut quads, "Fast. Private. AI-Powered. Built for Everyone.", cx, base_y + 152.0, 13.0, text_secondary);
+
+    // ---- Search bar (centered, Chrome-style pill) ----
+    let search_w = 540.0f32.min(content_w - 80.0);
+    let search_x = cx - search_w / 2.0;
+    let search_y = base_y + 175.0;
+    quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, white));
+    // Shadow simulation (slightly darker border)
+    quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, c(0, 0, 0, 18)));
+    quads.push(rq(search_x + 1.0, search_y + 1.0, search_w - 2.0, 42.0, 21.0, white));
+    // Search icon
+    render_text(compositor, &mut quads, "G", search_x + 16.0, search_y + 30.0, 16.0, blue, search_x + 36.0);
+    // Placeholder
+    render_text(compositor, &mut quads, "Search the web with Axomai AI...", search_x + 42.0, search_y + 28.0, 14.0, text_light, search_x + search_w - 40.0);
+    render_text(compositor, &mut quads, "Q", search_x + search_w - 32.0, search_y + 28.0, 14.0, text_secondary, search_x + search_w);
+
+    // ---- Quick Links row ----
+    let links = ["YouTube", "Google", "Facebook", "Instagram", "X", "Amazon", "Flipkart", "+"];
+    let link_colors: &[[u8; 3]] = &[
+        [255, 0, 0],
+        [66, 133, 244],
+        [24, 119, 242],
+        [225, 48, 108],
+        [100, 100, 110],
+        [255, 153, 0],
+        [255, 209, 0],
+        [26, 115, 232],
+    ];
+    let link_count = links.len() as f32;
+    let link_box_w = 72.0;
+    let link_gap = 14.0;
+    let total_links_w = link_count * link_box_w + (link_count - 1.0) * link_gap;
+    let links_start_x = cx - total_links_w / 2.0;
+    let links_y = base_y + 240.0;
+
+    for (i, label) in links.iter().enumerate() {
+        let lx = links_start_x + i as f32 * (link_box_w + link_gap);
+        let ly = links_y;
+        let icon_size = 44.0;
+        let icon_x = lx + (link_box_w - icon_size) / 2.0;
+        // Light circle background
+        quads.push(rq(icon_x, ly, icon_size, icon_size, 22.0, c(241, 243, 244, 255)));
+        let cc = link_colors[i];
+        quads.push(rq(icon_x + 6.0, ly + 6.0, icon_size - 12.0, icon_size - 12.0, 16.0, c(cc[0], cc[1], cc[2], 220)));
+        let first_char = &label[..1];
+        render_text_centered(compositor, &mut quads, first_char, lx + link_box_w / 2.0, ly + 30.0, 16.0, white);
+        render_text_centered(compositor, &mut quads, label, lx + link_box_w / 2.0, ly + 58.0, 10.0, text_secondary);
+    }
+
+    // ---- Category tabs ----
+    let tabs_y = links_y + 76.0;
+    let tab_labels = ["Top Sites", "News", "Technology", "Assam", "AI Tools", "Coding"];
+    let mut tx = 30.0;
+    for (i, label) in tab_labels.iter().enumerate() {
+        let tc = if i == 0 { blue } else { text_secondary };
+        let end = render_text(compositor, &mut quads, label, tx, tabs_y + 16.0, 13.0, tc, content_w - 30.0);
+        if i == 0 {
+            quads.push(NativeGpuCompositor::solid_quad(tx, tabs_y + 22.0, end - tx, 2.0, blue));
+        }
+        tx = end + 24.0;
+    }
+    quads.push(NativeGpuCompositor::solid_quad(30.0, tabs_y + 26.0, content_w - 60.0, 1.0, border));
+
+    // ---- Content cards and Quick Tools ----
+    let cards_y = tabs_y + 40.0;
+    let cards_w = (content_w - 90.0) * 0.6;
+    let tools_x = 30.0 + cards_w + 30.0;
+    let tools_w = content_w - tools_x - 30.0;
+
+    // Card 1
+    let card_h = 100.0;
+    quads.push(rq(30.0, cards_y, cards_w, card_h, 10.0, card_bg));
+    quads.push(rq(44.0, cards_y + 12.0, 60.0, 20.0, 4.0, c(26, 115, 232, 255)));
+    render_text(compositor, &mut quads, "Assam", 50.0, cards_y + 26.0, 10.0, white, 100.0);
+    render_text(compositor, &mut quads, "Kaziranga National Park sees", 44.0, cards_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "rise in tourist footfall this season", 44.0, cards_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "10 hours ago", 44.0, cards_y + 90.0, 10.0, text_light, 200.0);
+
+    // Card 2
+    let card2_y = cards_y + card_h + 10.0;
+    quads.push(rq(30.0, card2_y, cards_w, card_h, 10.0, card_bg));
+    quads.push(rq(44.0, card2_y + 12.0, 60.0, 20.0, 4.0, c(22, 163, 74, 255)));
+    render_text(compositor, &mut quads, "Wildlife", 48.0, card2_y + 26.0, 10.0, white, 110.0);
+    render_text(compositor, &mut quads, "One-Horned Rhino population", 44.0, card2_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "shows positive growth", 44.0, card2_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "12 hours ago", 44.0, card2_y + 90.0, 10.0, text_light, 200.0);
+
+    // Card 3
+    let card3_y = card2_y + card_h + 10.0;
+    quads.push(rq(30.0, card3_y, cards_w, card_h, 10.0, card_bg));
+    quads.push(rq(44.0, card3_y + 12.0, 60.0, 20.0, 4.0, c(168, 85, 247, 255)));
+    render_text(compositor, &mut quads, "Culture", 50.0, card3_y + 26.0, 10.0, white, 110.0);
+    render_text(compositor, &mut quads, "Bihu Festival 2026: Dates,", 44.0, card3_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "Events and Travel Guide", 44.0, card3_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
+    render_text(compositor, &mut quads, "1 day ago", 44.0, card3_y + 90.0, 10.0, text_light, 200.0);
+
+    // ---- Quick Tools (right column) ----
+    render_text(compositor, &mut quads, "Quick Tools", tools_x, cards_y + 16.0, 14.0, text_dark, tools_x + tools_w);
+    render_text(compositor, &mut quads, "View All ->", tools_x + tools_w - 80.0, cards_y + 16.0, 11.0, blue, tools_x + tools_w);
+
+    let tool_labels = [
+        "Word to PDF", "PDF to Word", "Image to PDF",
+        "PDF to JPG", "PDF to PNG", "Image Convert",
+        "AI Notes", "QR Code", "More Tools",
+    ];
+    let cols = 3;
+    let tool_box_w = (tools_w - 16.0) / cols as f32;
+    let tool_box_h = 50.0;
+
+    for (i, label) in tool_labels.iter().enumerate() {
+        let col = i % cols;
+        let row = i / cols;
+        let bx = tools_x + col as f32 * (tool_box_w + 4.0);
+        let by = cards_y + 30.0 + row as f32 * (tool_box_h + 4.0);
+        quads.push(rq(bx, by, tool_box_w - 4.0, tool_box_h, 8.0, card_bg));
+        quads.push(rq(bx + (tool_box_w - 4.0) / 2.0 - 10.0, by + 8.0, 20.0, 20.0, 10.0, c(232, 240, 254, 255)));
+        render_text_centered(compositor, &mut quads, label, bx + (tool_box_w - 4.0) / 2.0, by + 42.0, 10.0, text_secondary);
+    }
+
+    // ---- AI Assistant panel ----
+    let ai_y = card3_y + card_h + 30.0;
+    let ai_w = content_w - 60.0;
+    quads.push(rq(30.0, ai_y, ai_w, 200.0, 12.0, card_bg));
+
+    quads.push(rq(44.0, ai_y + 14.0, 32.0, 32.0, 16.0, blue));
+    render_text(compositor, &mut quads, "A", 53.0, ai_y + 38.0, 16.0, white, 72.0);
+    render_text(compositor, &mut quads, "Hello! I'm Axomai AI", 86.0, ai_y + 30.0, 16.0, text_dark, 30.0 + ai_w);
+    render_text(compositor, &mut quads, "Your intelligent browsing assistant for a better web experience.", 86.0, ai_y + 50.0, 12.0, text_secondary, 30.0 + ai_w);
+
+    let actions = ["Summarize this page", "Explain like 5 year old", "Translate to Assamese", "Find similar content", "Generate notes"];
+    for (i, action) in actions.iter().enumerate() {
+        let ay_btn = ai_y + 68.0 + i as f32 * 26.0;
+        quads.push(rq(44.0, ay_btn, ai_w - 28.0, 22.0, 6.0, c(241, 243, 244, 255)));
+        render_text(compositor, &mut quads, action, 56.0, ay_btn + 15.0, 12.0, text_secondary, 30.0 + ai_w - 10.0);
+    }
+
+    // ---- Footer ----
+    let footer_y = ai_y + 220.0;
+    render_text_centered(compositor, &mut quads, "Axomai Browser v1.7.0 - Native GPU Engine - No WebView - Built with Rust", cx, footer_y + 14.0, 10.0, text_light);
+
+    quads
+}
