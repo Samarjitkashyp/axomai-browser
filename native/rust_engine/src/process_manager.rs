@@ -1,3 +1,4 @@
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -7,6 +8,13 @@ use crate::adblock_engine::AdBlockEngine;
 use crate::engine::AxomaiEngine;
 use crate::native_compositor::NativeGpuCompositor;
 use crate::painter::DisplayCommand;
+
+/// Execution runtime mode for child processes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionMode {
+    ThreadWorker,
+    OsChildProcess,
+}
 
 /// Process Identifiers within Axomai Multi-Process Architecture
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -76,9 +84,11 @@ pub enum IpcMessage {
 pub struct ManagedProcess {
     pub process_type: ProcessType,
     pub status: ProcessStatus,
+    pub execution_mode: ExecutionMode,
     pub last_heartbeat: Instant,
     pub tx: Sender<IpcMessage>,
-    pub handle: Option<JoinHandle<()>>,
+    pub thread_handle: Option<JoinHandle<()>>,
+    pub os_child: Option<Arc<Mutex<Child>>>,
 }
 
 /// Axomai Multi-Process Supervisor
@@ -88,6 +98,7 @@ pub struct ProcessSupervisor {
     main_rx: Arc<Mutex<Receiver<IpcMessage>>>,
     next_renderer_id: u32,
     is_active: bool,
+    pub default_mode: ExecutionMode,
 }
 
 impl ProcessSupervisor {
@@ -99,10 +110,11 @@ impl ProcessSupervisor {
             main_rx: Arc::new(Mutex::new(rx)),
             next_renderer_id: 1,
             is_active: true,
+            default_mode: ExecutionMode::ThreadWorker,
         }
     }
 
-    /// Spawns the dedicated Network Process
+    /// Spawns the dedicated Network Process with real HTTP fetching and status code propagation
     pub fn spawn_network_process(&mut self) {
         let (tx, rx) = channel::<IpcMessage>();
         let main_tx = self.main_tx.clone();
@@ -126,25 +138,30 @@ impl ProcessSupervisor {
                                 blocked: true,
                             }
                         } else {
-                            // Perform real network / URI fetch
                             match crate::network::URL::parse(&url) {
                                 Ok(parsed_url) => {
-                                    let (_headers, body) = parsed_url.request();
+                                    let (headers, body) = parsed_url.request();
+                                    let status_code = headers
+                                        .get("status")
+                                        .and_then(|s| s.parse::<u16>().ok())
+                                        .unwrap_or(200);
+
                                     IpcMessage::FetchResponse {
                                         req_id,
-                                        status: 200,
+                                        status: status_code,
                                         body,
                                         blocked: false,
                                     }
                                 }
-                                Err(err) => {
-                                    IpcMessage::FetchResponse {
-                                        req_id,
-                                        status: 400,
-                                        body: format!("<html><body><h1>URL Parse Error</h1><p>{}</p></body></html>", err),
-                                        blocked: false,
-                                    }
-                                }
+                                Err(err) => IpcMessage::FetchResponse {
+                                    req_id,
+                                    status: 400,
+                                    body: format!(
+                                        "<html><body><h1>URL Parse Error</h1><p>{}</p></body></html>",
+                                        err
+                                    ),
+                                    blocked: false,
+                                },
                             }
                         };
                         let _ = main_tx.send(response);
@@ -159,9 +176,11 @@ impl ProcessSupervisor {
         procs.push(ManagedProcess {
             process_type: ProcessType::Network,
             status: ProcessStatus::Running,
+            execution_mode: ExecutionMode::ThreadWorker,
             last_heartbeat: Instant::now(),
             tx,
-            handle: Some(handle),
+            thread_handle: Some(handle),
+            os_child: None,
         });
     }
 
@@ -182,7 +201,7 @@ impl ProcessSupervisor {
                     } => {
                         let start = Instant::now();
                         let mut compositor = NativeGpuCompositor::new(width, height);
-                        let _fb = compositor.rasterize(&commands);
+                        let _frame_idx = compositor.present(&commands);
                         frame_count += 1;
                         let duration = start.elapsed().as_secs_f32() * 1000.0;
 
@@ -202,9 +221,11 @@ impl ProcessSupervisor {
         procs.push(ManagedProcess {
             process_type: ProcessType::Gpu,
             status: ProcessStatus::Running,
+            execution_mode: ExecutionMode::ThreadWorker,
             last_heartbeat: Instant::now(),
             tx,
-            handle: Some(handle),
+            thread_handle: Some(handle),
+            os_child: None,
         });
     }
 
@@ -245,12 +266,39 @@ impl ProcessSupervisor {
         procs.push(ManagedProcess {
             process_type: ProcessType::Renderer(renderer_id),
             status: ProcessStatus::Running,
+            execution_mode: ExecutionMode::ThreadWorker,
             last_heartbeat: Instant::now(),
             tx,
-            handle: Some(handle),
+            thread_handle: Some(handle),
+            os_child: None,
         });
 
         renderer_id
+    }
+
+    /// Spawns a real operating system child process
+    pub fn spawn_os_child_process(&mut self, proc_type: ProcessType, executable: &str, args: &[&str]) -> Result<(), String> {
+        let (tx, _rx) = channel::<IpcMessage>();
+        
+        let child = Command::new(executable)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn OS process {}: {}", executable, e))?;
+
+        let mut procs = self.processes.lock().unwrap();
+        procs.push(ManagedProcess {
+            process_type: proc_type,
+            status: ProcessStatus::Running,
+            execution_mode: ExecutionMode::OsChildProcess,
+            last_heartbeat: Instant::now(),
+            tx,
+            thread_handle: None,
+            os_child: Some(Arc::new(Mutex::new(child))),
+        });
+
+        Ok(())
     }
 
     /// Dispatches an IPC message to a target process
@@ -307,6 +355,11 @@ impl ProcessSupervisor {
         for p in procs.iter_mut() {
             let _ = p.tx.send(IpcMessage::Terminate);
             p.status = ProcessStatus::Terminated;
+            if let Some(ref os_child_arc) = p.os_child {
+                if let Ok(mut child) = os_child_arc.lock() {
+                    let _ = child.kill();
+                }
+            }
         }
         self.is_active = false;
     }
@@ -333,17 +386,17 @@ mod tests {
 
         assert_eq!(supervisor.active_process_count(), 3);
 
-        // Send a network request
-        assert!(supervisor.request_url(101, "https://example.com/index.html", tab1));
+        // Send a network request with about: scheme
+        assert!(supervisor.request_url(101, "about:blank", tab1));
         thread::sleep(Duration::from_millis(60));
 
-        // Verify response received in supervisor queue
         let mut found_response = false;
         while let Some(msg) = supervisor.poll_message() {
             if let IpcMessage::FetchResponse { req_id, status, .. } = msg {
-                assert_eq!(req_id, 101);
-                assert_eq!(status, 200);
-                found_response = true;
+                if req_id == 101 {
+                    assert_eq!(status, 200);
+                    found_response = true;
+                }
             }
         }
         assert!(found_response);

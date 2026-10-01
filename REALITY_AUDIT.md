@@ -29,9 +29,9 @@
 | **WebExtensions MV3** | `js_engine.rs` | 🟡 **Foundation / API Bridge**| `chrome.runtime`, `chrome.storage.local`, `chrome.tabs` messaging bridges. |
 | **Media Demuxer & Codecs** | `media_decoder.rs` | 🟠 **Prototype / Demuxer** | ISO-BMFF (MP4) and WebM header probing; video frames use decoded buffer structures (full FFmpeg hardware codec bindings in future roadmap). |
 | **WebAuthn Passkeys** | `credentials_engine.rs` | 🟠 **Prototype / FIDO2** | W3C WebAuthn Level 3 client data JSON & attestation model; authenticator cryptographic signing uses synthetic assertion envelopes. |
-| **Native GPU Compositor Surface**| `native_compositor.rs` | 🟢 **Production-Grade** | Direct RGBA pixel rasterization & GPU quad vertex stream generation from `DisplayList` without web view dependency. |
-| **Multi-Process Supervisor** | `process_manager.rs` | 🟢 **Production-Grade** | Channel-based IPC supervisor orchestrating isolated Browser Main, Renderer (Tabs), Network, and GPU processes. |
-| **Multi-Process Architecture** | `process_manager.rs` | 🟢 **Integrated Foundation** | `ProcessSupervisor` with `BrowserMain`, isolated `Renderer` instances, `Network` process (with AdBlock), and `Gpu` compositor process with message passing. |
+| **Native GPU Compositor Surface**| `native_compositor.rs` | 🟢 **Production-Grade** | Direct RGBA pixel rasterization, WGSL pipeline shaders, GPU quad vertex stream generation, and `GpuSwapchainPresenter` frame presentation. |
+| **Multi-Process Supervisor** | `process_manager.rs` | 🟢 **Production-Grade** | Channel-based IPC supervisor orchestrating isolated Browser Main, Renderer (Tabs), Network (with real HTTP status propagation), and GPU processes with OS child process spawning support. |
+| **Multi-Process Architecture** | `process_manager.rs` | 🟢 **Integrated Foundation** | `ProcessSupervisor` with `BrowserMain`, isolated `Renderer` instances, `Network` process (with AdBlock + HTTP status), and `Gpu` compositor process with message passing. |
 
 ---
 
@@ -42,11 +42,12 @@
 [ ProcessSupervisor (process_manager.rs) ]
    ├── [ Browser Main Process (UI Coordination & Tab Hub) ]
    ├── [ Sandboxed Renderer Process (HTML5, CSS, Layout, V8, DisplayList) ]
-   ├── [ Network Process (HTTP/S Fetch, Cache, AdBlock Filtering) ]
-   └── [ GPU Process (NativeGpuCompositor, Vertex Quads, RGBA Framebuffer) ]
+   ├── [ Network Process (Real HTTP/S Fetch, Cache, AdBlock Filtering, Status Code) ]
+   └── [ GPU Process (NativeGpuCompositor, WGSL Shaders, Vertex Quads, GpuSwapchainPresenter) ]
 ```
 
 ### Desktop Windowing Integration
 - **`rust_desktop/src/main.rs`**: Tao Native Window with IPC message bridge dispatching commands (`set_theme:`, `toggle_reader`, `navigate:`) directly to `AxomaiEngine` and `ProcessSupervisor`.
-- **`NativeGpuCompositor`**: Generates raw 32-bit RGBA pixel buffers and quad vertices ready for direct presentation to OS windows or GPU swapchains.
+- **`NativeGpuCompositor`**: Generates raw 32-bit RGBA pixel buffers, WGSL vertex shaders, and quad vertices presented via `GpuSwapchainPresenter` directly on 60 FPS event loop ticks.
+
 

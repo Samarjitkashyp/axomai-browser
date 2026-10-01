@@ -49,11 +49,16 @@ pub use ffi::*;
 pub use html_parser::HTMLParser;
 pub use js_engine::V8JSEngine;
 pub use media_decoder::{MediaDemuxer, MediaPlaybackPipeline};
-pub use native_compositor::{GpuQuad, GpuVertex, NativeFramebuffer, NativeGpuCompositor};
+pub use native_compositor::{
+    GpuPipelineDescriptor, GpuQuad, GpuSwapchainPresenter, GpuVertex, NativeFramebuffer,
+    NativeGpuCompositor,
+};
 pub use performance_limiter::ResourceLimiter;
 pub use permissions_engine::{PermissionName, PermissionState, PermissionsManager};
 pub use pip_engine::PipEngine;
-pub use process_manager::{IpcMessage, ManagedProcess, ProcessStatus, ProcessSupervisor, ProcessType};
+pub use process_manager::{
+    ExecutionMode, IpcMessage, ManagedProcess, ProcessStatus, ProcessSupervisor, ProcessType,
+};
 pub use reader_mode::{ReaderArticle, ReaderModeEngine};
 pub use split_view::{SplitLayoutMode, SplitViewEngine};
 pub use sync_engine::{SyncDataType, SyncEngine, SyncRecord};

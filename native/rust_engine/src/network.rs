@@ -265,13 +265,17 @@ impl URL {
                     Err(e) => (headers, format!("<html><body><h1>Error reading response body</h1><p>{}</p></body></html>", e)),
                 }
             }
-            Err(e) => (
-                HashMap::new(),
-                format!(
-                    "<html><body><h1>Network Error</h1><p>Failed to load {}: {}</p></body></html>",
-                    target_url, e
-                ),
-            ),
+            Err(e) => {
+                let mut headers = HashMap::new();
+                headers.insert("status".to_string(), "502".to_string());
+                (
+                    headers,
+                    format!(
+                        "<html><body><h1>Network Error</h1><p>Failed to load {}: {}</p></body></html>",
+                        target_url, e
+                    ),
+                )
+            }
         }
     }
 

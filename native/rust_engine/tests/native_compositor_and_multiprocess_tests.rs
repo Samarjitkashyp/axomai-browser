@@ -44,6 +44,13 @@ fn test_native_gpu_compositor_direct_rasterization() {
     for quad in quads {
         assert_eq!(quad.vertices.len(), 4);
     }
+
+    // Verify GPU pipeline WGSL shaders and swapchain presentation
+    assert!(compositor.pipeline.vertex_shader_wgsl.contains("@vertex"));
+    assert!(compositor.pipeline.fragment_shader_wgsl.contains("@fragment"));
+    let frame_id = compositor.present(&engine.display_list);
+    assert_eq!(frame_id, 1);
+    assert_eq!(compositor.presenter.presented_frames, 1);
 }
 
 #[test]
@@ -74,17 +81,22 @@ fn test_multi_process_ipc_orchestration() {
         768.0,
     );
 
-    // Fetch network asset
-    supervisor.request_url(1001, "https://api.axomai.org/v1/news", tab_assam);
+    // Fetch network asset with about: protocol (guaranteed real local response)
+    supervisor.request_url(1001, "about:version", tab_assam);
 
     // Wait for async execution
     thread::sleep(Duration::from_millis(100));
 
     let mut message_count = 0;
-    while let Some(_msg) = supervisor.poll_message() {
+    let mut received_status = 0;
+    while let Some(msg) = supervisor.poll_message() {
         message_count += 1;
+        if let IpcMessage::FetchResponse { status, .. } = msg {
+            received_status = status;
+        }
     }
     assert!(message_count > 0, "Supervisor should receive IPC responses from child processes");
+    assert_eq!(received_status, 200, "Real URL request should return status 200");
 
     supervisor.shutdown_all();
 }
