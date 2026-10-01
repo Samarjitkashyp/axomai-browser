@@ -301,7 +301,23 @@ impl WgpuRenderer {
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
         }))
-        .expect("Failed to find a suitable GPU adapter");
+        .or_else(|| {
+            eprintln!("[Axomai GPU] High-performance adapter not found, trying fallback...");
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+        })
+        .or_else(|| {
+            eprintln!("[Axomai GPU] No hardware adapter found, trying software fallback...");
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: true,
+            }))
+        })
+        .expect("Failed to find a suitable GPU adapter. Ensure GPU drivers are installed.");
 
         let adapter_info = adapter.get_info();
         println!(
