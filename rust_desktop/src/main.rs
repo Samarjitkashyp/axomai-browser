@@ -118,6 +118,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if let Ok(dy) = msg[6..].parse::<f32>() {
                         let _ = eng.handle_scroll(dy);
                     }
+                } else if msg.starts_with("set_theme:") {
+                    let preset_name = &msg[10..];
+                    println!("[Axomai Desktop] Theme switched to: {}", preset_name);
+                } else if msg == "toggle_reader" {
+                    if let Some(ref dom) = eng.dom_root {
+                        if let Some(article) = axomai_engine::ReaderModeEngine::parse(dom, &eng.current_title) {
+                            println!("[Axomai Desktop] Extracted Reader Article: {}", article.title);
+                        }
+                    }
                 } else if msg == "back" {
                     let _ = eng.go_back(1380.0, 860.0);
                 } else if msg == "forward" {

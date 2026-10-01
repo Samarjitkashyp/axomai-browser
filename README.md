@@ -54,6 +54,15 @@ A modern, high-performance web browser designed with an independent Rust engine 
 [ Screen / Display / Android View ]
 ```
 
+## 🔍 Implementation Tiers & Reality Audit
+
+For a complete, transparent breakdown of what is fully production-grade vs architectural foundation, see [REALITY_AUDIT.md](REALITY_AUDIT.md).
+
+* 🟢 **Production-Grade**: HTML5 Parser, CSSOM (Cascade, Specificity, Grid, Flexbox, Tables), CSS Variables & Math, V8 Isolate Integration, HarfBuzz Indic/Assamese Text Shaper, HTTP Cache, AdBlock Engine, Reader Mode.
+* 🟡 **Architectural Foundation / State Machines**: WebGPU WGSL pipelines, WebGL2 State Machine, WebAssembly VM, WebRTC P2P DataChannels, Web Cryptography (CSPRNG/SHA/AES), Web Audio Graph, CDP Inspector.
+* 🟠 **Prototypes / Future Native Hardware Bridges**: Hardware Video Codecs (FFmpeg native decoding), WebAuthn FIDO2 biometric driver, Neural translation models.
+* 🔴 **Desktop Integration Focus**: Active migration from WebView2-hosted UI to standalone multi-process `wgpu` compositor windowing.
+
 ---
 
 ## 📊 Subsystem Status Overview (`v1.6.0`)
