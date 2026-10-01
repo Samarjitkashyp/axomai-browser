@@ -37,6 +37,36 @@ const SIDEBAR_ITEMS: &[SidebarItem] = &[
     SidebarItem { label: "AI Tools", icon: "o", is_section: false },
 ];
 
+#[derive(Clone, Copy, PartialEq)]
+enum SearchEngine {
+    Google,
+    Bing,
+    Yahoo,
+    DuckDuckGo,
+}
+
+impl SearchEngine {
+    fn name(&self) -> &'static str {
+        match self {
+            SearchEngine::Google => "Google",
+            SearchEngine::Bing => "Bing",
+            SearchEngine::Yahoo => "Yahoo",
+            SearchEngine::DuckDuckGo => "DuckDuckGo",
+        }
+    }
+    fn search_url(&self, query: &str) -> String {
+        match self {
+            SearchEngine::Google => format!("https://www.google.com/search?q={}", query),
+            SearchEngine::Bing => format!("https://www.bing.com/search?q={}", query),
+            SearchEngine::Yahoo => format!("https://search.yahoo.com/search?p={}", query),
+            SearchEngine::DuckDuckGo => format!("https://html.duckduckgo.com/html/?q={}", query),
+        }
+    }
+    fn all() -> &'static [SearchEngine] {
+        &[SearchEngine::Google, SearchEngine::Bing, SearchEngine::Yahoo, SearchEngine::DuckDuckGo]
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--subprocess" {
@@ -122,6 +152,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut is_home_page = true;
     let mut home_scroll_y: f32 = 0.0;
     let mut hover_sidebar_idx: Option<usize> = None;
+    let mut is_settings_page = false;
+    let mut selected_search_engine = SearchEngine::Google;
+    let mut hover_engine_idx: Option<usize> = None;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
@@ -153,17 +186,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Sidebar hover tracking
                 let old_hover = hover_sidebar_idx;
                 hover_sidebar_idx = None;
-                if mouse_x < SIDEBAR_W && mouse_y > CHROME_TOP {
-                    let rel_y = mouse_y - CHROME_TOP - 16.0;
-                    let mut y_off = 0.0f32;
+                if mouse_x < SIDEBAR_W {
+                    let mut item_y = 50.0;
                     for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
-                        let item_h = if item.is_section { 36.0 } else { 34.0 };
-                        if rel_y >= y_off && rel_y < y_off + item_h && !item.is_section {
-                            hover_sidebar_idx = Some(i);
+                        if item.is_section {
+                            item_y += 41.0;
+                        } else {
+                            let h = 33.0;
+                            if mouse_y >= item_y && mouse_y < item_y + h {
+                                hover_sidebar_idx = Some(i);
+                                break;
+                            }
+                            item_y += h;
+                        }
+                    }
+                }
+                // Settings page hover tracking
+                if is_settings_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
+                    let content_x = mouse_x - SIDEBAR_W;
+                    let content_y = mouse_y - CHROME_TOP;
+                    let old_engine_hover = hover_engine_idx;
+                    hover_engine_idx = None;
+                    let card_x = 40.0;
+                    let card_w = (gpu_renderer.surface_config.width as f32 - SIDEBAR_W) - 80.0;
+                    let engine_start_y = 100.0;
+                    let engine_h = 56.0;
+                    for i in 0..SearchEngine::all().len() {
+                        let ey = engine_start_y + i as f32 * (engine_h + 8.0);
+                        if content_x >= card_x && content_x <= card_x + card_w
+                            && content_y >= ey && content_y <= ey + engine_h
+                        {
+                            hover_engine_idx = Some(i);
                             break;
                         }
-                        y_off += item_h;
                     }
+                    if old_engine_hover != hover_engine_idx {
+                        needs_chrome_redraw = true;
+                    }
+                } else {
+                    hover_engine_idx = None;
                 }
                 if old_hover != hover_sidebar_idx {
                     needs_chrome_redraw = true;
@@ -180,22 +241,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let w = gpu_renderer.surface_config.width as f32;
                 if state == ElementState::Pressed && button == MouseButton::Left {
-                    if mouse_x < SIDEBAR_W && mouse_y > CHROME_TOP {
-                        let rel_y = mouse_y - CHROME_TOP - 16.0;
-                        let mut y_off = 0.0f32;
+                    if mouse_x < SIDEBAR_W {
+                        let mut item_y = 50.0;
                         for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
-                            let item_h = if item.is_section { 36.0 } else { 34.0 };
-                            if rel_y >= y_off && rel_y < y_off + item_h && !item.is_section {
-                                sidebar_active = i;
-                                if i == 0 {
-                                    is_home_page = true;
-                                    address_bar_text = String::from("about:home");
-                                    home_scroll_y = 0.0;
+                            if item.is_section {
+                                item_y += 41.0;
+                            } else {
+                                let h = 33.0;
+                                if mouse_y >= item_y && mouse_y < item_y + h {
+                                    sidebar_active = i;
+                                    if i == 0 {
+                                        is_home_page = true;
+                                        is_settings_page = false;
+                                        address_bar_text = String::from("about:home");
+                                        home_scroll_y = 0.0;
+                                    } else if i == 7 {
+                                        is_settings_page = true;
+                                        is_home_page = false;
+                                        address_bar_text = String::from("about:settings");
+                                    } else {
+                                        is_settings_page = false;
+                                    }
+                                    needs_chrome_redraw = true;
+                                    break;
                                 }
-                                needs_chrome_redraw = true;
-                                break;
+                                item_y += h;
                             }
-                            y_off += item_h;
                         }
                     } else if mouse_y < CHROME_TOP {
                         let addr_x = SIDEBAR_W + 140.0;
@@ -253,6 +324,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             address_bar_focused = false;
                             needs_chrome_redraw = true;
+                        }
+                    } else if is_settings_page {
+                        address_bar_focused = false;
+                        let content_x = mouse_x - SIDEBAR_W;
+                        let content_y = mouse_y - CHROME_TOP;
+                        let card_x = 40.0;
+                        let card_w = (w - SIDEBAR_W) - 80.0;
+                        let engine_start_y = 100.0;
+                        let engine_h = 56.0;
+                        for (i, eng_option) in SearchEngine::all().iter().enumerate() {
+                            let ey = engine_start_y + i as f32 * (engine_h + 8.0);
+                            if content_x >= card_x && content_x <= card_x + card_w
+                                && content_y >= ey && content_y <= ey + engine_h
+                            {
+                                selected_search_engine = *eng_option;
+                                needs_chrome_redraw = true;
+                                break;
+                            }
                         }
                     } else if !is_home_page {
                         address_bar_focused = false;
@@ -313,7 +402,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         address_bar_text.clone()
                                     }
                                 } else if !address_bar_text.is_empty() {
-                                    format!("https://html.duckduckgo.com/html/?q={}", address_bar_text)
+                                    selected_search_engine.search_url(&address_bar_text)
                                 } else {
                                     return;
                                 };
@@ -393,7 +482,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let content_w = w - SIDEBAR_W;
                 let content_h = h - CHROME_TOP;
 
-                let should_render = if is_home_page {
+                let should_render = if is_home_page || is_settings_page {
                     needs_chrome_redraw || gpu_renderer.presented_frames < 3
                 } else if let Ok(mut eng) = engine.lock() {
                     let updated = eng.process_event_loop(content_w, content_h);
@@ -409,6 +498,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let title = if is_home_page {
                         "Axomai Browser".to_string()
+                    } else if is_settings_page {
+                        "Settings".to_string()
                     } else if let Ok(eng) = engine.lock() {
                         eng.current_title.clone()
                     } else {
@@ -427,8 +518,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let home_quads = build_home_page_quads(
                             &mut compositor, content_w, content_h, home_scroll_y,
                         );
-                        // Offset home quads to content area
                         for mut q in home_quads {
+                            for v in &mut q.vertices {
+                                v.position[0] += SIDEBAR_W;
+                                v.position[1] += CHROME_TOP;
+                            }
+                            quads.push(q);
+                        }
+                    } else if is_settings_page {
+                        let settings_quads = build_settings_page_quads(
+                            &mut compositor, content_w, content_h,
+                            selected_search_engine, hover_engine_idx,
+                        );
+                        for mut q in settings_quads {
                             for v in &mut q.vertices {
                                 v.position[0] += SIDEBAR_W;
                                 v.position[1] += CHROME_TOP;
@@ -660,6 +762,98 @@ fn build_chrome_quads(
     render_text(compositor, &mut quads, "U", rx + 125.0, ny + 17.0, 12.0, text_secondary, rx + 144.0);
     // Menu
     render_text(compositor, &mut quads, "=", rx + 150.0, ny + 18.0, 14.0, text_secondary, rx + 170.0);
+
+    quads
+}
+
+// ===== SETTINGS PAGE =====
+
+fn build_settings_page_quads(
+    compositor: &mut NativeGpuCompositor,
+    content_w: f32,
+    content_h: f32,
+    selected: SearchEngine,
+    hover_idx: Option<usize>,
+) -> Vec<GpuQuad> {
+    use axomai_engine::GpuQuad;
+    let mut quads = Vec::new();
+
+    let white = c(255, 255, 255, 255);
+    let page_bg = c(246, 247, 248, 255);
+    let text_dark = c(32, 33, 36, 255);
+    let text_secondary = c(95, 99, 104, 255);
+    let blue = c(26, 115, 232, 255);
+    let border = c(218, 220, 224, 255);
+    let hover_bg = c(241, 243, 244, 255);
+    let selected_bg = c(210, 227, 252, 255);
+    let green = c(24, 128, 56, 255);
+
+    // Background
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, page_bg));
+
+    // Header
+    render_text(compositor, &mut quads, "Settings", 40.0, 40.0, 24.0, text_dark, content_w);
+    quads.push(NativeGpuCompositor::solid_quad(40.0, 55.0, content_w - 80.0, 1.0, border));
+
+    // Section title
+    render_text(compositor, &mut quads, "Search Engine", 40.0, 88.0, 16.0, text_dark, content_w);
+    render_text(compositor, &mut quads, "Choose the search engine used in the address bar", 40.0, 108.0, 12.0, text_secondary, content_w);
+
+    // Search engine cards
+    let card_x = 40.0;
+    let card_w = (content_w - 80.0).min(500.0);
+    let engine_h = 56.0;
+    let start_y = 130.0;
+
+    let engine_descriptions: &[&str] = &[
+        "The world's most popular search engine",
+        "Microsoft's search engine with AI features",
+        "A classic search engine by Yahoo Inc.",
+        "Privacy-focused search, no tracking",
+    ];
+
+    for (i, eng) in SearchEngine::all().iter().enumerate() {
+        let ey = start_y + i as f32 * (engine_h + 8.0);
+        let is_selected = *eng == selected;
+        let is_hovered = hover_idx == Some(i);
+
+        let bg = if is_selected {
+            selected_bg
+        } else if is_hovered {
+            hover_bg
+        } else {
+            white
+        };
+
+        quads.push(rq(card_x, ey, card_w, engine_h, 10.0, bg));
+
+        // Radio circle
+        let radio_x = card_x + 20.0;
+        let radio_y = ey + engine_h / 2.0;
+        quads.push(rq(radio_x - 9.0, radio_y - 9.0, 18.0, 18.0, 9.0, if is_selected { blue } else { border }));
+        quads.push(rq(radio_x - 7.0, radio_y - 7.0, 14.0, 14.0, 7.0, if is_selected { blue } else { white }));
+        if is_selected {
+            quads.push(rq(radio_x - 4.0, radio_y - 4.0, 8.0, 8.0, 4.0, white));
+        }
+
+        // Engine name
+        let name_x = card_x + 48.0;
+        render_text(compositor, &mut quads, eng.name(), name_x, ey + 24.0, 14.0, text_dark, card_x + card_w);
+
+        // Description
+        render_text(compositor, &mut quads, engine_descriptions[i], name_x, ey + 42.0, 11.0, text_secondary, card_x + card_w - 10.0);
+
+        // Selected badge
+        if is_selected {
+            let badge_x = card_x + card_w - 80.0;
+            render_text(compositor, &mut quads, "Default", badge_x, ey + 32.0, 11.0, green, card_x + card_w);
+        }
+    }
+
+    // Info text at bottom
+    let info_y = start_y + 4.0 * (engine_h + 8.0) + 10.0;
+    render_text(compositor, &mut quads, "Click on a search engine to set it as default.", 40.0, info_y + 14.0, 11.0, text_secondary, content_w);
+    render_text(compositor, &mut quads, "The selected engine is used when you type in the address bar.", 40.0, info_y + 30.0, 11.0, text_secondary, content_w);
 
     quads
 }
