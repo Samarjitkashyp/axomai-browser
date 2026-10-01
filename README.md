@@ -1,22 +1,28 @@
-# 🚀 Axomai Browser `v1.4.0`
+# 🚀 Axomai Browser `v1.5.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, AI Smart Workspaces & Tab Hibernation, Built-in Secure VPN & DNS-over-HTTPS, Floating PiP with 300% Audio Booster, Split-Screen Dual Browsing Studio, Full-Page Screenshot & Annotation Studio, Opera GX Resource Performance Limiter, Native Web3 Multi-Chain Wallet, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
 ## 🏗️ Architecture Pipeline
 
 ```
-[ Browser UI / Tab / Android Shell ] ◄──( IPC Bus / Sandbox Boundary )──► [ Network Process ]
-            │                                                              │
-            ▼                                                              ▼
-[ Sandboxed Renderer Process ] ◄──( AdBlock / EasyList Filter )─── [ Multi-Threaded Range Downloader ]
+[ Browser UI / Tab / Split-Screen / Android Shell ] ◄──( IPC Bus / Sandbox Boundary )──► [ Network Process / VPN / DoH ]
+            │                                                                                   │
+            ▼                                                                                   ▼
+[ Sandboxed Renderer Process ] ◄──( AdBlock / EasyList Filter )───────────────── [ Multi-Threaded Range Downloader ]
 - HTML5 Tree Builder (Implicit <tbody>, Tables, Forms)
 - CSS Engine (Cascade, Custom Properties var(--*), calc/clamp)
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
+- AI Smart Workspaces & Tab Hibernation Memory Saver
+- Split-Screen Dual Browsing & Vertical Tabs
+- Floating PiP & 300% Audio Booster
+- Full-Page Screenshot & Annotation Studio
+- Resource Performance Limiter (RAM, CPU, Bandwidth)
+- Web3 Native Multi-Chain Wallet (Ethereum, Polygon, Solana)
 - Distraction-Free Reader Mode Engine
 - Native SVG Path & PDF Document Vector Engine
 - End-to-End Encrypted Sync Engine (Bookmarks, Tabs, History)
@@ -48,14 +54,21 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.4.0`)
+## 📊 Subsystem Status Overview (`v1.5.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
-| **Reader Mode Engine** | 🟢 **NEW** | Readability scoring algorithm, declutters ads/navigation, calculates estimated reading time |
-| **Download Manager** | 🟢 **NEW** | Multi-threaded range chunk downloader (`Range: bytes=X-Y`), pause, resume, speed estimation |
-| **SVG & PDF Vector Engine** | 🟢 **NEW** | SVG Path syntax parser (`M`, `L`, `C`, `Z`), 2D bezier curves rasterizer, native PDF stream viewer |
-| **Encrypted Sync Engine** | 🟢 **NEW** | End-to-end encrypted client storage & sync for bookmarks, history, tabs, and LWW merge resolution |
+| **AI Smart Workspaces** | 🟢 **NEW** | Context-based tab workspaces, auto-categorization, 80% RAM tab hibernation |
+| **Built-in VPN & DoH** | 🟢 **NEW** | DNS-over-HTTPS (Cloudflare/Quad9), WireGuard proxy tunnel, Kill Switch |
+| **Floating PiP & Sound Booster** | 🟢 **NEW** | Always-on-top detached video player, 300% audio boost, live AI subtitles |
+| **Split-Screen Studio** | 🟢 **NEW** | Side-by-side dual and quad browsing, vertical tabs, synchronized scrolling |
+| **Capture & Annotation Studio** | 🟢 **NEW** | Full-height scrolling webpage screenshot, markup arrows, text, blur redaction |
+| **Resource Performance Limiter** | 🟢 **NEW** | RAM, CPU, and Bandwidth limiter sliders (Opera GX style) to prevent lag |
+| **Web3 Multi-Chain Wallet** | 🟢 **NEW** | Native `window.ethereum` & `window.solana` provider injection and transaction signing |
+| **Reader Mode Engine** | 🟢 | Readability scoring algorithm, declutters ads/navigation, calculates estimated reading time |
+| **Download Manager** | 🟢 | Multi-threaded range chunk downloader (`Range: bytes=X-Y`), pause, resume, speed estimation |
+| **SVG & PDF Vector Engine** | 🟢 | SVG Path syntax parser (`M`, `L`, `C`, `Z`), 2D bezier curves rasterizer, native PDF stream viewer |
+| **Encrypted Sync Engine** | 🟢 | End-to-end encrypted client storage & sync for bookmarks, history, tabs, and LWW merge resolution |
 | **AdBlocker & Privacy Shield** | 🟢 | EasyList network filter engine, tracker blocking, cosmetic CSS injection (`##.ad-banner`) |
 | **Accessibility (a11y) & ARIA** | 🟢 | `AccessibilityTree`, Accessible Object Model (AOM), ARIA roles (`button`, `link`, `banner`, `alert`) |
 | **Permissions & Geolocation** | 🟢 | `PermissionsManager`, W3C Permissions API, Geolocation GPS coordinates, DeviceOrientation sensors |
