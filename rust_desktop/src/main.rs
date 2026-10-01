@@ -12,6 +12,13 @@ use tao::{
 use wry::WebViewBuilder;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Handle subprocess worker mode: `axomai_browser --subprocess <role>`
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() >= 3 && args[1] == "--subprocess" {
+        axomai_engine::run_subprocess(&args[2]);
+        return Ok(());
+    }
+
     // 1. Initialize Axomai Core Rust Engine
     let engine = Arc::new(Mutex::new(AxomaiEngine::new()));
 

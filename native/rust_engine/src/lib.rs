@@ -60,6 +60,7 @@ pub use permissions_engine::{PermissionName, PermissionState, PermissionsManager
 pub use pip_engine::PipEngine;
 pub use process_manager::{
     ExecutionMode, IpcMessage, ManagedProcess, ProcessStatus, ProcessSupervisor, ProcessType,
+    run_subprocess,
 };
 pub use reader_mode::{ReaderArticle, ReaderModeEngine};
 pub use split_view::{SplitLayoutMode, SplitViewEngine};

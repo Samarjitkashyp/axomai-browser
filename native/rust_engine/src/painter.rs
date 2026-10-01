@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::layout::{BoxType, LayoutBox};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DisplayCommand {
     DrawRect {
         x1: f32,
