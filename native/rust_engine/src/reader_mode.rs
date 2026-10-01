@@ -56,7 +56,8 @@ impl ReaderModeEngine {
 
     fn collect_article_paragraphs(node: &Rc<RefCell<Node>>, paragraphs: &mut Vec<String>) {
         let n = node.borrow();
-        let tag = n.tag_name.as_deref().unwrap_or("");
+        let tag_owned = n.tag_name();
+        let tag = tag_owned.as_deref().unwrap_or("");
 
         // Skip non-content tags
         if matches!(tag, "nav" | "footer" | "header" | "aside" | "script" | "style" | "noscript") {
@@ -64,7 +65,7 @@ impl ReaderModeEngine {
         }
 
         if tag == "p" || tag == "article" {
-            if let Some(ref text) = n.text_content {
+            if let Some(ref text) = n.text_content() {
                 let trimmed = text.trim();
                 // Paragraphs with reasonable length are considered article body
                 if trimmed.len() > 25 {

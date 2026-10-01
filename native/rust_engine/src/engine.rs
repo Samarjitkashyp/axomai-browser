@@ -1,5 +1,5 @@
 use crate::css_parser::{
-    interpolate_style_value, parse_animation_shorthand, parse_transition_shorthand, style_tree,
+    parse_animation_shorthand, style_tree,
     CSSParser, KeyframeAnimation, Rule, DEFAULT_UA_STYLES,
 };
 use crate::html_parser::{HTMLParser, NodePtr, NodeType};
@@ -1464,14 +1464,14 @@ impl CdpInspector {
         match method {
             "Page.navigate" => {
                 let target_url = params.trim().trim_matches('"');
-                engine.load_url(target_url);
+                let _ = engine.load_url(target_url, 1920.0, 1080.0);
                 format!(r#"{{"id":{},"result":{{"frameId":"main","loaderId":"1"}}}}"#, id)
             }
             "DOM.getDocument" => {
                 let title = &engine.current_title;
                 let url = engine.current_url.as_ref().map(|u| u.as_string()).unwrap_or_default();
                 format!(
-                    r#"{{"id":{},"result":{{"root":{{"nodeId":1,"nodeType":9,"nodeName":"#document","documentURL":"{}","title":"{}"}}}}}}"#,
+                    "{{\"id\":{},\"result\":{{\"root\":{{\"nodeId\":1,\"nodeType\":9,\"nodeName\":\"#document\",\"documentURL\":\"{}\",\"title\":\"{}\"}}}}}}",
                     id, url, title
                 )
             }

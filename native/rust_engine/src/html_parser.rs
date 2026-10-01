@@ -5,6 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub type NodePtr = Rc<RefCell<NodeData>>;
 pub type WeakNodePtr = Weak<RefCell<NodeData>>;
+/// Type alias for backwards compatibility with modules that reference `Node`.
+pub type Node = NodeData;
 
 static NEXT_NODE_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -100,6 +102,33 @@ impl NodeData {
             true
         } else {
             false
+        }
+    }
+
+    /// Returns the element tag name if this is an Element node, otherwise `None`.
+    pub fn tag_name(&self) -> Option<String> {
+        if let NodeType::Element { ref tag, .. } = self.node_type {
+            Some(tag.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Returns an attribute value if this is an Element node with that attribute.
+    pub fn get_attribute(&self, name: &str) -> Option<String> {
+        if let NodeType::Element { ref attributes, .. } = self.node_type {
+            attributes.get(name).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Returns the text content if this is a Text node, otherwise `None`.
+    pub fn text_content(&self) -> Option<String> {
+        if let NodeType::Text { ref text } = self.node_type {
+            Some(text.clone())
+        } else {
+            None
         }
     }
 }
@@ -701,7 +730,7 @@ impl<'a> HTMLParser<'a> {
         if tag_name == "html" {
             if let Some(ref root) = self.root {
                 let mut b = root.borrow_mut();
-                if let NodeType::Element { ref mut attributes: root_attrs, .. } = b.node_type {
+                if let NodeType::Element { attributes: ref mut root_attrs, .. } = b.node_type {
                     root_attrs.extend(attributes);
                 }
             }
@@ -723,9 +752,11 @@ impl<'a> HTMLParser<'a> {
         if tag_name == "body" {
             if let Some(ref root) = self.root {
                 if let Some(existing_body) = find_body(root) {
-                    let mut b = existing_body.borrow_mut();
-                    if let NodeType::Element { ref mut attributes: body_attrs, .. } = b.node_type {
-                        body_attrs.extend(attributes);
+                    {
+                        let mut b = existing_body.borrow_mut();
+                        if let NodeType::Element { attributes: ref mut body_attrs, .. } = b.node_type {
+                            body_attrs.extend(attributes);
+                        }
                     }
                     self.open_elements.push(existing_body);
                     self.mode = InsertionMode::InBody;

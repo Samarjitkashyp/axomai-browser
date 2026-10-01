@@ -294,7 +294,6 @@ impl WgpuRenderer {
                 label: Some("Axomai GPU Device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::default(),
             },
             None,
         ))
@@ -366,19 +365,17 @@ impl WgpuRenderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_main"),
+                entry_point: "vs_main",
                 buffers: &[WgpuVertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -392,7 +389,6 @@ impl WgpuRenderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
-            cache: None,
         });
 
         WgpuRenderer {
@@ -629,12 +625,6 @@ impl NativeGpuCompositor {
                         opacity: 1.0,
                     };
                     self.quads.push(quad);
-                }
-                DisplayCommand::DrawBorder { x1, y1, x2, y2, color, .. } => {
-                    let (r, g, b, a) = Self::parse_color_hex(color);
-                    let y1_adj = y1 - scroll_y;
-                    let y2_adj = y2 - scroll_y;
-                    self.framebuffer.draw_solid_rect(*x1, y1_adj, *x2, y2_adj, (r, g, b, a));
                 }
                 DisplayCommand::DrawText { x, y, text: _, font_size, color, .. } => {
                     let (r, g, b, a) = Self::parse_color_hex(color);

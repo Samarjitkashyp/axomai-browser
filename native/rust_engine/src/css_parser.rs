@@ -1075,12 +1075,6 @@ fn eval_calc_expr(expr: &str) -> Option<f32> {
     }
 }
 
-    let children = node.borrow().children.clone();
-    for child in children {
-        style_tree(&child, rules);
-    }
-}
-
 pub fn parse_keyframe_blocks(name: &str, body: &str) -> KeyframeAnimation {
     let mut steps = Vec::new();
     let chars: Vec<char> = body.chars().collect();

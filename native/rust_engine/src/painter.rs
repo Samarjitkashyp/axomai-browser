@@ -547,7 +547,11 @@ impl LayerTree {
             opacity: 1.0,
             scroll_offset: (root_box.scroll_left, root_box.scroll_top),
             is_opaque: true,
-            commands: build_display_list(root_box),
+            commands: {
+                let mut cmds = Vec::new();
+                build_display_list(root_box, &mut cmds);
+                cmds
+            },
             children: Vec::new(),
         };
 
@@ -572,10 +576,11 @@ impl LayerTree {
 }
 
 fn decompose_layers_recursive(layout_box: &LayoutBox, parent_layer: &mut Layer, next_id: &mut usize) {
-    let has_transform = layout_box.transform.is_some() || layout_box.transform_origin.is_some();
+    let has_transform = !layout_box.transform.is_empty();
     let is_scroll = layout_box.overflow == "auto" || layout_box.overflow == "scroll";
     let has_opacity = layout_box.opacity < 0.999;
-    let is_fixed = layout_box.position == "fixed";
+    let position = layout_box.style.get("position").map(|s| s.as_str()).unwrap_or("static");
+    let is_fixed = position == "fixed";
 
     if has_transform || is_scroll || has_opacity || is_fixed {
         *next_id += 1;

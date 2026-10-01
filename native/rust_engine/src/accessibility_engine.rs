@@ -51,7 +51,8 @@ impl AccessibilityTree {
 
     fn build_node(&self, dom_node: &Rc<RefCell<Node>>) -> AccessibleNode {
         let n = dom_node.borrow();
-        let tag = n.tag_name.as_deref().unwrap_or("");
+        let tag_owned = n.tag_name();
+        let tag = tag_owned.as_deref().unwrap_or("");
         
         let role_attr = n.get_attribute("role");
         let aria_label = n.get_attribute("aria-label");
@@ -99,7 +100,7 @@ impl AccessibilityTree {
 
         let mut accessible_name = aria_label.unwrap_or_default();
         if accessible_name.is_empty() {
-            if let Some(ref text) = n.text_content {
+            if let Some(ref text) = n.text_content() {
                 accessible_name = text.trim().to_string();
             }
         }

@@ -160,9 +160,10 @@ impl V8JSEngine {
         });
 
         // 3. Create ONE persistent V8 Context for the page
-        let handle_scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let handle_scope, isolate);
         let context = v8::Context::new(handle_scope, Default::default());
-        let scope = &mut v8::ContextScope::new(handle_scope, context);
+        let mut cs = v8::ContextScope::new(handle_scope, context);
+        let scope = &mut cs;
 
         let global = context.global(scope);
 
@@ -180,7 +181,7 @@ impl V8JSEngine {
         inject_dom_prototype_bootstrap(scope);
 
         // 6. Store persistent Context reference
-        self.page_context = Some(v8::Global::new(handle_scope, context));
+        self.page_context = Some(v8::Global::new(scope, context));
     }
 
     /// Execute a JavaScript snippet inside the CURRENT PERSISTENT PAGE CONTEXT with TryCatch exception reporting
@@ -191,12 +192,13 @@ impl V8JSEngine {
             .as_ref()
             .ok_or("No active page context. Call reset_page_context first.")?;
 
-        let handle_scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let handle_scope, isolate);
         let context = v8::Local::new(handle_scope, page_context_global);
-        let scope = &mut v8::ContextScope::new(handle_scope, context);
+        let mut cs = v8::ContextScope::new(handle_scope, context);
+        let scope = &mut cs;
 
         // Setup TryCatch block to accurately capture JS exceptions
-        let try_catch = &mut v8::TryCatch::new(scope);
+        v8::tc_scope!(let try_catch, scope);
 
         let code = v8::String::new(try_catch, source).ok_or("Failed to allocate JS source string")?;
 
@@ -224,7 +226,7 @@ impl V8JSEngine {
                     .and_then(|m| m.get_line_number(try_catch))
                     .unwrap_or(0);
                 eprintln!("[Axomai V8 Uncaught Exception @ line {}]: {}", line, msg);
-                if let Some(stack) = try_catch.stack_trace(try_catch) {
+                if let Some(stack) = try_catch.stack_trace() {
                     eprintln!("Stack Trace:\n{}", stack.to_rust_string_lossy(try_catch));
                 }
             }
@@ -271,9 +273,10 @@ impl V8JSEngine {
         let now = Instant::now();
         let mut executed_any = false;
 
-        let handle_scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let handle_scope, isolate);
         let context = v8::Local::new(handle_scope, page_context_global);
-        let scope = &mut v8::ContextScope::new(handle_scope, context);
+        let mut cs = v8::ContextScope::new(handle_scope, context);
+        let scope = &mut cs;
 
         // 0. Process Compositor Animation Frame Callbacks (requestAnimationFrame)
         let flush_raf_js = "if (typeof window !== 'undefined' && typeof window.__flushAnimationFrameCallbacks === 'function') { window.__flushAnimationFrameCallbacks(performance.now()); } else { false; }";
@@ -326,7 +329,7 @@ impl V8JSEngine {
             });
 
             if let Some(resolver_global) = resolver_opt {
-                let resolver = resolver_global.open(scope);
+                let resolver = v8::Local::new(scope, &resolver_global);
 
                 if let Some(err_msg) = fetch_res.error {
                     let err_v = v8::String::new(scope, &err_msg).unwrap();
@@ -358,26 +361,25 @@ impl V8JSEngine {
                         let hv = v8::String::new(scope, v).unwrap();
                         headers_map.set(scope, hk.into(), hv.into());
                     }
-                    let map_local = headers_map.into();
                     let get_k = v8::String::new(scope, "get").unwrap();
-                    let get_fn = v8::Function::new(
-                        scope,
-                        move |s: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut r: v8::ReturnValue| {
+                    let get_fn = v8::Function::builder(
+                        |s: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut r: v8::ReturnValue| {
                             if args.length() > 0 {
                                 let key = args.get(0).to_rust_string_lossy(s).to_lowercase();
                                 let k_str = v8::String::new(s, &key).unwrap();
-                                if let Some(obj) = map_local.to_object(s) {
-                                    if let Some(val) = obj.get(s, k_str.into()) {
-                                        if !val.is_undefined() {
-                                            r.set(val);
-                                            return;
-                                        }
+                                let map_obj: v8::Local<v8::Object> = args.data().try_into().unwrap();
+                                if let Some(val) = map_obj.get(s, k_str.into()) {
+                                    if !val.is_undefined() {
+                                        r.set(val);
+                                        return;
                                     }
                                 }
                             }
                             r.set(v8::null(s).into());
                         },
                     )
+                    .data(headers_map.into())
+                    .build(scope)
                     .unwrap();
                     headers_obj.set(scope, get_k.into(), get_fn.into());
 
@@ -386,15 +388,15 @@ impl V8JSEngine {
 
                     // text() method
                     let text_k = v8::String::new(scope, "text").unwrap();
-                    let body_clone = fetch_res.body.clone();
+                    let body_clone: &'static str = Box::leak(fetch_res.body.clone().into_boxed_str());
                     let text_fn = v8::Function::new(
                         scope,
-                        move |s: &mut v8::HandleScope,
+                        move |s: &mut v8::PinScope,
                               _a: v8::FunctionCallbackArguments,
                               mut r: v8::ReturnValue| {
                             let text_res = v8::PromiseResolver::new(s).unwrap();
                             let text_p = text_res.get_promise(s);
-                            let text_str = v8::String::new(s, &body_clone).unwrap();
+                            let text_str = v8::String::new(s, body_clone).unwrap();
                             text_res.resolve(s, text_str.into());
                             r.set(text_p.into());
                         },
@@ -404,15 +406,15 @@ impl V8JSEngine {
 
                     // json() method
                     let json_k = v8::String::new(scope, "json").unwrap();
-                    let body_json = fetch_res.body.clone();
+                    let body_json: &'static str = Box::leak(fetch_res.body.clone().into_boxed_str());
                     let json_fn = v8::Function::new(
                         scope,
-                        move |s: &mut v8::HandleScope,
+                        move |s: &mut v8::PinScope,
                               _a: v8::FunctionCallbackArguments,
                               mut r: v8::ReturnValue| {
                             let json_res = v8::PromiseResolver::new(s).unwrap();
                             let json_p = json_res.get_promise(s);
-                            let json_str = v8::String::new(s, &body_json).unwrap();
+                            let json_str = v8::String::new(s, body_json).unwrap();
                             if let Some(parsed) = v8::json::parse(s, json_str) {
                                 json_res.resolve(s, parsed);
                             } else {
@@ -443,10 +445,10 @@ impl V8JSEngine {
             }
 
             if now.duration_since(timer.created_at) >= timer.delay {
-                let func = timer.callback.open(scope);
+                let func = v8::Local::new(scope, &timer.callback);
                 let recv = context.global(scope).into();
 
-                let try_catch = &mut v8::TryCatch::new(scope);
+                v8::tc_scope!(let try_catch, scope);
                 let _ = func.call(try_catch, recv, &[]);
 
                 if let Some(exception) = try_catch.exception() {
@@ -760,8 +762,8 @@ fn collect_reachable_nodes(node: &NodePtr, set: &mut HashSet<*const std::cell::R
 // GLOBAL SCOPE BOOTSTRAP (window, console, location, navigator, document, fetch)
 // ============================================================================
 
-fn setup_window_global<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_window_global(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) {
     let window_key = v8::String::new(scope, "window").unwrap();
@@ -771,8 +773,8 @@ fn setup_window_global<'s>(
     global.set(scope, global_this_key.into(), global.into());
 }
 
-fn setup_console_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_console_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) {
     let console_key = v8::String::new(scope, "console").unwrap();
@@ -781,7 +783,7 @@ fn setup_console_api<'s>(
     let log_key = v8::String::new(scope, "log").unwrap();
     let log_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          _rv: v8::ReturnValue| {
             let mut log_line = String::new();
@@ -812,8 +814,8 @@ fn setup_console_api<'s>(
     global.set(scope, console_key.into(), console_obj.into());
 }
 
-fn setup_location_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_location_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
     url_str: &str,
 ) {
@@ -836,8 +838,8 @@ fn setup_location_api<'s>(
     global.set(scope, loc_key.into(), loc_obj.into());
 }
 
-fn setup_navigator_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_navigator_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) {
     let nav_key = v8::String::new(scope, "navigator").unwrap();
@@ -858,14 +860,14 @@ fn setup_navigator_api<'s>(
     global.set(scope, nav_key.into(), nav_obj.into());
 }
 
-fn setup_timer_apis<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_timer_apis(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) {
     let timeout_key = v8::String::new(scope, "setTimeout").unwrap();
     let timeout_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() > 0 && args.get(0).is_function() {
@@ -908,7 +910,7 @@ fn setup_timer_apis<'s>(
     let interval_key = v8::String::new(scope, "setInterval").unwrap();
     let interval_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() > 0 && args.get(0).is_function() {
@@ -951,7 +953,7 @@ fn setup_timer_apis<'s>(
     let clear_timeout_k = v8::String::new(scope, "clearTimeout").unwrap();
     let clear_timeout_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          _rv: v8::ReturnValue| {
             if args.length() > 0 {
@@ -973,27 +975,27 @@ fn setup_timer_apis<'s>(
 // TRUE ASYNCHRONOUS FETCH() API (Uses Background Worker Thread & Channel)
 // ============================================================================
 
-fn setup_async_fetch_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_async_fetch_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
     base_url_str: &str,
     engine_id: usize,
 ) {
-    let base_url = base_url_str.to_string();
+    let base_url: &'static str = Box::leak(base_url_str.to_string().into_boxed_str());
     let fetch_key = v8::String::new(scope, "fetch").unwrap();
 
     let fetch_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
             if args.length() == 0 {
                 return;
             }
-            let target_url_raw = args.get(0).to_rust_string_lossy(scope);
+            let target_url_raw = args.get(0).to_rust_string_lossy(scope).to_string();
 
             // Resolve target URL relative to base URL
-            let resolved_url = if let Ok(base) = URL::parse(&base_url) {
+            let resolved_url: String = if let Ok(base) = URL::parse(base_url) {
                 base.resolve(&target_url_raw)
             } else {
                 target_url_raw
@@ -1027,7 +1029,7 @@ fn setup_async_fetch_api<'s>(
                     if let Some(h_val) = init_obj.get(scope, headers_k.into()) {
                         if h_val.is_object() {
                             if let Some(h_obj) = h_val.to_object(scope) {
-                                if let Some(prop_names) = h_obj.get_property_names(scope) {
+                                if let Some(prop_names) = h_obj.get_property_names(scope, Default::default()) {
                                     for i in 0..prop_names.length() {
                                         if let Some(key_val) = prop_names.get_index(scope, i) {
                                             let key_str = key_val.to_rust_string_lossy(scope);
@@ -1113,7 +1115,7 @@ fn setup_async_fetch_api<'s>(
 
                         // Same-Origin Policy & CORS Check
                         let req_origin = get_origin_from_url(&url_for_worker);
-                        let doc_origin = get_origin_from_url(&url_str_owned);
+                        let doc_origin = get_origin_from_url(&base_url);
                         let is_cross_origin = !doc_origin.is_empty() && doc_origin != "null" && doc_origin != req_origin;
 
                         let cors_error = if is_cross_origin {
@@ -1217,37 +1219,38 @@ fn load_local_storage_from_disk(origin: &str) -> HashMap<String, String> {
 // WEB STORAGE (localStorage / sessionStorage) & COOKIE SYSTEM
 // ============================================================================
 
-fn setup_storage_and_cookies_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_storage_and_cookies_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
     url_str: &str,
 ) {
     let origin = get_origin_from_url(url_str);
-    let origin_local = origin.clone();
+    let origin_local: &'static str = Box::leak(origin.clone().into_boxed_str());
 
     // 1. window.localStorage & window.sessionStorage bindings
-    let create_storage_obj = |s: &mut v8::ContextScope<'s, v8::HandleScope>, is_session: bool| -> v8::Local<'s, v8::Object> {
+    fn create_storage_obj<'s>(s: &mut v8::PinScope<'s, '_>, is_session: bool, origin: &str) -> v8::Local<'s, v8::Object> {
         let storage = v8::Object::new(s);
-        let orig = origin.clone();
+        let orig = origin.to_string();
 
         // getItem(key)
         let get_item_k = v8::String::new(s, "getItem").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let get_item_fn = v8::Function::new(
             s,
-            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
                 if args.length() == 0 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
+                let orig_s = orig_c.to_string();
                 let val_opt = if is_session {
-                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.get(&key).cloned()))
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).and_then(|m| m.get(&*key).cloned()))
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if !map.contains_key(&orig_c) {
-                            let disk_map = load_local_storage_from_disk(&orig_c);
-                            map.insert(orig_c.clone(), disk_map);
+                        if !map.contains_key(&orig_s) {
+                            let disk_map = load_local_storage_from_disk(&orig_s);
+                            map.insert(orig_s.clone(), disk_map);
                         }
-                        map.get(&orig_c).and_then(|m| m.get(&key).cloned())
+                        map.get(&orig_s).and_then(|m| m.get(&*key).cloned())
                     })
                 };
                 if let Some(val) = val_opt {
@@ -1262,28 +1265,29 @@ fn setup_storage_and_cookies_api<'s>(
 
         // setItem(key, val)
         let set_item_k = v8::String::new(s, "setItem").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let set_item_fn = v8::Function::new(
             s,
-            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
                 if args.length() < 2 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
                 let val = args.get(1).to_rust_string_lossy(scope);
+                let orig_s = orig_c.to_string();
                 if is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        map.entry(orig_c.clone()).or_insert_with(HashMap::new).insert(key, val);
+                        map.entry(orig_s.clone()).or_insert_with(HashMap::new).insert(key.to_string(), val.to_string());
                     });
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if !map.contains_key(&orig_c) {
-                            let disk_map = load_local_storage_from_disk(&orig_c);
-                            map.insert(orig_c.clone(), disk_map);
+                        if !map.contains_key(&orig_s) {
+                            let disk_map = load_local_storage_from_disk(&orig_s);
+                            map.insert(orig_s.clone(), disk_map);
                         }
-                        if let Some(m) = map.get_mut(&orig_c) {
-                            m.insert(key, val);
-                            save_local_storage_to_disk(&orig_c, m);
+                        if let Some(m) = map.get_mut(&orig_s) {
+                            m.insert(key.to_string(), val.to_string());
+                            save_local_storage_to_disk(&orig_s, m);
                         }
                     });
                 }
@@ -1293,29 +1297,30 @@ fn setup_storage_and_cookies_api<'s>(
 
         // removeItem(key)
         let rm_item_k = v8::String::new(s, "removeItem").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let rm_item_fn = v8::Function::new(
             s,
-            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
                 if args.length() == 0 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
+                let orig_s = orig_c.to_string();
                 if is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if let Some(m) = map.get_mut(&orig_c) {
-                            m.remove(&key);
+                        if let Some(m) = map.get_mut(&orig_s) {
+                            m.remove(&*key);
                         }
                     });
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if !map.contains_key(&orig_c) {
-                            let disk_map = load_local_storage_from_disk(&orig_c);
-                            map.insert(orig_c.clone(), disk_map);
+                        if !map.contains_key(&orig_s) {
+                            let disk_map = load_local_storage_from_disk(&orig_s);
+                            map.insert(orig_s.clone(), disk_map);
                         }
-                        if let Some(m) = map.get_mut(&orig_c) {
-                            m.remove(&key);
-                            save_local_storage_to_disk(&orig_c, m);
+                        if let Some(m) = map.get_mut(&orig_s) {
+                            m.remove(&*key);
+                            save_local_storage_to_disk(&orig_s, m);
                         }
                     });
                 }
@@ -1325,22 +1330,23 @@ fn setup_storage_and_cookies_api<'s>(
 
         // clear()
         let clear_k = v8::String::new(s, "clear").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let clear_fn = v8::Function::new(
             s,
-            move |_scope: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+            move |_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                let orig_s = orig_c.to_string();
                 if is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if let Some(m) = map.get_mut(&orig_c) {
+                        if let Some(m) = map.get_mut(&orig_s) {
                             m.clear();
                         }
                     });
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        map.insert(orig_c.clone(), HashMap::new());
-                        save_local_storage_to_disk(&orig_c, &HashMap::new());
+                        map.insert(orig_s.clone(), HashMap::new());
+                        save_local_storage_to_disk(&orig_s, &HashMap::new());
                     });
                 }
             },
@@ -1349,22 +1355,23 @@ fn setup_storage_and_cookies_api<'s>(
 
         // key(index)
         let key_k = v8::String::new(s, "key").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let key_fn = v8::Function::new(
             s,
-            move |scope: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
                 if args.length() == 0 { return; }
                 let idx = args.get(0).to_integer(scope).map(|i| i.value() as usize).unwrap_or(0);
+                let orig_s = orig_c.to_string();
                 let key_opt = if is_session {
-                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).and_then(|m| m.keys().nth(idx).cloned()))
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).and_then(|m| m.keys().nth(idx).cloned()))
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if !map.contains_key(&orig_c) {
-                            let disk_map = load_local_storage_from_disk(&orig_c);
-                            map.insert(orig_c.clone(), disk_map);
+                        if !map.contains_key(&orig_s) {
+                            let disk_map = load_local_storage_from_disk(&orig_s);
+                            map.insert(orig_s.clone(), disk_map);
                         }
-                        map.get(&orig_c).and_then(|m| m.keys().nth(idx).cloned())
+                        map.get(&orig_s).and_then(|m| m.keys().nth(idx).cloned())
                     })
                 };
                 if let Some(k) = key_opt {
@@ -1379,20 +1386,21 @@ fn setup_storage_and_cookies_api<'s>(
 
         // length getter
         let len_k = v8::String::new(s, "length").unwrap();
-        let orig_c = orig.clone();
+        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
         let len_fn = v8::Function::new(
             s,
-            move |scope: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+            move |scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                let orig_s = orig_c.to_string();
                 let len = if is_session {
-                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_c).map(|m| m.len()).unwrap_or(0))
+                    SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).map(|m| m.len()).unwrap_or(0))
                 } else {
                     LOCAL_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
-                        if !map.contains_key(&orig_c) {
-                            let disk_map = load_local_storage_from_disk(&orig_c);
-                            map.insert(orig_c.clone(), disk_map);
+                        if !map.contains_key(&orig_s) {
+                            let disk_map = load_local_storage_from_disk(&orig_s);
+                            map.insert(orig_s.clone(), disk_map);
                         }
-                        map.get(&orig_c).map(|m| m.len()).unwrap_or(0)
+                        map.get(&orig_s).map(|m| m.len()).unwrap_or(0)
                     })
                 };
                 rv.set(v8::Integer::new(scope, len as i32).into());
@@ -1401,10 +1409,10 @@ fn setup_storage_and_cookies_api<'s>(
         storage.set(s, len_k.into(), len_fn.into());
 
         storage
-    };
+    }
 
-    let local_storage = create_storage_obj(scope, false);
-    let session_storage = create_storage_obj(scope, true);
+    let local_storage = create_storage_obj(scope, false, &origin);
+    let session_storage = create_storage_obj(scope, true, &origin);
 
     let ls_k = v8::String::new(scope, "localStorage").unwrap();
     let ss_k = v8::String::new(scope, "sessionStorage").unwrap();
@@ -1414,10 +1422,10 @@ fn setup_storage_and_cookies_api<'s>(
     // 2. Cookie native hooks with attribute awareness
     let get_cookie_fn = v8::Function::new(
         scope,
-        move |s: &mut v8::HandleScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+        move |s: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
             let cookies = COOKIE_JAR.with(|jar| {
                 let map = jar.borrow();
-                if let Some(list) = map.get(&origin_local) {
+                if let Some(list) = map.get(origin_local) {
                     list.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join("; ")
                 } else {
                     String::new()
@@ -1428,10 +1436,10 @@ fn setup_storage_and_cookies_api<'s>(
         },
     ).unwrap();
 
-    let orig_set = origin.clone();
+    let orig_set: &'static str = Box::leak(origin.clone().into_boxed_str());
     let set_cookie_fn = v8::Function::new(
         scope,
-        move |s: &mut v8::HandleScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+        move |s: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
             if args.length() == 0 { return; }
             let cookie_str = args.get(0).to_rust_string_lossy(s);
             let parts: Vec<&str> = cookie_str.split(';').collect();
@@ -1442,7 +1450,7 @@ fn setup_storage_and_cookies_api<'s>(
                     let v = kv[1].trim().to_string();
                     COOKIE_JAR.with(|jar| {
                         let mut map = jar.borrow_mut();
-                        let list = map.entry(orig_set.clone()).or_insert_with(Vec::new);
+                        let list = map.entry(orig_set.to_string()).or_insert_with(Vec::new);
                         list.retain(|(item_k, _)| item_k != &k);
                         // Check if deleted via max-age=0 or expires in past
                         let is_deleted = parts.iter().skip(1).any(|p| {
@@ -1468,8 +1476,8 @@ fn setup_storage_and_cookies_api<'s>(
 // DOCUMENT & ELEMENT DOM BINDINGS
 // ============================================================================
 
-fn setup_document_api<'s>(
-    scope: &mut v8::ContextScope<'s, v8::HandleScope>,
+fn setup_document_api(
+    scope: &mut v8::PinScope,
     global: v8::Local<v8::Object>,
 ) {
     let doc_key = v8::String::new(scope, "document").unwrap();
@@ -1479,7 +1487,7 @@ fn setup_document_api<'s>(
     let write_key = v8::String::new(scope, "write").unwrap();
     let write_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          _rv: v8::ReturnValue| {
             if args.length() > 0 {
@@ -1522,7 +1530,7 @@ fn setup_document_api<'s>(
     let get_id_key = v8::String::new(scope, "getElementById").unwrap();
     let get_id_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() == 0 {
@@ -1555,7 +1563,7 @@ fn setup_document_api<'s>(
     let qs_key = v8::String::new(scope, "querySelector").unwrap();
     let qs_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() == 0 {
@@ -1588,7 +1596,7 @@ fn setup_document_api<'s>(
     let qsa_key = v8::String::new(scope, "querySelectorAll").unwrap();
     let qsa_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() == 0 {
@@ -1623,7 +1631,7 @@ fn setup_document_api<'s>(
     let ce_key = v8::String::new(scope, "createElement").unwrap();
     let ce_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             let tag = if args.length() > 0 {
@@ -1660,7 +1668,7 @@ fn setup_document_api<'s>(
 
 /// Wrap a Rust NodePtr into an Element Object with standard methods and property hooks
 fn wrap_dom_element<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     node: &NodePtr,
 ) -> v8::Local<'s, v8::Object> {
     let elem_obj = v8::Object::new(scope);
@@ -1683,7 +1691,7 @@ fn wrap_dom_element<'s>(
     let append_key = v8::String::new(scope, "appendChild").unwrap();
     let append_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() == 0 || !args.get(0).is_object() {
@@ -1727,7 +1735,7 @@ fn wrap_dom_element<'s>(
     let remove_child_k = v8::String::new(scope, "removeChild").unwrap();
     let remove_child_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          mut rv: v8::ReturnValue| {
             if args.length() == 0 || !args.get(0).is_object() {
@@ -1772,7 +1780,7 @@ fn wrap_dom_element<'s>(
     let remove_k = v8::String::new(scope, "remove").unwrap();
     let remove_fn = v8::Function::new(
         scope,
-        |scope: &mut v8::HandleScope,
+        |scope: &mut v8::PinScope,
          args: v8::FunctionCallbackArguments,
          _rv: v8::ReturnValue| {
             let this_obj = args.this();
@@ -1810,15 +1818,15 @@ fn wrap_dom_element<'s>(
 }
 
 // Binds __getInnerHTML, __setInnerHTML, __getTextContent, __setTextContent
-fn bind_element_accessor_functions<'s>(
-    scope: &mut v8::HandleScope<'s>,
-    elem_obj: v8::Local<'s, v8::Object>,
+fn bind_element_accessor_functions(
+    scope: &mut v8::PinScope,
+    elem_obj: v8::Local<v8::Object>,
     node_id: usize,
 ) {
     let get_html_k = v8::String::new(scope, "__getInnerHTML").unwrap();
     let get_html_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               _args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
             let html_str = CURRENT_CONTEXT.with(|ctx| {
@@ -1839,7 +1847,7 @@ fn bind_element_accessor_functions<'s>(
     let set_html_k = v8::String::new(scope, "__setInnerHTML").unwrap();
     let set_html_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
             if args.length() > 0 {
@@ -1863,7 +1871,7 @@ fn bind_element_accessor_functions<'s>(
     let get_text_k = v8::String::new(scope, "__getTextContent").unwrap();
     let get_text_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               _args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
             let text_str = CURRENT_CONTEXT.with(|ctx| {
@@ -1884,7 +1892,7 @@ fn bind_element_accessor_functions<'s>(
     let set_text_k = v8::String::new(scope, "__setTextContent").unwrap();
     let set_text_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
             if args.length() > 0 {
@@ -1904,15 +1912,15 @@ fn bind_element_accessor_functions<'s>(
     elem_obj.set(scope, set_text_k.into(), set_text_fn.into());
 }
 
-fn bind_element_attribute_functions<'s>(
-    scope: &mut v8::HandleScope<'s>,
-    elem_obj: v8::Local<'s, v8::Object>,
+fn bind_element_attribute_functions(
+    scope: &mut v8::PinScope,
+    elem_obj: v8::Local<v8::Object>,
     node_id: usize,
 ) {
     let get_attr_k = v8::String::new(scope, "getAttribute").unwrap();
     let get_attr_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
             if args.length() > 0 {
@@ -1944,7 +1952,7 @@ fn bind_element_attribute_functions<'s>(
     let set_attr_k = v8::String::new(scope, "setAttribute").unwrap();
     let set_attr_fn = v8::Function::new(
         scope,
-        move |scope: &mut v8::HandleScope,
+        move |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
             if args.length() >= 2 {
@@ -1968,9 +1976,9 @@ fn bind_element_attribute_functions<'s>(
     elem_obj.set(scope, set_attr_k.into(), set_attr_fn.into());
 }
 
-fn bind_element_event_functions<'s>(
-    scope: &mut v8::HandleScope<'s>,
-    elem_obj: v8::Local<'s, v8::Object>,
+fn bind_element_event_functions(
+    scope: &mut v8::PinScope,
+    elem_obj: v8::Local<v8::Object>,
 ) {
     let events_map = v8::Object::new(scope);
     let events_k = v8::String::new(scope, "__events").unwrap();
@@ -1981,7 +1989,7 @@ fn bind_element_event_functions<'s>(
 /// 1. window.addEventListener, document.addEventListener, element.addEventListener
 /// 2. Event bubbling & capture phase from target -> parent -> document -> window
 /// 3. element.innerHTML, textContent, className, id reactive property getters & setters
-fn inject_dom_prototype_bootstrap<'s>(scope: &mut v8::ContextScope<'s, v8::HandleScope>) {
+fn inject_dom_prototype_bootstrap(scope: &mut v8::PinScope) {
     let bootstrap_js = r#"
     (function() {
         // --------------------------------------------------------------------

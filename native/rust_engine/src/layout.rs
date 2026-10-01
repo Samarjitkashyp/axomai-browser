@@ -1755,8 +1755,13 @@ impl LayoutBox {
         let inner_x = local_x + self.scroll_left;
         let inner_y = local_y + self.scroll_top;
 
-        for child in self.children.iter_mut().rev() {
-            if let Some(sc) = child.find_scroll_container_at_mut(inner_x, inner_y) {
+        // Check children first; use index + pointer to avoid overlapping &mut borrows.
+        let num_children = self.children.len();
+        for i in (0..num_children).rev() {
+            let child_ptr: *mut LayoutBox = &mut self.children[i];
+            // SAFETY: we return immediately when a match is found, so only one mutable
+            // reference into `self.children` is live at any time.
+            if let Some(sc) = unsafe { &mut *child_ptr }.find_scroll_container_at_mut(inner_x, inner_y) {
                 return Some(sc);
             }
         }
@@ -2087,5 +2092,7 @@ pub fn build_layout_tree(node: &NodePtr, current_url: Option<&crate::network::UR
             text_box.node_id = node_id;
             Some(text_box)
         }
+
+        NodeType::Document | NodeType::DocumentType { .. } | NodeType::Comment { .. } => None,
     }
 }

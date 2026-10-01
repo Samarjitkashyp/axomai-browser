@@ -282,7 +282,7 @@ impl WasmInstance {
 
     /// Execute a named exported function
     pub fn call_export(&mut self, name: &str, args: &[WasmVal]) -> Result<Option<WasmVal>, String> {
-        let export = self.module.exports.get(name).ok_or_else(|| format!("Export not found: {}", name))?;
+        let export = self.module.exports.get(name).ok_or_else(|| format!("Export not found: {}", name))?.clone();
         if export.kind != 0 {
             return Err(format!("Export '{}' is not a function", name));
         }
@@ -294,8 +294,9 @@ impl WasmInstance {
         if let Some(func) = self.module.functions.get(func_idx as usize) {
             let mut locals = args.to_vec();
             locals.extend(func.locals.clone());
+            let instructions = func.instructions.clone();
 
-            for instr in &func.instructions {
+            for instr in &instructions {
                 match instr {
                     WasmOpcode::I32Const(v) => self.stack.push(WasmVal::I32(*v)),
                     WasmOpcode::I64Const(v) => self.stack.push(WasmVal::I64(*v)),
