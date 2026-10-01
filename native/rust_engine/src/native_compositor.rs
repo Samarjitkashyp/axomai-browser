@@ -345,12 +345,21 @@ impl WgpuRenderer {
         .expect("Failed to create wgpu device");
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
+        let surface_format = if surface_caps.formats.is_empty() {
+            wgpu::TextureFormat::Bgra8UnormSrgb
+        } else {
+            surface_caps
+                .formats
+                .iter()
+                .find(|f| f.is_srgb())
+                .copied()
+                .unwrap_or(surface_caps.formats[0])
+        };
+        let alpha_mode = if surface_caps.alpha_modes.is_empty() {
+            wgpu::CompositeAlphaMode::Auto
+        } else {
+            surface_caps.alpha_modes[0]
+        };
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -358,7 +367,7 @@ impl WgpuRenderer {
             width,
             height,
             present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps.alpha_modes[0],
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
