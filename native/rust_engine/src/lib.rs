@@ -50,8 +50,8 @@ pub use html_parser::HTMLParser;
 pub use js_engine::V8JSEngine;
 pub use media_decoder::{MediaDemuxer, MediaPlaybackPipeline};
 pub use native_compositor::{
-    GpuPipelineDescriptor, GpuQuad, GpuSwapchainPresenter, GpuVertex, NativeFramebuffer,
-    NativeGpuCompositor,
+    GpuBufferStream, GpuHardwareDevice, GpuPipelineDescriptor, GpuQuad, GpuSwapchainPresenter,
+    GpuVertex, NativeFramebuffer, NativeGpuCompositor,
 };
 pub use performance_limiter::ResourceLimiter;
 pub use permissions_engine::{PermissionName, PermissionState, PermissionsManager};

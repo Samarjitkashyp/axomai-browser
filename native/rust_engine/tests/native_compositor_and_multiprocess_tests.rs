@@ -51,6 +51,12 @@ fn test_native_gpu_compositor_direct_rasterization() {
     let frame_id = compositor.present(&engine.display_list);
     assert_eq!(frame_id, 1);
     assert_eq!(compositor.presenter.presented_frames, 1);
+
+    // Verify GPU hardware buffer stream creation
+    let stream = compositor.generate_gpu_buffer_stream(&engine.display_list);
+    assert!(stream.quad_count > 0);
+    assert_eq!(stream.vertex_data.len(), stream.quad_count * 32);
+    assert_eq!(stream.index_data.len(), stream.quad_count * 6);
 }
 
 #[test]
