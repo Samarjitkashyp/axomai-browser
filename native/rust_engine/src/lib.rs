@@ -9,6 +9,7 @@ pub mod css_parser;
 pub mod download_manager;
 pub mod engine;
 pub mod ffi;
+pub mod glyph_atlas;
 pub mod html_parser;
 pub mod js_engine;
 pub mod layout;

@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut mouse_x: f32 = 0.0;
     let mut mouse_y: f32 = 0.0;
+    let mut compositor = NativeGpuCompositor::new(size.width, size.height);
 
     // 5. Run Event Loop — all rendering via real wgpu, no WebView
     event_loop.run(move |event, _, control_flow| {
@@ -144,9 +145,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let h = gpu_renderer.surface_config.height as f32;
                     let updated = eng.process_event_loop(w, h);
 
-                    if updated {
-                        let mut compositor = NativeGpuCompositor::new(w as u32, h as u32);
+                    if updated || gpu_renderer.presented_frames < 3 {
+                        compositor.width = w as u32;
+                        compositor.height = h as u32;
                         let quads = compositor.extract_gpu_quads(&eng.display_list);
+
+                        if compositor.glyph_atlas.dirty {
+                            gpu_renderer.upload_glyph_atlas(&compositor.glyph_atlas);
+                            compositor.glyph_atlas.dirty = false;
+                        }
 
                         match gpu_renderer.render_frame(&quads) {
                             Ok(frame_idx) => {

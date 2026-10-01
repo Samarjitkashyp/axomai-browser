@@ -3,6 +3,7 @@
 //! surface, render pipeline, and GPU buffers to present frames to the OS window.
 //! Without the feature, it falls back to CPU rasterization into a framebuffer.
 
+use crate::glyph_atlas::GlyphAtlas;
 use crate::painter::DisplayCommand;
 
 #[cfg(feature = "wgpu-backend")]
@@ -21,6 +22,7 @@ pub struct GpuQuad {
     pub indices: [u32; 6],
     pub clip_rect: Option<[f32; 4]>,
     pub opacity: f32,
+    pub is_textured: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -171,7 +173,7 @@ impl GpuSwapchainPresenter {
 
 // ─── Real wgpu GPU Renderer (behind wgpu-backend feature) ───
 
-/// Vertex layout matching the WGSL shader: position(2) + uv(2) + color(4) = 8 floats = 32 bytes
+/// Vertex layout: position(2) + uv(2) + color(4) + mode(1) = 9 floats = 36 bytes
 #[cfg(feature = "wgpu-backend")]
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -179,6 +181,7 @@ pub struct WgpuVertex {
     pub position: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub mode: f32,
 }
 
 #[cfg(feature = "wgpu-backend")]
@@ -203,6 +206,11 @@ impl WgpuVertex {
                     shader_location: 2,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                wgpu::VertexAttribute {
+                    offset: 32,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -214,17 +222,21 @@ struct Uniforms {
     projection: mat4x4<f32>,
 };
 @binding(0) @group(0) var<uniform> uniforms: Uniforms;
+@binding(0) @group(1) var glyph_texture: texture_2d<f32>;
+@binding(1) @group(1) var glyph_sampler: sampler;
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) mode: f32,
 };
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) mode: f32,
 };
 
 @vertex
@@ -233,11 +245,16 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.position = uniforms.projection * vec4<f32>(input.position, 0.0, 1.0);
     output.uv = input.uv;
     output.color = input.color;
+    output.mode = input.mode;
     return output;
 }
 
 @fragment
-fn fs_main(@location(0) uv: vec2<f32>, @location(1) color: vec4<f32>) -> @location(0) vec4<f32> {
+fn fs_main(@location(0) uv: vec2<f32>, @location(1) color: vec4<f32>, @location(2) mode: f32) -> @location(0) vec4<f32> {
+    if (mode > 0.5) {
+        let alpha = textureSample(glyph_texture, glyph_sampler, uv).r;
+        return vec4<f32>(color.rgb, color.a * alpha);
+    }
     return color;
 }
 "#;
@@ -263,6 +280,9 @@ pub struct WgpuRenderer {
     pub render_pipeline: wgpu::RenderPipeline,
     pub uniform_buffer: wgpu::Buffer,
     pub uniform_bind_group: wgpu::BindGroup,
+    pub glyph_texture: wgpu::Texture,
+    pub glyph_bind_group: wgpu::BindGroup,
+    pub glyph_bind_group_layout: wgpu::BindGroupLayout,
     pub presented_frames: u64,
 }
 
@@ -354,9 +374,59 @@ impl WgpuRenderer {
             }],
         });
 
+        let glyph_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Glyph Atlas"),
+            size: wgpu::Extent3d { width: 1024, height: 1024, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let glyph_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Glyph Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let glyph_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Glyph Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let glyph_view = glyph_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let glyph_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Glyph Bind Group"),
+            layout: &glyph_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&glyph_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&glyph_sampler) },
+            ],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Axomai Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &glyph_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -399,6 +469,9 @@ impl WgpuRenderer {
             render_pipeline,
             uniform_buffer,
             uniform_bind_group,
+            glyph_texture,
+            glyph_bind_group,
+            glyph_bind_group_layout,
             presented_frames: 0,
         }
     }
@@ -420,6 +493,24 @@ impl WgpuRenderer {
         );
     }
 
+    pub fn upload_glyph_atlas(&mut self, atlas: &crate::glyph_atlas::GlyphAtlas) {
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.glyph_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &atlas.pixels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(atlas.size),
+                rows_per_image: Some(atlas.size),
+            },
+            wgpu::Extent3d { width: atlas.size, height: atlas.size, depth_or_array_layers: 1 },
+        );
+    }
+
     /// Render a frame: convert GpuQuads to real GPU buffers, execute a render pass, present.
     pub fn render_frame(&mut self, quads: &[GpuQuad]) -> Result<u64, wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
@@ -431,11 +522,13 @@ impl WgpuRenderer {
         let mut base: u32 = 0;
 
         for quad in quads {
+            let mode = if quad.is_textured { 1.0f32 } else { 0.0f32 };
             for v in &quad.vertices {
                 vertices.push(WgpuVertex {
                     position: v.position,
                     uv: v.uv,
                     color: v.color,
+                    mode,
                 });
             }
             for idx in &quad.indices {
@@ -505,6 +598,7 @@ impl WgpuRenderer {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.glyph_bind_group, &[]);
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
@@ -526,6 +620,7 @@ pub struct NativeGpuCompositor {
     pub quads: Vec<GpuQuad>,
     pub pipeline: GpuPipelineDescriptor,
     pub presenter: GpuSwapchainPresenter,
+    pub glyph_atlas: GlyphAtlas,
 }
 
 impl NativeGpuCompositor {
@@ -577,6 +672,7 @@ impl NativeGpuCompositor {
                 sample_count: 1,
             },
             presenter: GpuSwapchainPresenter::new(width, height),
+            glyph_atlas: GlyphAtlas::new(),
         }
     }
 
@@ -623,32 +719,41 @@ impl NativeGpuCompositor {
                         indices: [0, 1, 2, 0, 2, 3],
                         clip_rect: None,
                         opacity: 1.0,
+                        is_textured: false,
                     };
                     self.quads.push(quad);
                 }
-                DisplayCommand::DrawText { x, y, text, font_size, color, width, height, .. } => {
+                DisplayCommand::DrawText { x, y, text, font_size, color, width: _, height: _, .. } => {
                     let (r, g, b, a) = Self::parse_color_hex(color);
                     let y_adj = y - scroll_y;
-                    let text_w = if *width > 0.0 { *width } else { text.len() as f32 * font_size * 0.6 };
-                    let text_h = if *height > 0.0 { *height } else { *font_size };
-                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + text_w, y_adj + text_h, (r, g, b, a));
-
                     let rf = r as f32 / 255.0;
                     let gf = g as f32 / 255.0;
                     let bf = b as f32 / 255.0;
                     let af = a as f32 / 255.0;
-                    let quad = GpuQuad {
-                        vertices: [
-                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [rf, gf, bf, af] },
-                            GpuVertex { position: [*x + text_w, y_adj], uv: [1.0, 0.0], color: [rf, gf, bf, af] },
-                            GpuVertex { position: [*x + text_w, y_adj + text_h], uv: [1.0, 1.0], color: [rf, gf, bf, af] },
-                            GpuVertex { position: [*x, y_adj + text_h], uv: [0.0, 1.0], color: [rf, gf, bf, af] },
-                        ],
-                        indices: [0, 1, 2, 0, 2, 3],
-                        clip_rect: None,
-                        opacity: 1.0,
-                    };
-                    self.quads.push(quad);
+
+                    let mut pen_x = *x;
+                    let baseline_y = y_adj + font_size;
+                    for ch in text.chars() {
+                        let glyph = self.glyph_atlas.rasterize(ch, *font_size);
+                        if glyph.width > 0.0 && glyph.height > 0.0 {
+                            let gx = pen_x + glyph.offset_x;
+                            let gy = baseline_y - glyph.offset_y - glyph.height;
+                            let quad = GpuQuad {
+                                vertices: [
+                                    GpuVertex { position: [gx, gy], uv: [glyph.u0, glyph.v0], color: [rf, gf, bf, af] },
+                                    GpuVertex { position: [gx + glyph.width, gy], uv: [glyph.u1, glyph.v0], color: [rf, gf, bf, af] },
+                                    GpuVertex { position: [gx + glyph.width, gy + glyph.height], uv: [glyph.u1, glyph.v1], color: [rf, gf, bf, af] },
+                                    GpuVertex { position: [gx, gy + glyph.height], uv: [glyph.u0, glyph.v1], color: [rf, gf, bf, af] },
+                                ],
+                                indices: [0, 1, 2, 0, 2, 3],
+                                clip_rect: None,
+                                opacity: 1.0,
+                                is_textured: true,
+                            };
+                            self.quads.push(quad);
+                        }
+                        pen_x += glyph.advance_width;
+                    }
                 }
                 DisplayCommand::DrawGradientRect { x1, y1, x2, y2, gradient: _, border_radius: _ } => {
                     let y1_adj = y1 - scroll_y;
@@ -665,6 +770,7 @@ impl NativeGpuCompositor {
                         indices: [0, 1, 2, 0, 2, 3],
                         clip_rect: None,
                         opacity: 1.0,
+                        is_textured: false,
                     };
                     self.quads.push(quad);
                 }
@@ -682,6 +788,7 @@ impl NativeGpuCompositor {
                         indices: [0, 1, 2, 0, 2, 3],
                         clip_rect: None,
                         opacity: 1.0,
+                        is_textured: false,
                     };
                     self.quads.push(quad);
                 }
@@ -699,6 +806,7 @@ impl NativeGpuCompositor {
                         indices: [0, 1, 2, 0, 2, 3],
                         clip_rect: None,
                         opacity: 1.0,
+                        is_textured: false,
                     };
                     self.quads.push(quad);
                 }
@@ -716,6 +824,7 @@ impl NativeGpuCompositor {
                         indices: [0, 1, 2, 0, 2, 3],
                         clip_rect: None,
                         opacity: 1.0,
+                        is_textured: false,
                     };
                     self.quads.push(quad);
                 }
@@ -725,7 +834,18 @@ impl NativeGpuCompositor {
     }
 
     fn parse_color_hex(hex: &str) -> (u8, u8, u8, u8) {
-        let clean = hex.trim().trim_start_matches('#');
+        let clean = hex.trim();
+        match clean.to_lowercase().as_str() {
+            "white" => return (255, 255, 255, 255),
+            "black" => return (0, 0, 0, 255),
+            "red" => return (255, 0, 0, 255),
+            "green" => return (0, 128, 0, 255),
+            "blue" => return (0, 0, 255, 255),
+            "transparent" => return (0, 0, 0, 0),
+            "gray" | "grey" => return (128, 128, 128, 255),
+            _ => {}
+        }
+        let clean = clean.trim_start_matches('#');
         if clean.len() == 6 {
             let r = u8::from_str_radix(&clean[0..2], 16).unwrap_or(0);
             let g = u8::from_str_radix(&clean[2..4], 16).unwrap_or(0);
