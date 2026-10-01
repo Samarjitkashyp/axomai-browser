@@ -119,6 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ElementState::Released => {
                             let _ = eng.handle_pointer_up(mouse_x, mouse_y, btn);
                         }
+                        _ => {}
                     }
                 }
             }
@@ -129,6 +130,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let dy = match delta {
                     tao::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
                     tao::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    _ => 0.0,
                 };
                 if let Ok(mut eng) = engine.lock() {
                     let w = gpu_renderer.surface_config.width as f32;
