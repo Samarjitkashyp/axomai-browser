@@ -389,32 +389,40 @@ impl V8JSEngine {
                     // text() method
                     let text_k = v8::String::new(scope, "text").unwrap();
                     let body_clone: &'static str = Box::leak(fetch_res.body.clone().into_boxed_str());
-                    let text_fn = v8::Function::new(
-                        scope,
-                        move |s: &mut v8::PinScope,
-                              _a: v8::FunctionCallbackArguments,
+                    let body_ptr: *mut &'static str = Box::leak(Box::new(body_clone));
+                    let text_ext = v8::External::new(scope, body_ptr as *mut std::ffi::c_void);
+                    let text_fn = v8::Function::builder(
+                        |s: &mut v8::PinScope,
+                              args: v8::FunctionCallbackArguments,
                               mut r: v8::ReturnValue| {
+                            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                            let body_str = unsafe { *(ext.value() as *const &str) };
                             let text_res = v8::PromiseResolver::new(s).unwrap();
                             let text_p = text_res.get_promise(s);
-                            let text_str = v8::String::new(s, body_clone).unwrap();
+                            let text_str = v8::String::new(s, body_str).unwrap();
                             text_res.resolve(s, text_str.into());
                             r.set(text_p.into());
                         },
                     )
+                    .data(text_ext.into())
+                    .build(scope)
                     .unwrap();
                     resp_obj.set(scope, text_k.into(), text_fn.into());
 
                     // json() method
                     let json_k = v8::String::new(scope, "json").unwrap();
                     let body_json: &'static str = Box::leak(fetch_res.body.clone().into_boxed_str());
-                    let json_fn = v8::Function::new(
-                        scope,
-                        move |s: &mut v8::PinScope,
-                              _a: v8::FunctionCallbackArguments,
+                    let body_json_ptr: *mut &'static str = Box::leak(Box::new(body_json));
+                    let json_ext = v8::External::new(scope, body_json_ptr as *mut std::ffi::c_void);
+                    let json_fn = v8::Function::builder(
+                        |s: &mut v8::PinScope,
+                              args: v8::FunctionCallbackArguments,
                               mut r: v8::ReturnValue| {
+                            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                            let body_str = unsafe { *(ext.value() as *const &str) };
                             let json_res = v8::PromiseResolver::new(s).unwrap();
                             let json_p = json_res.get_promise(s);
-                            let json_str = v8::String::new(s, body_json).unwrap();
+                            let json_str = v8::String::new(s, body_str).unwrap();
                             if let Some(parsed) = v8::json::parse(s, json_str) {
                                 json_res.resolve(s, parsed);
                             } else {
@@ -424,6 +432,8 @@ impl V8JSEngine {
                             r.set(json_p.into());
                         },
                     )
+                    .data(json_ext.into())
+                    .build(scope)
                     .unwrap();
                     resp_obj.set(scope, json_k.into(), json_fn.into());
 
@@ -984,11 +994,21 @@ fn setup_async_fetch_api(
     let base_url: &'static str = Box::leak(base_url_str.to_string().into_boxed_str());
     let fetch_key = v8::String::new(scope, "fetch").unwrap();
 
-    let fetch_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
+    struct FetchData {
+        base_url: &'static str,
+        engine_id: usize,
+    }
+    let fetch_data = Box::leak(Box::new(FetchData { base_url, engine_id }));
+    let fetch_ext = v8::External::new(scope, fetch_data as *mut FetchData as *mut std::ffi::c_void);
+
+    let fetch_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let fetch_data = unsafe { &*(ext.value() as *const FetchData) };
+            let base_url = fetch_data.base_url;
+            let engine_id = fetch_data.engine_id;
             if args.length() == 0 {
                 return;
             }
@@ -1158,6 +1178,8 @@ fn setup_async_fetch_api(
             });
         },
     )
+    .data(fetch_ext.into())
+    .build(scope)
     .unwrap();
 
     global.set(scope, fetch_key.into(), fetch_fn.into());
@@ -1228,20 +1250,26 @@ fn setup_storage_and_cookies_api(
     let origin_local: &'static str = Box::leak(origin.clone().into_boxed_str());
 
     // 1. window.localStorage & window.sessionStorage bindings
+    struct StorageData {
+        origin: &'static str,
+        is_session: bool,
+    }
+
     fn create_storage_obj<'s>(s: &mut v8::PinScope<'s, '_>, is_session: bool, origin: &str) -> v8::Local<'s, v8::Object> {
         let storage = v8::Object::new(s);
-        let orig = origin.to_string();
 
         // getItem(key)
         let get_item_k = v8::String::new(s, "getItem").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let get_item_fn = v8::Function::new(
-            s,
-            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let get_item_fn = v8::Function::builder(
+            |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
                 if args.length() == 0 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
-                let orig_s = orig_c.to_string();
-                let val_opt = if is_session {
+                let orig_s = sd.origin.to_string();
+                let val_opt = if sd.is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).and_then(|m| m.get(&*key).cloned()))
                 } else {
                     LOCAL_STORAGE.with(|st| {
@@ -1260,20 +1288,22 @@ fn setup_storage_and_cookies_api(
                     rv.set(v8::null(scope).into());
                 }
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, get_item_k.into(), get_item_fn.into());
 
         // setItem(key, val)
         let set_item_k = v8::String::new(s, "setItem").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let set_item_fn = v8::Function::new(
-            s,
-            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let set_item_fn = v8::Function::builder(
+            |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
                 if args.length() < 2 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
                 let val = args.get(1).to_rust_string_lossy(scope);
-                let orig_s = orig_c.to_string();
-                if is_session {
+                let orig_s = sd.origin.to_string();
+                if sd.is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
                         map.entry(orig_s.clone()).or_insert_with(HashMap::new).insert(key.to_string(), val.to_string());
@@ -1292,19 +1322,21 @@ fn setup_storage_and_cookies_api(
                     });
                 }
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, set_item_k.into(), set_item_fn.into());
 
         // removeItem(key)
         let rm_item_k = v8::String::new(s, "removeItem").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let rm_item_fn = v8::Function::new(
-            s,
-            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let rm_item_fn = v8::Function::builder(
+            |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
                 if args.length() == 0 { return; }
                 let key = args.get(0).to_rust_string_lossy(scope);
-                let orig_s = orig_c.to_string();
-                if is_session {
+                let orig_s = sd.origin.to_string();
+                if sd.is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
                         if let Some(m) = map.get_mut(&orig_s) {
@@ -1325,17 +1357,19 @@ fn setup_storage_and_cookies_api(
                     });
                 }
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, rm_item_k.into(), rm_item_fn.into());
 
         // clear()
         let clear_k = v8::String::new(s, "clear").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let clear_fn = v8::Function::new(
-            s,
-            move |_scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
-                let orig_s = orig_c.to_string();
-                if is_session {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let clear_fn = v8::Function::builder(
+            |_scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
+                let orig_s = sd.origin.to_string();
+                if sd.is_session {
                     SESSION_STORAGE.with(|st| {
                         let mut map = st.borrow_mut();
                         if let Some(m) = map.get_mut(&orig_s) {
@@ -1350,19 +1384,21 @@ fn setup_storage_and_cookies_api(
                     });
                 }
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, clear_k.into(), clear_fn.into());
 
         // key(index)
         let key_k = v8::String::new(s, "key").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let key_fn = v8::Function::new(
-            s,
-            move |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let key_fn = v8::Function::builder(
+            |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
                 if args.length() == 0 { return; }
                 let idx = args.get(0).to_integer(scope).map(|i| i.value() as usize).unwrap_or(0);
-                let orig_s = orig_c.to_string();
-                let key_opt = if is_session {
+                let orig_s = sd.origin.to_string();
+                let key_opt = if sd.is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).and_then(|m| m.keys().nth(idx).cloned()))
                 } else {
                     LOCAL_STORAGE.with(|st| {
@@ -1381,17 +1417,19 @@ fn setup_storage_and_cookies_api(
                     rv.set(v8::null(scope).into());
                 }
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, key_k.into(), key_fn.into());
 
         // length getter
         let len_k = v8::String::new(s, "length").unwrap();
-        let orig_c: &'static str = Box::leak(orig.clone().into_boxed_str());
-        let len_fn = v8::Function::new(
-            s,
-            move |scope: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
-                let orig_s = orig_c.to_string();
-                let len = if is_session {
+        let sd = Box::leak(Box::new(StorageData { origin: Box::leak(origin.to_string().into_boxed_str()), is_session }));
+        let ext = v8::External::new(s, sd as *mut StorageData as *mut std::ffi::c_void);
+        let len_fn = v8::Function::builder(
+            |scope: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+                let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+                let sd = unsafe { &*(ext.value() as *const StorageData) };
+                let orig_s = sd.origin.to_string();
+                let len = if sd.is_session {
                     SESSION_STORAGE.with(|st| st.borrow().get(&orig_s).map(|m| m.len()).unwrap_or(0))
                 } else {
                     LOCAL_STORAGE.with(|st| {
@@ -1405,7 +1443,7 @@ fn setup_storage_and_cookies_api(
                 };
                 rv.set(v8::Integer::new(scope, len as i32).into());
             },
-        ).unwrap();
+        ).data(ext.into()).build(s).unwrap();
         storage.set(s, len_k.into(), len_fn.into());
 
         storage
@@ -1420,9 +1458,12 @@ fn setup_storage_and_cookies_api(
     global.set(scope, ss_k.into(), session_storage.into());
 
     // 2. Cookie native hooks with attribute awareness
-    let get_cookie_fn = v8::Function::new(
-        scope,
-        move |s: &mut v8::PinScope, _args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+    let origin_local_ptr: *mut &'static str = Box::leak(Box::new(origin_local));
+    let get_cookie_ext = v8::External::new(scope, origin_local_ptr as *mut std::ffi::c_void);
+    let get_cookie_fn = v8::Function::builder(
+        |s: &mut v8::PinScope, args: v8::FunctionCallbackArguments, mut rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let origin_local = unsafe { *(ext.value() as *const &str) };
             let cookies = COOKIE_JAR.with(|jar| {
                 let map = jar.borrow();
                 if let Some(list) = map.get(origin_local) {
@@ -1434,12 +1475,15 @@ fn setup_storage_and_cookies_api(
             let v_str = v8::String::new(s, &cookies).unwrap();
             rv.set(v_str.into());
         },
-    ).unwrap();
+    ).data(get_cookie_ext.into()).build(scope).unwrap();
 
     let orig_set: &'static str = Box::leak(origin.clone().into_boxed_str());
-    let set_cookie_fn = v8::Function::new(
-        scope,
-        move |s: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+    let orig_set_ptr: *mut &'static str = Box::leak(Box::new(orig_set));
+    let set_cookie_ext = v8::External::new(scope, orig_set_ptr as *mut std::ffi::c_void);
+    let set_cookie_fn = v8::Function::builder(
+        |s: &mut v8::PinScope, args: v8::FunctionCallbackArguments, _rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let orig_set = unsafe { *(ext.value() as *const &str) };
             if args.length() == 0 { return; }
             let cookie_str = args.get(0).to_rust_string_lossy(s);
             let parts: Vec<&str> = cookie_str.split(';').collect();
@@ -1464,7 +1508,7 @@ fn setup_storage_and_cookies_api(
                 }
             }
         },
-    ).unwrap();
+    ).data(set_cookie_ext.into()).build(scope).unwrap();
 
     let doc_k = v8::String::new(scope, "__native_get_cookie").unwrap();
     let set_doc_k = v8::String::new(scope, "__native_set_cookie").unwrap();
@@ -1824,11 +1868,13 @@ fn bind_element_accessor_functions(
     node_id: usize,
 ) {
     let get_html_k = v8::String::new(scope, "__getInnerHTML").unwrap();
-    let get_html_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
-              _args: v8::FunctionCallbackArguments,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let get_html_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
+              args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             let html_str = CURRENT_CONTEXT.with(|ctx| {
                 if let Some(ref c) = *ctx.borrow() {
                     if let Some(node) = c.node_registry.get(&node_id) {
@@ -1841,15 +1887,19 @@ fn bind_element_accessor_functions(
             rv.set(v.into());
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, get_html_k.into(), get_html_fn.into());
 
     let set_html_k = v8::String::new(scope, "__setInnerHTML").unwrap();
-    let set_html_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let set_html_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             if args.length() > 0 {
                 let html_val = args.get(0).to_rust_string_lossy(scope);
                 CURRENT_CONTEXT.with(|ctx| {
@@ -1865,15 +1915,19 @@ fn bind_element_accessor_functions(
             }
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, set_html_k.into(), set_html_fn.into());
 
     let get_text_k = v8::String::new(scope, "__getTextContent").unwrap();
-    let get_text_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
-              _args: v8::FunctionCallbackArguments,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let get_text_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
+              args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             let text_str = CURRENT_CONTEXT.with(|ctx| {
                 if let Some(ref c) = *ctx.borrow() {
                     if let Some(node) = c.node_registry.get(&node_id) {
@@ -1886,15 +1940,19 @@ fn bind_element_accessor_functions(
             rv.set(v.into());
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, get_text_k.into(), get_text_fn.into());
 
     let set_text_k = v8::String::new(scope, "__setTextContent").unwrap();
-    let set_text_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let set_text_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             if args.length() > 0 {
                 let text_val = args.get(0).to_rust_string_lossy(scope);
                 CURRENT_CONTEXT.with(|ctx| {
@@ -1908,6 +1966,8 @@ fn bind_element_accessor_functions(
             }
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, set_text_k.into(), set_text_fn.into());
 }
@@ -1918,11 +1978,13 @@ fn bind_element_attribute_functions(
     node_id: usize,
 ) {
     let get_attr_k = v8::String::new(scope, "getAttribute").unwrap();
-    let get_attr_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let get_attr_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               mut rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             if args.length() > 0 {
                 let attr_name = args.get(0).to_rust_string_lossy(scope);
                 let val_opt = CURRENT_CONTEXT.with(|ctx| {
@@ -1946,15 +2008,19 @@ fn bind_element_attribute_functions(
             }
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, get_attr_k.into(), get_attr_fn.into());
 
     let set_attr_k = v8::String::new(scope, "setAttribute").unwrap();
-    let set_attr_fn = v8::Function::new(
-        scope,
-        move |scope: &mut v8::PinScope,
+    let nid_ext = v8::External::new(scope, node_id as *mut std::ffi::c_void);
+    let set_attr_fn = v8::Function::builder(
+        |scope: &mut v8::PinScope,
               args: v8::FunctionCallbackArguments,
               _rv: v8::ReturnValue| {
+            let ext: v8::Local<v8::External> = args.data().try_into().unwrap();
+            let node_id = ext.value() as usize;
             if args.length() >= 2 {
                 let key = args.get(0).to_rust_string_lossy(scope);
                 let val = args.get(1).to_rust_string_lossy(scope);
@@ -1972,6 +2038,8 @@ fn bind_element_attribute_functions(
             }
         },
     )
+    .data(nid_ext.into())
+    .build(scope)
     .unwrap();
     elem_obj.set(scope, set_attr_k.into(), set_attr_fn.into());
 }
