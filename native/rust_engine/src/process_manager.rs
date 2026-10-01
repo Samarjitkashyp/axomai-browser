@@ -110,7 +110,7 @@ impl ProcessSupervisor {
             main_rx: Arc::new(Mutex::new(rx)),
             next_renderer_id: 1,
             is_active: true,
-            default_mode: ExecutionMode::ThreadWorker,
+            default_mode: ExecutionMode::OsChildProcess,
         }
     }
 

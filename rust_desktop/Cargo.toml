@@ -8,4 +8,6 @@ description = "Axomai Browser - Fast, Private, AI-Powered Native Web Browser"
 [dependencies]
 tao = "0.28"
 wry = "0.41"
-axomai_engine = { path = "../native/rust_engine" }
+wgpu = "0.19"
+pollster = "0.3"
+axomai_engine = { path = "../native/rust_engine", features = ["wgpu-backend"] }

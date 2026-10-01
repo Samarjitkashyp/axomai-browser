@@ -14,8 +14,9 @@ ureq = { version = "2.9", features = ["tls"] }
 html-escape = "0.2"
 v8 = "152.2.0"
 wgpu = { version = "0.19", optional = true }
+bytemuck = { version = "1.14", features = ["derive"], optional = true }
+pollster = { version = "0.3", optional = true }
 
 [features]
 default = []
-wgpu-backend = ["dep:wgpu"]
-
+wgpu-backend = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]

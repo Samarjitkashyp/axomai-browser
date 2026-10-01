@@ -53,6 +53,8 @@ pub use native_compositor::{
     GpuBufferStream, GpuHardwareDevice, GpuPipelineDescriptor, GpuQuad, GpuSwapchainPresenter,
     GpuVertex, NativeFramebuffer, NativeGpuCompositor,
 };
+#[cfg(feature = "wgpu-backend")]
+pub use native_compositor::{WgpuRenderer, WgpuVertex};
 pub use performance_limiter::ResourceLimiter;
 pub use permissions_engine::{PermissionName, PermissionState, PermissionsManager};
 pub use pip_engine::PipEngine;
