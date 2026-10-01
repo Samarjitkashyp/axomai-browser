@@ -696,7 +696,7 @@ impl NativeGpuCompositor {
         self.presenter.hardware_device.create_buffer_stream(&self.quads)
     }
 
-    fn solid_quad(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> GpuQuad {
+    pub fn solid_quad(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> GpuQuad {
         GpuQuad {
             vertices: [
                 GpuVertex { position: [x, y], uv: [0.0, 0.0], color },
@@ -711,7 +711,7 @@ impl NativeGpuCompositor {
         }
     }
 
-    fn text_quad(x: f32, y: f32, glyph: &crate::glyph_atlas::GlyphInfo, color: [f32; 4]) -> GpuQuad {
+    pub fn text_quad(x: f32, y: f32, glyph: &crate::glyph_atlas::GlyphInfo, color: [f32; 4]) -> GpuQuad {
         GpuQuad {
             vertices: [
                 GpuVertex { position: [x, y], uv: [glyph.u0, glyph.v0], color },
