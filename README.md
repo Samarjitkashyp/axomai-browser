@@ -1,22 +1,25 @@
-# 🚀 Axomai Browser `v1.2.0`
+# 🚀 Axomai Browser `v1.3.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Built-in AdBlocker & Privacy Shield, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
 ## 🏗️ Architecture Pipeline
 
 ```
-[ Browser UI / Tab Process ] ◄──( IPC Bus / Sandbox Boundary )──► [ Network Process ]
+[ Browser UI / Tab / Android Shell ] ◄──( IPC Bus / Sandbox Boundary )──► [ Network Process ]
             │                                                              │
             ▼                                                              ▼
-[ Sandboxed Renderer Process ] ◄────────────────────────────────── [ HTTP Cache / Stream ]
+[ Sandboxed Renderer Process ] ◄──( AdBlock / EasyList Filter )─── [ HTTP Cache / Stream ]
 - HTML5 Tree Builder (Implicit <tbody>, Tables, Forms)
 - CSS Engine (Cascade, Custom Properties var(--*), calc/clamp)
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
+- Accessibility (a11y) & ARIA Tree Engine
+- Permissions & Geolocation Manager
+- On-Device AI & Multilingual Translator (Assamese, Hindi, English)
 - Google V8 Runtime (DOM, Web APIs, Workers, IndexedDB, WebSocket)
 - Web Cryptography API (SHA-256/512, AES-GCM, CSPRNG)
 - Web Audio API (AudioContext, Oscillator, Filter, Gain nodes)
@@ -37,20 +40,25 @@ A modern, high-performance web browser designed with an independent Rust engine 
 - Native Media Codec Demuxer (MP4/WebM -> AV1/VP9/H.264/AAC/Opus)
             │
             ▼
-[ Screen / Display ]
+[ Screen / Display / Android View ]
 ```
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.2.0`)
+## 📊 Subsystem Status Overview (`v1.3.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
-| **Web Cryptography API** | 🟢 **NEW** | `window.crypto.subtle` (SHA-1/256/384/512, AES-GCM cipher, CSPRNG `getRandomValues`, HMAC) |
-| **Web Audio API Graph** | 🟢 **NEW** | `AudioContext`, `GainNode`, `OscillatorNode`, `BiquadFilterNode`, `AnalyserNode`, node connection routing |
-| **Web Workers & OffscreenCanvas**| 🟢 **NEW** | `WorkerThreadPool`, background thread isolate dispatch, transferable buffers, `OffscreenCanvas` rendering |
-| **WebAuthn & Passkeys** | 🟢 **NEW** | `navigator.credentials` (FIDO2 / WebAuthn Level 3 public key attestation & assertion) |
-| **W3C WPT Test Runner** | 🟢 **NEW** | `WptRunner` automated suite execution, assertion validation, compliance score reporting |
+| **AdBlocker & Privacy Shield** | 🟢 **NEW** | EasyList network filter engine, tracker blocking, cosmetic CSS injection (`##.ad-banner`) |
+| **Accessibility (a11y) & ARIA** | 🟢 **NEW** | `AccessibilityTree`, Accessible Object Model (AOM), ARIA roles (`button`, `link`, `banner`, `alert`) |
+| **Permissions & Geolocation** | 🟢 **NEW** | `PermissionsManager`, W3C Permissions API, Geolocation GPS coordinates, DeviceOrientation sensors |
+| **On-Device AI & Translator** | 🟢 **NEW** | `AiAssistant`, native page text summarizer, keyword extractor, offline Assamese/Hindi/English translation |
+| **Android NDK Bridge** | 🟢 **NEW** | C-ABI / JNI functions (`axomai_android_init`, `axomai_android_load_html`) for Android APK mobile compilation |
+| **Web Cryptography API** | 🟢 | `window.crypto.subtle` (SHA-1/256/384/512, AES-GCM cipher, CSPRNG `getRandomValues`, HMAC) |
+| **Web Audio API Graph** | 🟢 | `AudioContext`, `GainNode`, `OscillatorNode`, `BiquadFilterNode`, `AnalyserNode`, node connection routing |
+| **Web Workers & OffscreenCanvas**| 🟢 | `WorkerThreadPool`, background thread isolate dispatch, transferable buffers, `OffscreenCanvas` rendering |
+| **WebAuthn & Passkeys** | 🟢 | `navigator.credentials` (FIDO2 / WebAuthn Level 3 public key attestation & assertion) |
+| **W3C WPT Test Runner** | 🟢 | `WptRunner` automated suite execution, assertion validation, compliance score reporting |
 | **WebAssembly (WASM) Engine** | 🟢 | Binary parser (`\0asm\1`), LEB128 decoder, linear memory pages, stack bytecode VM |
 | **WebGPU 3D Engine** | 🟢 | `GpuDevice`, `GpuBuffer`, `GpuShaderModule` (WGSL), `GpuRenderPipeline`, `GpuCommandEncoder` |
 | **WebGL 2.0 State Machine** | 🟢 | `WebGl2Context`, VAO, shader compile, `bindBuffer`, `drawArrays`, `drawElements` |
