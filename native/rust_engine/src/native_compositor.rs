@@ -626,10 +626,98 @@ impl NativeGpuCompositor {
                     };
                     self.quads.push(quad);
                 }
-                DisplayCommand::DrawText { x, y, text: _, font_size, color, .. } => {
+                DisplayCommand::DrawText { x, y, text, font_size, color, width, height, .. } => {
                     let (r, g, b, a) = Self::parse_color_hex(color);
                     let y_adj = y - scroll_y;
-                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + (*font_size * 4.0), y_adj + *font_size, (r, g, b, a));
+                    let text_w = if *width > 0.0 { *width } else { text.len() as f32 * font_size * 0.6 };
+                    let text_h = if *height > 0.0 { *height } else { *font_size };
+                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + text_w, y_adj + text_h, (r, g, b, a));
+
+                    let rf = r as f32 / 255.0;
+                    let gf = g as f32 / 255.0;
+                    let bf = b as f32 / 255.0;
+                    let af = a as f32 / 255.0;
+                    let quad = GpuQuad {
+                        vertices: [
+                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [rf, gf, bf, af] },
+                            GpuVertex { position: [*x + text_w, y_adj], uv: [1.0, 0.0], color: [rf, gf, bf, af] },
+                            GpuVertex { position: [*x + text_w, y_adj + text_h], uv: [1.0, 1.0], color: [rf, gf, bf, af] },
+                            GpuVertex { position: [*x, y_adj + text_h], uv: [0.0, 1.0], color: [rf, gf, bf, af] },
+                        ],
+                        indices: [0, 1, 2, 0, 2, 3],
+                        clip_rect: None,
+                        opacity: 1.0,
+                    };
+                    self.quads.push(quad);
+                }
+                DisplayCommand::DrawGradientRect { x1, y1, x2, y2, gradient: _, border_radius: _ } => {
+                    let y1_adj = y1 - scroll_y;
+                    let y2_adj = y2 - scroll_y;
+                    self.framebuffer.draw_solid_rect(*x1, y1_adj, *x2, y2_adj, (128, 128, 200, 255));
+
+                    let quad = GpuQuad {
+                        vertices: [
+                            GpuVertex { position: [*x1, y1_adj], uv: [0.0, 0.0], color: [0.5, 0.5, 0.78, 1.0] },
+                            GpuVertex { position: [*x2, y1_adj], uv: [1.0, 0.0], color: [0.5, 0.5, 0.78, 1.0] },
+                            GpuVertex { position: [*x2, y2_adj], uv: [1.0, 1.0], color: [0.5, 0.5, 0.78, 1.0] },
+                            GpuVertex { position: [*x1, y2_adj], uv: [0.0, 1.0], color: [0.5, 0.5, 0.78, 1.0] },
+                        ],
+                        indices: [0, 1, 2, 0, 2, 3],
+                        clip_rect: None,
+                        opacity: 1.0,
+                    };
+                    self.quads.push(quad);
+                }
+                DisplayCommand::DrawImage { x, y, width, height, .. } => {
+                    let y_adj = y - scroll_y;
+                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + *width, y_adj + *height, (200, 200, 200, 255));
+
+                    let quad = GpuQuad {
+                        vertices: [
+                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [0.78, 0.78, 0.78, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj], uv: [1.0, 0.0], color: [0.78, 0.78, 0.78, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj + *height], uv: [1.0, 1.0], color: [0.78, 0.78, 0.78, 1.0] },
+                            GpuVertex { position: [*x, y_adj + *height], uv: [0.0, 1.0], color: [0.78, 0.78, 0.78, 1.0] },
+                        ],
+                        indices: [0, 1, 2, 0, 2, 3],
+                        clip_rect: None,
+                        opacity: 1.0,
+                    };
+                    self.quads.push(quad);
+                }
+                DisplayCommand::DrawInput { x, y, width, height, .. } => {
+                    let y_adj = y - scroll_y;
+                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + *width, y_adj + *height, (245, 245, 245, 255));
+
+                    let quad = GpuQuad {
+                        vertices: [
+                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [0.96, 0.96, 0.96, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj], uv: [1.0, 0.0], color: [0.96, 0.96, 0.96, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj + *height], uv: [1.0, 1.0], color: [0.96, 0.96, 0.96, 1.0] },
+                            GpuVertex { position: [*x, y_adj + *height], uv: [0.0, 1.0], color: [0.96, 0.96, 0.96, 1.0] },
+                        ],
+                        indices: [0, 1, 2, 0, 2, 3],
+                        clip_rect: None,
+                        opacity: 1.0,
+                    };
+                    self.quads.push(quad);
+                }
+                DisplayCommand::DrawButton { x, y, width, height, .. } => {
+                    let y_adj = y - scroll_y;
+                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + *width, y_adj + *height, (220, 220, 230, 255));
+
+                    let quad = GpuQuad {
+                        vertices: [
+                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [0.86, 0.86, 0.9, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj], uv: [1.0, 0.0], color: [0.86, 0.86, 0.9, 1.0] },
+                            GpuVertex { position: [*x + *width, y_adj + *height], uv: [1.0, 1.0], color: [0.86, 0.86, 0.9, 1.0] },
+                            GpuVertex { position: [*x, y_adj + *height], uv: [0.0, 1.0], color: [0.86, 0.86, 0.9, 1.0] },
+                        ],
+                        indices: [0, 1, 2, 0, 2, 3],
+                        clip_rect: None,
+                        opacity: 1.0,
+                    };
+                    self.quads.push(quad);
                 }
                 _ => {}
             }
