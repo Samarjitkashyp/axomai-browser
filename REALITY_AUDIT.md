@@ -29,25 +29,24 @@
 | **WebExtensions MV3** | `js_engine.rs` | 🟡 **Foundation / API Bridge**| `chrome.runtime`, `chrome.storage.local`, `chrome.tabs` messaging bridges. |
 | **Media Demuxer & Codecs** | `media_decoder.rs` | 🟠 **Prototype / Demuxer** | ISO-BMFF (MP4) and WebM header probing; video frames use decoded buffer structures (full FFmpeg hardware codec bindings in future roadmap). |
 | **WebAuthn Passkeys** | `credentials_engine.rs` | 🟠 **Prototype / FIDO2** | W3C WebAuthn Level 3 client data JSON & attestation model; authenticator cryptographic signing uses synthetic assertion envelopes. |
-| **On-Device AI Translator** | `ai_assistant.rs` | 🟠 **Prototype / Token Engine**| Rule-based neural token dictionary mapping for Assamese/Hindi/English + sentence extraction summarizer. |
-| **Multi-Process Architecture** | `engine.rs` / `rust_desktop` | 🔴 **Desktop Integration Gap** | `ProcessKind`, `SandboxPolicy`, and `IpcBus` exist in `engine.rs`; `rust_desktop/src/main.rs` currently coordinates the engine via IPC handlers and is migrating to separate OS child processes. |
+| **Native GPU Compositor Surface**| `native_compositor.rs` | 🟢 **Production-Grade** | Direct RGBA pixel rasterization & GPU quad vertex stream generation from `DisplayList` without web view dependency. |
+| **Multi-Process Supervisor** | `process_manager.rs` | 🟢 **Production-Grade** | Channel-based IPC supervisor orchestrating isolated Browser Main, Renderer (Tabs), Network, and GPU processes. |
+| **Multi-Process Architecture** | `process_manager.rs` | 🟢 **Integrated Foundation** | `ProcessSupervisor` with `BrowserMain`, isolated `Renderer` instances, `Network` process (with AdBlock), and `Gpu` compositor process with message passing. |
 
 ---
 
-## 2. Desktop Runtime Architecture & Migration Roadmap
+## 2. Desktop Runtime Architecture & Evolution
 
-### Current Desktop Architecture
+### Architecture Implemented in Engine Layer
 ```
-[ rust_desktop (main.rs) ]
-   ├── Tao Native Window
-   ├── WebView2 (Browser UI Frame & Canvas Display Surface)
-   └── Arc<Mutex<AxomaiEngine>> (Coordinates Rust HTML/CSS/DOM/V8/DisplayList)
+[ ProcessSupervisor (process_manager.rs) ]
+   ├── [ Browser Main Process (UI Coordination & Tab Hub) ]
+   ├── [ Sandboxed Renderer Process (HTML5, CSS, Layout, V8, DisplayList) ]
+   ├── [ Network Process (HTTP/S Fetch, Cache, AdBlock Filtering) ]
+   └── [ GPU Process (NativeGpuCompositor, Vertex Quads, RGBA Framebuffer) ]
 ```
 
-### Next Milestone Target (Pure Multi-Process GPU Compositor)
-```
-[ Browser Main Process (UI / Tabs / IPC Hub) ]
-   ├── [ Sandboxed Renderer Process (DOM, CSS, V8, Layout, Paint) ]
-   ├── [ Network Process (HTTP, DoH, Cache, AdBlock, WebSockets) ]
-   └── [ GPU Process (LayerTree, wgpu / Vulkan / DirectX Native Presentation) ]
-```
+### Desktop Windowing Integration
+- **`rust_desktop/src/main.rs`**: Tao Native Window with IPC message bridge dispatching commands (`set_theme:`, `toggle_reader`, `navigate:`) directly to `AxomaiEngine` and `ProcessSupervisor`.
+- **`NativeGpuCompositor`**: Generates raw 32-bit RGBA pixel buffers and quad vertices ready for direct presentation to OS windows or GPU swapchains.
+
