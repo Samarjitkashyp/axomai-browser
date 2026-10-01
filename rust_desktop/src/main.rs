@@ -9,6 +9,8 @@ use tao::{
     keyboard::Key,
     window::WindowBuilder,
 };
+use tao::platform::windows::WindowExtWindows;
+use wry::{Rect, WebViewBuilder};
 
 const SIDEBAR_W: f32 = 180.0;
 const TAB_BAR_H: f32 = 40.0;
@@ -141,12 +143,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         size.width, size.height
     );
 
+    // Load home background image
+    {
+        let bg_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("home_bg.jpg");
+        if bg_path.exists() {
+            let img = image::open(&bg_path).expect("Failed to load home_bg.jpg").to_rgba8();
+            gpu_renderer.upload_bg_image(img.width(), img.height(), img.as_raw());
+            println!("[Axomai] Background image loaded: {}x{}", img.width(), img.height());
+        }
+    }
+
     let mut mouse_x: f32 = 0.0;
     let mut mouse_y: f32 = 0.0;
     let mut compositor = NativeGpuCompositor::new(size.width, size.height);
 
     let mut address_bar_text = String::from("about:home");
     let mut address_bar_focused = false;
+    let mut home_search_focused = false;
+    let mut home_search_text = String::new();
+    let mut ime_active = false;
     let mut needs_chrome_redraw = true;
     let mut sidebar_active: usize = 0;
     let mut is_home_page = true;
@@ -155,6 +170,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut is_settings_page = false;
     let mut selected_search_engine = SearchEngine::Google;
     let mut hover_engine_idx: Option<usize> = None;
+    let mut menu_open = false;
+    let mut hover_menu_idx: Option<usize> = None;
+
+    let scale_factor = window.scale_factor() as f32;
+
+    let nav_url_shared: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    let mut webview: Option<wry::WebView> = None;
+    let mut webview_visible = false;
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
@@ -175,6 +199,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if new_size.width > 0 && new_size.height > 0 {
                     gpu_renderer.resize(new_size.width, new_size.height);
                     needs_chrome_redraw = true;
+                    if let Some(ref wv) = webview {
+                        let _ = wv.set_bounds(Rect {
+                            position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
+                            size: wry::dpi::LogicalSize::new(
+                                (new_size.width as f32 / scale_factor - SIDEBAR_W) as u32,
+                                (new_size.height as f32 / scale_factor - CHROME_TOP) as u32,
+                            ).into(),
+                        });
+                    }
                 }
             }
             Event::WindowEvent {
@@ -209,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     hover_engine_idx = None;
                     let card_x = 40.0;
                     let card_w = (gpu_renderer.surface_config.width as f32 - SIDEBAR_W) - 80.0;
-                    let engine_start_y = 100.0;
+                    let engine_start_y = 130.0;
                     let engine_h = 56.0;
                     for i in 0..SearchEngine::all().len() {
                         let ey = engine_start_y + i as f32 * (engine_h + 8.0);
@@ -229,6 +262,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if old_hover != hover_sidebar_idx {
                     needs_chrome_redraw = true;
                 }
+                // Menu hover tracking
+                if menu_open {
+                    let old_menu_hover = hover_menu_idx;
+                    hover_menu_idx = None;
+                    let dm_w = 240.0;
+                    let dm_x = gpu_renderer.surface_config.width as f32 - dm_w - 20.0;
+                    let dm_y = CHROME_TOP + 4.0;
+                    for i in 0..8 {
+                        let iy = dm_y + 8.0 + i as f32 * 38.0;
+                        if mouse_x >= dm_x && mouse_x <= dm_x + dm_w
+                            && mouse_y >= iy && mouse_y <= iy + 36.0
+                        {
+                            hover_menu_idx = Some(i);
+                            break;
+                        }
+                    }
+                    if old_menu_hover != hover_menu_idx {
+                        needs_chrome_redraw = true;
+                    }
+                }
                 if !is_home_page && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
                     if let Ok(mut eng) = engine.lock() {
                         let _ = eng.handle_pointer_move(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP);
@@ -240,7 +293,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 let w = gpu_renderer.surface_config.width as f32;
+                // Query actual cursor position from OS (CursorMoved events may not fire with automation)
+                {
+                    let hwnd = window.hwnd() as *mut std::ffi::c_void;
+                    #[repr(C)]
+                    struct POINT { x: i32, y: i32 }
+                    extern "system" {
+                        fn GetCursorPos(lp: *mut POINT) -> i32;
+                        fn ScreenToClient(hwnd: *mut std::ffi::c_void, lp: *mut POINT) -> i32;
+                    }
+                    let mut pt = POINT { x: 0, y: 0 };
+                    unsafe {
+                        if GetCursorPos(&mut pt) != 0 {
+                            ScreenToClient(hwnd, &mut pt);
+                            mouse_x = pt.x as f32;
+                            mouse_y = pt.y as f32;
+                        }
+                    }
+                }
                 if state == ElementState::Pressed && button == MouseButton::Left {
+
                     if mouse_x < SIDEBAR_W {
                         let mut item_y = 50.0;
                         for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
@@ -255,10 +327,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         is_settings_page = false;
                                         address_bar_text = String::from("about:home");
                                         home_scroll_y = 0.0;
+                                        if webview_visible {
+                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
+                                            webview_visible = false;
+                                        }
                                     } else if i == 7 {
                                         is_settings_page = true;
                                         is_home_page = false;
                                         address_bar_text = String::from("about:settings");
+                                        if webview_visible {
+                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
+                                            webview_visible = false;
+                                        }
                                     } else {
                                         is_settings_page = false;
                                     }
@@ -268,7 +348,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 item_y += h;
                             }
                         }
+                    } else if menu_open {
+                        // Check if click is on a menu item
+                        let menu_x = w - 260.0;
+                        let menu_y_start = CHROME_TOP + 4.0;
+                        let menu_w = 240.0;
+                        let menu_items = ["Profile Management", "Dark Theme", "Light Theme", "Font Size +", "Font Size -", "Clear Memory", "Theme Management", "Settings"];
+                        let mut clicked_item = None;
+                        for (i, _item) in menu_items.iter().enumerate() {
+                            let iy = menu_y_start + 8.0 + i as f32 * 38.0;
+                            if mouse_x >= menu_x && mouse_x <= menu_x + menu_w
+                                && mouse_y >= iy && mouse_y <= iy + 36.0
+                            {
+                                clicked_item = Some(i);
+                                break;
+                            }
+                        }
+                        menu_open = false;
+                        if let Some(idx) = clicked_item {
+                            match idx {
+                                7 => {
+                                    // Settings
+                                    is_settings_page = true;
+                                    is_home_page = false;
+                                    sidebar_active = 7;
+                                    address_bar_text = String::from("about:settings");
+                                    if let Some(ref wv) = webview {
+                                        let _ = wv.set_visible(false);
+                                        webview_visible = false;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
+                        // 3-dot menu button
+                        let menu_btn_x = w - 160.0;
+
+                        if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 20.0
+                            && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
+                        {
+                            menu_open = !menu_open;
+
+                            needs_chrome_redraw = true;
+                        }
                         let addr_x = SIDEBAR_W + 140.0;
                         let addr_y = TAB_BAR_H + 8.0;
                         let addr_h = 30.0;
@@ -279,10 +403,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             && mouse_y <= addr_y + addr_h
                         {
                             address_bar_focused = true;
-                            if is_home_page {
-                                address_bar_text.clear();
-                            }
+                            address_bar_text.clear();
                             needs_chrome_redraw = true;
+                            // Steal focus back from WebView2
+                            unsafe {
+                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                SetFocus(window.hwnd() as _);
+                            }
                         } else if mouse_y >= TAB_BAR_H {
                             let nav_base_x = SIDEBAR_W + 8.0;
                             if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 32.0 {
@@ -327,11 +454,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else if is_settings_page {
                         address_bar_focused = false;
+                        menu_open = false;
                         let content_x = mouse_x - SIDEBAR_W;
                         let content_y = mouse_y - CHROME_TOP;
                         let card_x = 40.0;
                         let card_w = (w - SIDEBAR_W) - 80.0;
-                        let engine_start_y = 100.0;
+                        let engine_start_y = 130.0;
                         let engine_h = 56.0;
                         for (i, eng_option) in SearchEngine::all().iter().enumerate() {
                             let ey = engine_start_y + i as f32 * (engine_h + 8.0);
@@ -343,8 +471,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                         }
+                    } else if is_home_page {
+                        address_bar_focused = false;
+                        menu_open = false;
+                        let content_w = w - SIDEBAR_W;
+                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
+                        let cx = content_w / 2.0;
+                        let cy = content_h / 2.0 - 60.0;
+                        let search_w = 540.0f32.min(content_w - 80.0);
+                        let search_x = SIDEBAR_W + cx - search_w / 2.0;
+                        let search_y = CHROME_TOP + cy + 135.0;
+                        if mouse_x >= search_x && mouse_x <= search_x + search_w
+                            && mouse_y >= search_y && mouse_y <= search_y + 44.0
+                        {
+                            home_search_focused = true;
+                            home_search_text.clear();
+                            needs_chrome_redraw = true;
+                            unsafe {
+                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                SetFocus(window.hwnd() as _);
+                            }
+                        } else {
+                            home_search_focused = false;
+                            needs_chrome_redraw = true;
+                        }
                     } else if !is_home_page {
                         address_bar_focused = false;
+                        menu_open = false;
                         let btn = match button {
                             MouseButton::Left => 0,
                             MouseButton::Right => 2,
@@ -384,8 +537,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if address_bar_focused {
                         match key_event.logical_key {
                             Key::Character(ref ch) => {
-                                address_bar_text.push_str(ch.as_ref());
-                                needs_chrome_redraw = true;
+                                if !ime_active {
+                                    address_bar_text.push_str(ch.as_ref());
+                                    needs_chrome_redraw = true;
+                                }
                             }
                             Key::Backspace => {
                                 address_bar_text.pop();
@@ -406,13 +561,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     return;
                                 };
-                                if let Ok(mut eng) = engine.lock() {
-                                    let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
-                                    let content_h = h_of(&gpu_renderer) - CHROME_TOP;
-                                    let _ = eng.load_url(&url, content_w, content_h);
-                                    address_bar_text = url;
-                                    is_home_page = false;
+                                if webview.is_none() {
+                                    let cw = w_of(&gpu_renderer);
+                                    let ch = h_of(&gpu_renderer);
+                                    let nav_clone = nav_url_shared.clone();
+                                    webview = WebViewBuilder::new()
+                                        .with_url(&url)
+                                        .with_devtools(false)
+                                        .with_initialization_script("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});")
+                                        .with_bounds(Rect {
+                                            position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
+                                            size: wry::dpi::LogicalSize::new(
+                                                (cw - SIDEBAR_W) as u32,
+                                                (ch - CHROME_TOP) as u32,
+                                            ).into(),
+                                        })
+                                        .with_navigation_handler(move |nav_url: String| {
+                                            if let Ok(mut nav) = nav_clone.lock() {
+                                                *nav = Some(nav_url);
+                                            }
+                                            true
+                                        })
+                                        .build_as_child(&window)
+                                        .ok();
+                                    webview_visible = webview.is_some();
+                                    if webview.is_some() {
+                                        println!("[Axomai] WebView2 initialized successfully");
+                                    }
+                                } else if let Some(ref wv) = webview {
+                                    let _ = wv.load_url(&url);
+                                    if !webview_visible {
+                                        let _ = wv.set_visible(true);
+                                        webview_visible = true;
+                                    }
                                 }
+                                address_bar_text = url;
+                                is_home_page = false;
+                                is_settings_page = false;
                                 needs_chrome_redraw = true;
                             }
                             Key::Escape => {
@@ -424,8 +609,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             _ => {}
                         }
+                    } else if home_search_focused {
+                        match key_event.logical_key {
+                            Key::Character(ref ch) => {
+                                if !ime_active {
+                                    home_search_text.push_str(ch.as_ref());
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                            Key::Backspace => {
+                                home_search_text.pop();
+                                needs_chrome_redraw = true;
+                            }
+                            Key::Enter => {
+                                home_search_focused = false;
+                                if !home_search_text.is_empty() {
+                                    let url = if home_search_text.contains("://")
+                                        || home_search_text.contains('.')
+                                    {
+                                        if !home_search_text.contains("://") {
+                                            format!("https://{}", home_search_text)
+                                        } else {
+                                            home_search_text.clone()
+                                        }
+                                    } else {
+                                        selected_search_engine.search_url(&home_search_text)
+                                    };
+                                    if webview.is_none() {
+                                        let cw = w_of(&gpu_renderer);
+                                        let ch = h_of(&gpu_renderer);
+                                        let nav_clone = nav_url_shared.clone();
+                                        webview = WebViewBuilder::new()
+                                            .with_url(&url)
+                                            .with_devtools(false)
+                                            .with_initialization_script("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});")
+                                            .with_bounds(Rect {
+                                                position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
+                                                size: wry::dpi::LogicalSize::new(
+                                                    (cw - SIDEBAR_W) as u32,
+                                                    (ch - CHROME_TOP) as u32,
+                                                ).into(),
+                                            })
+                                            .with_navigation_handler(move |nav_url: String| {
+                                                if let Ok(mut nav) = nav_clone.lock() {
+                                                    *nav = Some(nav_url);
+                                                }
+                                                true
+                                            })
+                                            .build_as_child(&window)
+                                            .ok();
+                                        webview_visible = webview.is_some();
+                                    } else if let Some(ref wv) = webview {
+                                        let _ = wv.load_url(&url);
+                                        if !webview_visible {
+                                            let _ = wv.set_visible(true);
+                                            webview_visible = true;
+                                        }
+                                    }
+                                    address_bar_text = url;
+                                    is_home_page = false;
+                                    is_settings_page = false;
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                            Key::Escape => {
+                                home_search_focused = false;
+                                home_search_text.clear();
+                                needs_chrome_redraw = true;
+                            }
+                            _ => {}
+                        }
                     } else {
-                        if !is_home_page {
+                        if is_home_page {
+                            if let Key::Character(ref ch) = key_event.logical_key {
+                                if !ime_active {
+                                    home_search_focused = true;
+                                    home_search_text.clear();
+                                    home_search_text.push_str(ch.as_ref());
+                                    needs_chrome_redraw = true;
+                                    unsafe {
+                                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                        SetFocus(window.hwnd() as _);
+                                    }
+                                }
+                            }
+                        } else if !is_home_page {
                             let key_str = match key_event.logical_key {
                                 Key::Character(ref ch) => ch.to_string(),
                                 Key::Backspace => "BackSpace".to_string(),
@@ -455,6 +723,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::WindowEvent {
+                event: WindowEvent::ReceivedImeText(ref text),
+                ..
+            } => {
+                ime_active = true;
+                if address_bar_focused {
+                    address_bar_text.push_str(text);
+                    needs_chrome_redraw = true;
+                } else if home_search_focused {
+                    home_search_text.push_str(text);
+                    needs_chrome_redraw = true;
+                } else if is_home_page {
+                    home_search_focused = true;
+                    home_search_text.clear();
+                    home_search_text.push_str(text);
+                    needs_chrome_redraw = true;
+                }
+            }
+            Event::WindowEvent {
                 event: WindowEvent::MouseWheel { delta, .. },
                 ..
             } => {
@@ -477,6 +763,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::MainEventsCleared => {
+                if let Ok(mut nav) = nav_url_shared.lock() {
+                    if let Some(url) = nav.take() {
+                        address_bar_text = url;
+                        needs_chrome_redraw = true;
+                    }
+                }
+
                 let w = w_of(&gpu_renderer);
                 let h = h_of(&gpu_renderer);
                 let content_w = w - SIDEBAR_W;
@@ -512,11 +805,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut quads = build_chrome_quads(
                         &mut compositor, w, h, &address_bar_text, address_bar_focused,
                         &title, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
+                        menu_open, hover_menu_idx,
                     );
 
                     if is_home_page {
                         let home_quads = build_home_page_quads(
                             &mut compositor, content_w, content_h, home_scroll_y,
+                            home_search_focused, &home_search_text,
                         );
                         for mut q in home_quads {
                             for v in &mut q.vertices {
@@ -548,6 +843,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             quads.extend(page_quads);
                         }
+                    }
+
+                    if menu_open {
+                        quads.extend(build_dropdown_quads(&mut compositor, w, hover_menu_idx));
                     }
 
                     if compositor.glyph_atlas.dirty {
@@ -646,6 +945,8 @@ fn build_chrome_quads(
     history_fwd: bool,
     sidebar_active: usize,
     hover_sidebar: Option<usize>,
+    menu_open: bool,
+    hover_menu: Option<usize>,
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
@@ -653,49 +954,70 @@ fn build_chrome_quads(
     let white = c(255, 255, 255, 255);
     let tab_bar_bg = c(222, 225, 230, 255);
     let toolbar_bg = white;
-    let sidebar_bg = c(248, 249, 250, 255);
     let border = c(218, 220, 224, 255);
     let text_primary = c(32, 33, 36, 255);
     let text_secondary = c(95, 99, 104, 255);
     let text_disabled = c(155, 160, 168, 255);
     let blue = c(26, 115, 232, 255);
-    let hover_bg = c(232, 234, 237, 255);
-    let active_bg = c(210, 227, 252, 255);
+    let hover_bg = c(232, 234, 237, 200);
+    let active_bg = c(210, 227, 252, 200);
 
-    // === SIDEBAR ===
-    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, sidebar_bg));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, border));
+    // === SIDEBAR (Glassmorphism gradient) ===
+    // Gradient background: deep blue-purple to teal
+    let bands = 8;
+    for i in 0..bands {
+        let t = i as f32 / bands as f32;
+        let r = (15.0 + t * 10.0) as u8;
+        let g = (20.0 + t * 30.0) as u8;
+        let b = (50.0 + t * 30.0) as u8;
+        let band_h = viewport_h / bands as f32;
+        quads.push(NativeGpuCompositor::solid_quad(0.0, i as f32 * band_h, SIDEBAR_W, band_h + 1.0, c(r, g, b, 255)));
+    }
+    // Glass overlay (frosted white)
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, c(255, 255, 255, 18)));
+    // Right border glow
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, c(100, 140, 200, 80)));
+
+    // Sidebar colors (light on dark glass)
+    let sb_text = c(220, 225, 235, 255);
+    let sb_text_dim = c(140, 155, 180, 255);
+    let sb_accent = c(100, 180, 255, 255);
+    let sb_divider = c(255, 255, 255, 20);
+    let sb_hover = c(255, 255, 255, 20);
+    let sb_active = c(100, 180, 255, 30);
 
     // Logo
-    render_text(compositor, &mut quads, "Axomai", 16.0, 28.0, 16.0, blue, SIDEBAR_W);
-    render_text(compositor, &mut quads, "Browser", 88.0, 28.0, 10.0, text_secondary, SIDEBAR_W);
-    quads.push(NativeGpuCompositor::solid_quad(12.0, 40.0, SIDEBAR_W - 24.0, 1.0, border));
+    render_text(compositor, &mut quads, "Axomai", 16.0, 28.0, 16.0, sb_accent, SIDEBAR_W);
+    render_text(compositor, &mut quads, "Browser", 88.0, 28.0, 10.0, sb_text_dim, SIDEBAR_W);
+    quads.push(NativeGpuCompositor::solid_quad(12.0, 40.0, SIDEBAR_W - 24.0, 1.0, sb_divider));
 
     let mut item_y = 50.0;
     for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
         if item.is_section {
             item_y += 8.0;
-            quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, border));
+            quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, sb_divider));
             item_y += 10.0;
-            render_text(compositor, &mut quads, item.label, 16.0, item_y + 12.0, 10.0, text_disabled, SIDEBAR_W);
+            render_text(compositor, &mut quads, item.label, 16.0, item_y + 12.0, 10.0, sb_text_dim, SIDEBAR_W);
             item_y += 22.0;
         } else {
             let is_active = i == sidebar_active;
             let is_hovered = hover_sidebar == Some(i);
             let h = 32.0;
             if is_active {
-                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, active_bg));
+                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_active));
+                // Left accent bar
+                quads.push(NativeGpuCompositor::solid_quad(2.0, item_y + 6.0, 3.0, h - 12.0, sb_accent));
             } else if is_hovered {
-                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, hover_bg));
+                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_hover));
             }
-            let tc = if is_active { blue } else { text_primary };
+            let tc = if is_active { sb_accent } else { sb_text };
             render_text(compositor, &mut quads, item.icon, 18.0, item_y + 21.0, 13.0, tc, 36.0);
             render_text(compositor, &mut quads, item.label, 38.0, item_y + 21.0, 13.0, tc, SIDEBAR_W - 8.0);
             item_y += h + 1.0;
         }
     }
     item_y += 6.0;
-    render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, blue, SIDEBAR_W);
+    render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, sb_accent, SIDEBAR_W);
 
     // === TAB BAR (Chrome-style) ===
     // Tab strip background - slightly darker than toolbar
@@ -741,23 +1063,25 @@ fn build_chrome_quads(
     // Home button
     render_text(compositor, &mut quads, "H", nb + 88.0, nav_y + 5.0, 13.0, text_secondary, nb + 106.0);
 
-    // Address bar (Chrome-style: wide rounded pill, centered feel)
+    // Address bar (Chrome-style omnibox)
     let ax = SIDEBAR_W + 130.0;
-    let ay = ty + 6.0;
-    let ah = TOOLBAR_H - 12.0;
+    let ay = ty + 5.0;
+    let ah = TOOLBAR_H - 10.0;
     let aw = viewport_w - ax - 140.0;
+    let bar_radius = ah / 2.0;
     if focused {
-        // Focused: white bg with blue border
-        quads.push(rq(ax, ay, aw, ah, ah / 2.0, blue));
-        quads.push(rq(ax + 2.0, ay + 2.0, aw - 4.0, ah - 4.0, (ah - 4.0) / 2.0, white));
+        // Focused: white with blue outline, subtle shadow
+        quads.push(rq(ax - 1.0, ay + 1.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(0, 0, 0, 18)));
+        quads.push(rq(ax - 1.0, ay - 1.0, aw + 2.0, ah + 2.0, bar_radius + 1.0, c(26, 115, 232, 255)));
+        quads.push(rq(ax + 1.0, ay + 1.0, aw - 2.0, ah - 2.0, bar_radius - 1.0, white));
     } else {
-        // Unfocused: subtle gray pill
-        quads.push(rq(ax, ay, aw, ah, ah / 2.0, c(241, 243, 244, 255)));
+        // Unfocused: Chrome's subtle gray pill with slight depth
+        quads.push(rq(ax, ay + 1.0, aw, ah, bar_radius, c(0, 0, 0, 8)));
+        quads.push(rq(ax, ay, aw, ah, bar_radius, c(241, 243, 244, 255)));
     }
 
     // Search/lock icon
-    let icon_c = if focused { text_secondary } else { text_secondary };
-    render_text(compositor, &mut quads, "O", ax + 14.0, ay + ah / 2.0 + 6.0, 13.0, icon_c, ax + 30.0);
+    render_text(compositor, &mut quads, "O", ax + 14.0, ay + ah / 2.0 + 6.0, 13.0, text_secondary, ax + 30.0);
 
     let is_placeholder = (address_text == "about:home" || address_text == "about:settings") && !focused;
     let display = if is_placeholder { "Search Google or type a URL" } else { address_text };
@@ -765,7 +1089,7 @@ fn build_chrome_quads(
     let end_x = render_text(compositor, &mut quads, display, ax + 34.0, ay + ah / 2.0 + 6.0, 14.0, dtc, ax + aw - 14.0);
 
     if focused {
-        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, blue));
+        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 5.0, 1.5, ah - 10.0, c(26, 115, 232, 255)));
     }
 
     // Right toolbar icons (Chrome-style, compact)
@@ -774,17 +1098,58 @@ fn build_chrome_quads(
     let icy = iy + ih / 2.0 + 5.0;
 
     // AI button (branded pill)
-    let ai_x = viewport_w - 120.0;
+    let ai_x = viewport_w - 250.0;
     quads.push(rq(ai_x, iy, 40.0, ih, ih / 2.0, blue));
     render_text(compositor, &mut quads, "AI", ai_x + 12.0, icy, 12.0, white, viewport_w);
     // Profile avatar circle
-    let prof_x = viewport_w - 70.0;
+    let prof_x = viewport_w - 200.0;
     quads.push(rq(prof_x, iy, ih, ih, ih / 2.0, c(138, 180, 248, 255)));
     render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
-    // Three-dot menu
-    let menu_x = viewport_w - 36.0;
-    render_text(compositor, &mut quads, ":", menu_x, icy, 18.0, text_secondary, viewport_w);
+    // Three-dot menu button
+    let menu_x = viewport_w - 160.0;
+    quads.push(NativeGpuCompositor::solid_quad(menu_x - 4.0, iy, 24.0, ih, c(200, 200, 200, 60)));
+    render_text(compositor, &mut quads, ":", menu_x, icy - 2.0, 20.0, c(90, 90, 90, 255), viewport_w);
 
+    quads
+}
+
+fn build_dropdown_quads(
+    compositor: &mut NativeGpuCompositor,
+    viewport_w: f32,
+    hover_menu: Option<usize>,
+) -> Vec<GpuQuad> {
+    let mut quads = Vec::new();
+    let text_primary = c(32, 33, 36, 255);
+    let text_secondary = c(95, 99, 104, 255);
+    let dm_w = 240.0;
+    let dm_x = viewport_w - dm_w - 20.0;
+    let dm_y = CHROME_TOP + 4.0;
+    let menu_items = [
+        ("P", "Profile Management"),
+        ("D", "Dark Theme"),
+        ("L", "Light Theme"),
+        ("F", "Font Size +"),
+        ("f", "Font Size -"),
+        ("C", "Clear Memory"),
+        ("T", "Theme Management"),
+        ("S", "Settings"),
+    ];
+    let dm_h = 8.0 + menu_items.len() as f32 * 38.0 + 8.0;
+    quads.push(rq(dm_x + 3.0, dm_y + 3.0, dm_w, dm_h, 12.0, c(0, 0, 0, 40)));
+    quads.push(rq(dm_x, dm_y, dm_w, dm_h, 12.0, c(255, 255, 255, 255)));
+    quads.push(rq(dm_x, dm_y, dm_w, dm_h, 12.0, c(218, 220, 224, 30)));
+
+    for (i, (icon, label)) in menu_items.iter().enumerate() {
+        let iy = dm_y + 8.0 + i as f32 * 38.0;
+        if hover_menu == Some(i) {
+            quads.push(rq(dm_x + 4.0, iy, dm_w - 8.0, 36.0, 8.0, c(232, 234, 237, 255)));
+        }
+        render_text(compositor, &mut quads, icon, dm_x + 16.0, iy + 24.0, 14.0, text_secondary, dm_x + 36.0);
+        render_text(compositor, &mut quads, label, dm_x + 40.0, iy + 24.0, 13.0, text_primary, dm_x + dm_w - 10.0);
+        if i < menu_items.len() - 1 {
+            quads.push(NativeGpuCompositor::solid_quad(dm_x + 12.0, iy + 36.0, dm_w - 24.0, 1.0, c(218, 220, 224, 60)));
+        }
+    }
     quads
 }
 
@@ -887,181 +1252,59 @@ fn build_home_page_quads(
     content_w: f32,
     content_h: f32,
     scroll_y: f32,
+    search_focused: bool,
+    search_text: &str,
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
-    // Light theme colors
     let white = c(255, 255, 255, 255);
-    let page_bg = c(246, 247, 248, 255);
-    let text_dark = c(32, 33, 36, 255);
-    let text_secondary = c(95, 99, 104, 255);
-    let text_light = c(155, 160, 168, 255);
     let blue = c(26, 115, 232, 255);
-    let card_bg = white;
-    let border = c(218, 220, 224, 255);
 
-    // Background
-    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, page_bg));
+    // Background image (tea garden photo)
+    quads.push(NativeGpuCompositor::bg_image_quad(0.0, 0.0, content_w, content_h));
+    // Dark overlay for readability
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, c(0, 0, 0, 140)));
 
+    // ---- Centered content ----
     let cx = content_w / 2.0;
-    let base_y = scroll_y;
-
-    // ---- Hero section (white) ----
-    quads.push(NativeGpuCompositor::solid_quad(0.0, base_y, content_w, 280.0, white));
-    quads.push(NativeGpuCompositor::solid_quad(0.0, base_y + 279.0, content_w, 1.0, border));
-
-    // Location / weather widget (top right of hero)
-    let wr_x = content_w - 200.0;
-    render_text(compositor, &mut quads, "Guwahati", wr_x, base_y + 30.0, 12.0, text_secondary, content_w);
-    render_text(compositor, &mut quads, "28 C  Partly Cloudy", wr_x, base_y + 48.0, 11.0, text_light, content_w);
+    let cy = content_h / 2.0 - 60.0;
 
     // Logo icon
     let logo_size = 56.0;
     let logo_x = cx - logo_size / 2.0;
-    quads.push(rq(logo_x, base_y + 40.0, logo_size, logo_size, 14.0, blue));
-    render_text_centered(compositor, &mut quads, "A", cx, base_y + 82.0, 28.0, white);
+    quads.push(rq(logo_x, cy, logo_size, logo_size, 14.0, c(255, 255, 255, 40)));
+    quads.push(rq(logo_x + 2.0, cy + 2.0, logo_size - 4.0, logo_size - 4.0, 12.0, blue));
+    render_text_centered(compositor, &mut quads, "A", cx, cy + 42.0, 28.0, white);
 
     // Title
-    render_text_centered(compositor, &mut quads, "Axomai Browser", cx, base_y + 125.0, 26.0, text_dark);
-    render_text_centered(compositor, &mut quads, "Fast. Private. AI-Powered. Built for Everyone.", cx, base_y + 152.0, 13.0, text_secondary);
+    render_text_centered(compositor, &mut quads, "Axomai Browser", cx, cy + 85.0, 26.0, white);
+    render_text_centered(compositor, &mut quads, "Fast. Private. AI-Powered. Built for Everyone.", cx, cy + 112.0, 13.0, c(200, 210, 220, 200));
 
-    // ---- Search bar (centered, Chrome-style pill) ----
+    // ---- Search bar (centered, Chrome-style pill with glass effect) ----
     let search_w = 540.0f32.min(content_w - 80.0);
     let search_x = cx - search_w / 2.0;
-    let search_y = base_y + 175.0;
-    quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, white));
-    // Shadow simulation (slightly darker border)
-    quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, c(0, 0, 0, 18)));
-    quads.push(rq(search_x + 1.0, search_y + 1.0, search_w - 2.0, 42.0, 21.0, white));
+    let search_y = cy + 135.0;
+    // Glass background (brighter border when focused)
+    if search_focused {
+        quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, c(100, 160, 255, 80)));
+    } else {
+        quads.push(rq(search_x, search_y, search_w, 44.0, 22.0, c(255, 255, 255, 25)));
+    }
+    quads.push(rq(search_x + 1.0, search_y + 1.0, search_w - 2.0, 42.0, 21.0, c(30, 30, 30, 180)));
     // Search icon
-    render_text(compositor, &mut quads, "G", search_x + 16.0, search_y + 30.0, 16.0, blue, search_x + 36.0);
-    // Placeholder
-    render_text(compositor, &mut quads, "Search the web with Axomai AI...", search_x + 42.0, search_y + 28.0, 14.0, text_light, search_x + search_w - 40.0);
-    render_text(compositor, &mut quads, "Q", search_x + search_w - 32.0, search_y + 28.0, 14.0, text_secondary, search_x + search_w);
-
-    // ---- Quick Links row ----
-    let links = ["YouTube", "Google", "Facebook", "Instagram", "X", "Amazon", "Flipkart", "+"];
-    let link_colors: &[[u8; 3]] = &[
-        [255, 0, 0],
-        [66, 133, 244],
-        [24, 119, 242],
-        [225, 48, 108],
-        [100, 100, 110],
-        [255, 153, 0],
-        [255, 209, 0],
-        [26, 115, 232],
-    ];
-    let link_count = links.len() as f32;
-    let link_box_w = 72.0;
-    let link_gap = 14.0;
-    let total_links_w = link_count * link_box_w + (link_count - 1.0) * link_gap;
-    let links_start_x = cx - total_links_w / 2.0;
-    let links_y = base_y + 240.0;
-
-    for (i, label) in links.iter().enumerate() {
-        let lx = links_start_x + i as f32 * (link_box_w + link_gap);
-        let ly = links_y;
-        let icon_size = 44.0;
-        let icon_x = lx + (link_box_w - icon_size) / 2.0;
-        // Light circle background
-        quads.push(rq(icon_x, ly, icon_size, icon_size, 22.0, c(241, 243, 244, 255)));
-        let cc = link_colors[i];
-        quads.push(rq(icon_x + 6.0, ly + 6.0, icon_size - 12.0, icon_size - 12.0, 16.0, c(cc[0], cc[1], cc[2], 220)));
-        let first_char = &label[..1];
-        render_text_centered(compositor, &mut quads, first_char, lx + link_box_w / 2.0, ly + 30.0, 16.0, white);
-        render_text_centered(compositor, &mut quads, label, lx + link_box_w / 2.0, ly + 58.0, 10.0, text_secondary);
+    render_text(compositor, &mut quads, "G", search_x + 16.0, search_y + 30.0, 16.0, c(130, 180, 255, 255), search_x + 36.0);
+    if search_focused && !search_text.is_empty() {
+        render_text(compositor, &mut quads, search_text, search_x + 42.0, search_y + 28.0, 14.0, white, search_x + search_w - 40.0);
+        // Cursor
+        let cursor_x = search_x + 42.0 + search_text.len() as f32 * 8.0;
+        quads.push(NativeGpuCompositor::solid_quad(cursor_x, search_y + 10.0, 2.0, 24.0, white));
+    } else if search_focused {
+        // Cursor only
+        quads.push(NativeGpuCompositor::solid_quad(search_x + 42.0, search_y + 10.0, 2.0, 24.0, white));
+    } else {
+        render_text(compositor, &mut quads, "Search the web with Axomai AI...", search_x + 42.0, search_y + 28.0, 14.0, c(180, 185, 195, 200), search_x + search_w - 40.0);
     }
-
-    // ---- Category tabs ----
-    let tabs_y = links_y + 76.0;
-    let tab_labels = ["Top Sites", "News", "Technology", "Assam", "AI Tools", "Coding"];
-    let mut tx = 30.0;
-    for (i, label) in tab_labels.iter().enumerate() {
-        let tc = if i == 0 { blue } else { text_secondary };
-        let end = render_text(compositor, &mut quads, label, tx, tabs_y + 16.0, 13.0, tc, content_w - 30.0);
-        if i == 0 {
-            quads.push(NativeGpuCompositor::solid_quad(tx, tabs_y + 22.0, end - tx, 2.0, blue));
-        }
-        tx = end + 24.0;
-    }
-    quads.push(NativeGpuCompositor::solid_quad(30.0, tabs_y + 26.0, content_w - 60.0, 1.0, border));
-
-    // ---- Content cards and Quick Tools ----
-    let cards_y = tabs_y + 40.0;
-    let cards_w = (content_w - 90.0) * 0.6;
-    let tools_x = 30.0 + cards_w + 30.0;
-    let tools_w = content_w - tools_x - 30.0;
-
-    // Card 1
-    let card_h = 100.0;
-    quads.push(rq(30.0, cards_y, cards_w, card_h, 10.0, card_bg));
-    quads.push(rq(44.0, cards_y + 12.0, 60.0, 20.0, 4.0, c(26, 115, 232, 255)));
-    render_text(compositor, &mut quads, "Assam", 50.0, cards_y + 26.0, 10.0, white, 100.0);
-    render_text(compositor, &mut quads, "Kaziranga National Park sees", 44.0, cards_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "rise in tourist footfall this season", 44.0, cards_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "10 hours ago", 44.0, cards_y + 90.0, 10.0, text_light, 200.0);
-
-    // Card 2
-    let card2_y = cards_y + card_h + 10.0;
-    quads.push(rq(30.0, card2_y, cards_w, card_h, 10.0, card_bg));
-    quads.push(rq(44.0, card2_y + 12.0, 60.0, 20.0, 4.0, c(22, 163, 74, 255)));
-    render_text(compositor, &mut quads, "Wildlife", 48.0, card2_y + 26.0, 10.0, white, 110.0);
-    render_text(compositor, &mut quads, "One-Horned Rhino population", 44.0, card2_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "shows positive growth", 44.0, card2_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "12 hours ago", 44.0, card2_y + 90.0, 10.0, text_light, 200.0);
-
-    // Card 3
-    let card3_y = card2_y + card_h + 10.0;
-    quads.push(rq(30.0, card3_y, cards_w, card_h, 10.0, card_bg));
-    quads.push(rq(44.0, card3_y + 12.0, 60.0, 20.0, 4.0, c(168, 85, 247, 255)));
-    render_text(compositor, &mut quads, "Culture", 50.0, card3_y + 26.0, 10.0, white, 110.0);
-    render_text(compositor, &mut quads, "Bihu Festival 2026: Dates,", 44.0, card3_y + 52.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "Events and Travel Guide", 44.0, card3_y + 72.0, 14.0, text_dark, 30.0 + cards_w - 10.0);
-    render_text(compositor, &mut quads, "1 day ago", 44.0, card3_y + 90.0, 10.0, text_light, 200.0);
-
-    // ---- Quick Tools (right column) ----
-    render_text(compositor, &mut quads, "Quick Tools", tools_x, cards_y + 16.0, 14.0, text_dark, tools_x + tools_w);
-    render_text(compositor, &mut quads, "View All ->", tools_x + tools_w - 80.0, cards_y + 16.0, 11.0, blue, tools_x + tools_w);
-
-    let tool_labels = [
-        "Word to PDF", "PDF to Word", "Image to PDF",
-        "PDF to JPG", "PDF to PNG", "Image Convert",
-        "AI Notes", "QR Code", "More Tools",
-    ];
-    let cols = 3;
-    let tool_box_w = (tools_w - 16.0) / cols as f32;
-    let tool_box_h = 50.0;
-
-    for (i, label) in tool_labels.iter().enumerate() {
-        let col = i % cols;
-        let row = i / cols;
-        let bx = tools_x + col as f32 * (tool_box_w + 4.0);
-        let by = cards_y + 30.0 + row as f32 * (tool_box_h + 4.0);
-        quads.push(rq(bx, by, tool_box_w - 4.0, tool_box_h, 8.0, card_bg));
-        quads.push(rq(bx + (tool_box_w - 4.0) / 2.0 - 10.0, by + 8.0, 20.0, 20.0, 10.0, c(232, 240, 254, 255)));
-        render_text_centered(compositor, &mut quads, label, bx + (tool_box_w - 4.0) / 2.0, by + 42.0, 10.0, text_secondary);
-    }
-
-    // ---- AI Assistant panel ----
-    let ai_y = card3_y + card_h + 30.0;
-    let ai_w = content_w - 60.0;
-    quads.push(rq(30.0, ai_y, ai_w, 200.0, 12.0, card_bg));
-
-    quads.push(rq(44.0, ai_y + 14.0, 32.0, 32.0, 16.0, blue));
-    render_text(compositor, &mut quads, "A", 53.0, ai_y + 38.0, 16.0, white, 72.0);
-    render_text(compositor, &mut quads, "Hello! I'm Axomai AI", 86.0, ai_y + 30.0, 16.0, text_dark, 30.0 + ai_w);
-    render_text(compositor, &mut quads, "Your intelligent browsing assistant for a better web experience.", 86.0, ai_y + 50.0, 12.0, text_secondary, 30.0 + ai_w);
-
-    let actions = ["Summarize this page", "Explain like 5 year old", "Translate to Assamese", "Find similar content", "Generate notes"];
-    for (i, action) in actions.iter().enumerate() {
-        let ay_btn = ai_y + 68.0 + i as f32 * 26.0;
-        quads.push(rq(44.0, ay_btn, ai_w - 28.0, 22.0, 6.0, c(241, 243, 244, 255)));
-        render_text(compositor, &mut quads, action, 56.0, ay_btn + 15.0, 12.0, text_secondary, 30.0 + ai_w - 10.0);
-    }
-
-    // ---- Footer ----
-    let footer_y = ai_y + 220.0;
-    render_text_centered(compositor, &mut quads, "Axomai Browser v1.7.0 - Native GPU Engine - No WebView - Built with Rust", cx, footer_y + 14.0, 10.0, text_light);
+    render_text(compositor, &mut quads, "Q", search_x + search_w - 32.0, search_y + 28.0, 14.0, c(160, 165, 175, 200), search_x + search_w);
 
     quads
 }

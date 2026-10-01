@@ -23,6 +23,7 @@ pub struct GpuQuad {
     pub clip_rect: Option<[f32; 4]>,
     pub opacity: f32,
     pub is_textured: bool,
+    pub texture_mode: u8,
     pub rect_bounds: Option<[f32; 4]>,
     pub corner_radius: f32,
 }
@@ -238,6 +239,8 @@ struct Uniforms {
 @binding(0) @group(0) var<uniform> uniforms: Uniforms;
 @binding(0) @group(1) var glyph_texture: texture_2d<f32>;
 @binding(1) @group(1) var glyph_sampler: sampler;
+@binding(0) @group(2) var bg_texture: texture_2d<f32>;
+@binding(1) @group(2) var bg_sampler: sampler;
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
@@ -288,6 +291,10 @@ fn fs_main(
     @location(4) rect_bounds: vec4<f32>,
     @location(5) corner_radius: f32,
 ) -> @location(0) vec4<f32> {
+    if (mode > 1.5) {
+        let tex_color = textureSample(bg_texture, bg_sampler, uv);
+        return vec4<f32>(tex_color.rgb, tex_color.a * color.a);
+    }
     if (mode > 0.5) {
         let alpha = textureSample(glyph_texture, glyph_sampler, uv).r;
         return vec4<f32>(color.rgb, color.a * alpha);
@@ -325,6 +332,8 @@ pub struct WgpuRenderer {
     pub glyph_texture: wgpu::Texture,
     pub glyph_bind_group: wgpu::BindGroup,
     pub glyph_bind_group_layout: wgpu::BindGroupLayout,
+    pub bg_bind_group_layout: wgpu::BindGroupLayout,
+    pub bg_bind_group: Option<wgpu::BindGroup>,
     pub presented_frames: u64,
 }
 
@@ -482,6 +491,28 @@ impl WgpuRenderer {
             ],
         });
 
+        let bg_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("BG Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
         let glyph_view = glyph_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let glyph_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Glyph Bind Group"),
@@ -494,7 +525,7 @@ impl WgpuRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Axomai Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout, &glyph_bind_group_layout],
+            bind_group_layouts: &[&bind_group_layout, &glyph_bind_group_layout, &bg_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -529,6 +560,32 @@ impl WgpuRenderer {
             multiview: None,
         });
 
+        let dummy_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Dummy BG"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &dummy_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &[255u8, 255, 255, 255],
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: Some(1) },
+            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        );
+        let dummy_view = dummy_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let dummy_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let dummy_bg_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Dummy BG Bind Group"),
+            layout: &bg_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&dummy_view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&dummy_sampler) },
+            ],
+        });
+
         WgpuRenderer {
             device,
             queue,
@@ -540,6 +597,8 @@ impl WgpuRenderer {
             glyph_texture,
             glyph_bind_group,
             glyph_bind_group_layout,
+            bg_bind_group_layout,
+            bg_bind_group: Some(dummy_bg_bind_group),
             presented_frames: 0,
         }
     }
@@ -559,6 +618,39 @@ impl WgpuRenderer {
             0,
             bytemuck::cast_slice(&projection),
         );
+    }
+
+    pub fn upload_bg_image(&mut self, width: u32, height: u32, rgba_data: &[u8]) {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("BG Image"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            rgba_data,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("BG Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        self.bg_bind_group = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("BG Bind Group"),
+            layout: &self.bg_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+            ],
+        }));
     }
 
     pub fn upload_glyph_atlas(&mut self, atlas: &crate::glyph_atlas::GlyphAtlas) {
@@ -590,7 +682,7 @@ impl WgpuRenderer {
         let mut base: u32 = 0;
 
         for quad in quads {
-            let mode = if quad.is_textured { 1.0f32 } else { 0.0f32 };
+            let mode = quad.texture_mode as f32;
             let rb = quad.rect_bounds.unwrap_or([0.0, 0.0, 0.0, 0.0]);
             let cr = quad.corner_radius;
             for v in &quad.vertices {
@@ -671,6 +763,9 @@ impl WgpuRenderer {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
             render_pass.set_bind_group(1, &self.glyph_bind_group, &[]);
+            if let Some(ref bg) = self.bg_bind_group {
+                render_pass.set_bind_group(2, bg, &[]);
+            }
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
@@ -780,6 +875,25 @@ impl NativeGpuCompositor {
             clip_rect: None,
             opacity: 1.0,
             is_textured: false,
+            texture_mode: 0,
+            rect_bounds: None,
+            corner_radius: 0.0,
+        }
+    }
+
+    pub fn bg_image_quad(x: f32, y: f32, w: f32, h: f32) -> GpuQuad {
+        GpuQuad {
+            vertices: [
+                GpuVertex { position: [x, y], uv: [0.0, 0.0], color: [1.0, 1.0, 1.0, 1.0] },
+                GpuVertex { position: [x + w, y], uv: [1.0, 0.0], color: [1.0, 1.0, 1.0, 1.0] },
+                GpuVertex { position: [x + w, y + h], uv: [1.0, 1.0], color: [1.0, 1.0, 1.0, 1.0] },
+                GpuVertex { position: [x, y + h], uv: [0.0, 1.0], color: [1.0, 1.0, 1.0, 1.0] },
+            ],
+            indices: [0, 1, 2, 0, 2, 3],
+            clip_rect: None,
+            opacity: 1.0,
+            is_textured: true,
+            texture_mode: 2,
             rect_bounds: None,
             corner_radius: 0.0,
         }
@@ -797,6 +911,7 @@ impl NativeGpuCompositor {
             clip_rect: None,
             opacity: 1.0,
             is_textured: false,
+            texture_mode: 0,
             rect_bounds: Some([x, y, x + w, y + h]),
             corner_radius: radius,
         }
@@ -814,6 +929,7 @@ impl NativeGpuCompositor {
             clip_rect: None,
             opacity: 1.0,
             is_textured: true,
+            texture_mode: 1,
             rect_bounds: None,
             corner_radius: 0.0,
         }
@@ -850,6 +966,7 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        texture_mode: 0,
                         rect_bounds: None,
                         corner_radius: 0.0,
                     };
@@ -881,6 +998,7 @@ impl NativeGpuCompositor {
                                 clip_rect: None,
                                 opacity: 1.0,
                                 is_textured: true,
+                                texture_mode: 1,
                                 rect_bounds: None,
                                 corner_radius: 0.0,
                             };
@@ -905,6 +1023,7 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        texture_mode: 0,
                         rect_bounds: None,
                         corner_radius: 0.0,
                     };
@@ -925,6 +1044,7 @@ impl NativeGpuCompositor {
                         clip_rect: None,
                         opacity: 1.0,
                         is_textured: false,
+                        texture_mode: 0,
                         rect_bounds: None,
                         corner_radius: 0.0,
                     };
