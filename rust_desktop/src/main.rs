@@ -32,10 +32,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_min_inner_size(LogicalSize::new(800.0, 500.0))
         .build(&event_loop)?;
 
+    let backends = if cfg!(target_os = "windows") {
+        wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL
+    } else {
+        wgpu::Backends::all()
+    };
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::all(),
+        backends,
         ..Default::default()
     });
+    println!("[Axomai] wgpu instance created (backends: {:?})", backends);
 
     let size: PhysicalSize<u32> = window.inner_size();
 
@@ -45,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("Failed to create surface target"),
         )
     }?;
+    println!("[Axomai] Surface created successfully");
 
     let mut gpu_renderer = WgpuRenderer::new(&instance, surface, size.width, size.height);
     println!(

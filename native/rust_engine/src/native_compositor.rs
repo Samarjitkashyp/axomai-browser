@@ -302,7 +302,7 @@ impl WgpuRenderer {
             force_fallback_adapter: false,
         }))
         .or_else(|| {
-            eprintln!("[Axomai GPU] High-performance adapter not found, trying fallback...");
+            eprintln!("[Axomai GPU] High-performance adapter not found, trying low-power...");
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: Some(&surface),
@@ -310,14 +310,22 @@ impl WgpuRenderer {
             }))
         })
         .or_else(|| {
-            eprintln!("[Axomai GPU] No hardware adapter found, trying software fallback...");
+            eprintln!("[Axomai GPU] Trying without surface compatibility constraint...");
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }))
+        })
+        .or_else(|| {
+            eprintln!("[Axomai GPU] Trying software fallback adapter...");
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: Some(&surface),
+                compatible_surface: None,
                 force_fallback_adapter: true,
             }))
         })
-        .expect("Failed to find a suitable GPU adapter. Ensure GPU drivers are installed.");
+        .expect("Failed to find any GPU adapter. Ensure GPU drivers are installed.");
 
         let adapter_info = adapter.get_info();
         println!(
