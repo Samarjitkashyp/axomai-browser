@@ -32,28 +32,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_min_inner_size(LogicalSize::new(800.0, 500.0))
         .build(&event_loop)?;
 
-    let backends = if cfg!(target_os = "windows") {
-        wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL
-    } else {
-        wgpu::Backends::all()
-    };
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends,
-        ..Default::default()
-    });
-    println!("[Axomai] wgpu instance created (backends: {:?})", backends);
-
     let size: PhysicalSize<u32> = window.inner_size();
 
-    let surface = unsafe {
-        instance.create_surface_unsafe(
-            wgpu::SurfaceTargetUnsafe::from_window(&window)
-                .expect("Failed to create surface target"),
-        )
-    }?;
-    println!("[Axomai] Surface created successfully");
+    let backend_list: &[(&str, wgpu::Backends)] = if cfg!(target_os = "windows") {
+        &[
+            ("All", wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL),
+            ("GL", wgpu::Backends::GL),
+            ("Vulkan", wgpu::Backends::VULKAN),
+            ("DX12", wgpu::Backends::DX12),
+        ]
+    } else {
+        &[("All", wgpu::Backends::all())]
+    };
 
-    let mut gpu_renderer = WgpuRenderer::new(&instance, surface, size.width, size.height);
+    let mut gpu_renderer = None;
+    let mut chosen_instance = None;
+
+    for (name, backends) in backend_list {
+        println!("[Axomai] Trying {} backend...", name);
+        let inst = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: *backends,
+            ..Default::default()
+        });
+        let surface_result = unsafe {
+            inst.create_surface_unsafe(
+                wgpu::SurfaceTargetUnsafe::from_window(&window)
+                    .expect("Failed to create surface target"),
+            )
+        };
+        let surface = match surface_result {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[Axomai] {} surface creation failed: {}", name, e);
+                continue;
+            }
+        };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            WgpuRenderer::new(&inst, surface, size.width, size.height)
+        })) {
+            Ok(renderer) => {
+                println!("[Axomai] {} backend succeeded!", name);
+                gpu_renderer = Some(renderer);
+                chosen_instance = Some(inst);
+                break;
+            }
+            Err(_) => {
+                eprintln!("[Axomai] {} backend failed, trying next...", name);
+            }
+        }
+    }
+
+    let mut gpu_renderer = gpu_renderer.expect("Failed to initialize GPU with any backend. Ensure GPU drivers are installed.");
+    let _instance = chosen_instance.unwrap();
     println!(
         "[Axomai] GPU renderer initialized: {}x{} — fully native, no WebView",
         size.width, size.height

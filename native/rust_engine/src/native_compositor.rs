@@ -310,18 +310,10 @@ impl WgpuRenderer {
             }))
         })
         .or_else(|| {
-            eprintln!("[Axomai GPU] Trying without surface compatibility constraint...");
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-        })
-        .or_else(|| {
-            eprintln!("[Axomai GPU] Trying software fallback adapter...");
+            eprintln!("[Axomai GPU] Trying software fallback with surface...");
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
+                compatible_surface: Some(&surface),
                 force_fallback_adapter: true,
             }))
         })
