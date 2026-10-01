@@ -696,6 +696,43 @@ impl NativeGpuCompositor {
         self.presenter.hardware_device.create_buffer_stream(&self.quads)
     }
 
+    fn solid_quad(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> GpuQuad {
+        GpuQuad {
+            vertices: [
+                GpuVertex { position: [x, y], uv: [0.0, 0.0], color },
+                GpuVertex { position: [x + w, y], uv: [1.0, 0.0], color },
+                GpuVertex { position: [x + w, y + h], uv: [1.0, 1.0], color },
+                GpuVertex { position: [x, y + h], uv: [0.0, 1.0], color },
+            ],
+            indices: [0, 1, 2, 0, 2, 3],
+            clip_rect: None,
+            opacity: 1.0,
+            is_textured: false,
+        }
+    }
+
+    fn text_quad(x: f32, y: f32, glyph: &crate::glyph_atlas::GlyphInfo, color: [f32; 4]) -> GpuQuad {
+        GpuQuad {
+            vertices: [
+                GpuVertex { position: [x, y], uv: [glyph.u0, glyph.v0], color },
+                GpuVertex { position: [x + glyph.width, y], uv: [glyph.u1, glyph.v0], color },
+                GpuVertex { position: [x + glyph.width, y + glyph.height], uv: [glyph.u1, glyph.v1], color },
+                GpuVertex { position: [x, y + glyph.height], uv: [glyph.u0, glyph.v1], color },
+            ],
+            indices: [0, 1, 2, 0, 2, 3],
+            clip_rect: None,
+            opacity: 1.0,
+            is_textured: true,
+        }
+    }
+
+    fn push_border_quads(&mut self, x: f32, y: f32, w: f32, h: f32, bw: f32, color: [f32; 4]) {
+        self.quads.push(Self::solid_quad(x, y, w, bw, color));
+        self.quads.push(Self::solid_quad(x, y + h - bw, w, bw, color));
+        self.quads.push(Self::solid_quad(x, y + bw, bw, h - 2.0 * bw, color));
+        self.quads.push(Self::solid_quad(x + w - bw, y + bw, bw, h - 2.0 * bw, color));
+    }
+
     pub fn composite_display_list(&mut self, display_list: &[DisplayCommand], scroll_y: f32) {
         self.quads.clear();
         self.framebuffer.clear(255, 255, 255, 255);
@@ -792,41 +829,75 @@ impl NativeGpuCompositor {
                     };
                     self.quads.push(quad);
                 }
-                DisplayCommand::DrawInput { x, y, width, height, .. } => {
+                DisplayCommand::DrawInput { x, y, width, height, value, placeholder, is_focused } => {
                     let y_adj = y - scroll_y;
-                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + *width, y_adj + *height, (245, 245, 245, 255));
-
-                    let quad = GpuQuad {
-                        vertices: [
-                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [0.96, 0.96, 0.96, 1.0] },
-                            GpuVertex { position: [*x + *width, y_adj], uv: [1.0, 0.0], color: [0.96, 0.96, 0.96, 1.0] },
-                            GpuVertex { position: [*x + *width, y_adj + *height], uv: [1.0, 1.0], color: [0.96, 0.96, 0.96, 1.0] },
-                            GpuVertex { position: [*x, y_adj + *height], uv: [0.0, 1.0], color: [0.96, 0.96, 0.96, 1.0] },
-                        ],
-                        indices: [0, 1, 2, 0, 2, 3],
-                        clip_rect: None,
-                        opacity: 1.0,
-                        is_textured: false,
+                    let border_color: [f32; 4] = if *is_focused {
+                        [0.24, 0.52, 0.88, 1.0]
+                    } else {
+                        [0.80, 0.82, 0.84, 1.0]
                     };
-                    self.quads.push(quad);
+                    let bw = if *is_focused { 2.0 } else { 1.0 };
+                    self.push_border_quads(*x, y_adj, *width, *height, bw, border_color);
+
+                    let bg: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+                    self.quads.push(Self::solid_quad(*x + bw, y_adj + bw, *width - 2.0 * bw, *height - 2.0 * bw, bg));
+
+                    let text = if value.is_empty() { placeholder } else { value };
+                    let text_color = if value.is_empty() {
+                        [0.6, 0.63, 0.66, 1.0]
+                    } else {
+                        [0.13, 0.13, 0.13, 1.0]
+                    };
+                    if !text.is_empty() {
+                        let font_size = 14.0f32;
+                        let mut pen_x = *x + bw + 8.0;
+                        let baseline_y = y_adj + bw + font_size + 4.0;
+                        for ch in text.chars() {
+                            let glyph = self.glyph_atlas.rasterize(ch, font_size);
+                            if glyph.width > 0.0 && glyph.height > 0.0 {
+                                let gx = pen_x + glyph.offset_x;
+                                let gy = baseline_y - glyph.offset_y - glyph.height;
+                                self.quads.push(Self::text_quad(gx, gy, &glyph, text_color));
+                            }
+                            pen_x += glyph.advance_width;
+                        }
+                    }
                 }
-                DisplayCommand::DrawButton { x, y, width, height, .. } => {
+                DisplayCommand::DrawButton { x, y, width, height, label } => {
                     let y_adj = y - scroll_y;
-                    self.framebuffer.draw_solid_rect(*x, y_adj, *x + *width, y_adj + *height, (220, 220, 230, 255));
+                    let bg: [f32; 4] = [0.93, 0.94, 0.95, 1.0];
+                    let border_color: [f32; 4] = [0.78, 0.80, 0.82, 1.0];
+                    self.push_border_quads(*x, y_adj, *width, *height, 1.0, border_color);
+                    self.quads.push(Self::solid_quad(*x + 1.0, y_adj + 1.0, *width - 2.0, *height - 2.0, bg));
 
-                    let quad = GpuQuad {
-                        vertices: [
-                            GpuVertex { position: [*x, y_adj], uv: [0.0, 0.0], color: [0.86, 0.86, 0.9, 1.0] },
-                            GpuVertex { position: [*x + *width, y_adj], uv: [1.0, 0.0], color: [0.86, 0.86, 0.9, 1.0] },
-                            GpuVertex { position: [*x + *width, y_adj + *height], uv: [1.0, 1.0], color: [0.86, 0.86, 0.9, 1.0] },
-                            GpuVertex { position: [*x, y_adj + *height], uv: [0.0, 1.0], color: [0.86, 0.86, 0.9, 1.0] },
-                        ],
-                        indices: [0, 1, 2, 0, 2, 3],
-                        clip_rect: None,
-                        opacity: 1.0,
-                        is_textured: false,
-                    };
-                    self.quads.push(quad);
+                    if !label.is_empty() {
+                        let font_size = 14.0f32;
+                        let text_w: f32 = label.chars().map(|ch| self.glyph_atlas.rasterize(ch, font_size).advance_width).sum();
+                        let mut pen_x = *x + (*width - text_w) / 2.0;
+                        let baseline_y = y_adj + (*height + font_size) / 2.0 - 2.0;
+                        let text_color = [0.13, 0.13, 0.13, 1.0];
+                        for ch in label.chars() {
+                            let glyph = self.glyph_atlas.rasterize(ch, font_size);
+                            if glyph.width > 0.0 && glyph.height > 0.0 {
+                                let gx = pen_x + glyph.offset_x;
+                                let gy = baseline_y - glyph.offset_y - glyph.height;
+                                self.quads.push(Self::text_quad(gx, gy, &glyph, text_color));
+                            }
+                            pen_x += glyph.advance_width;
+                        }
+                    }
+                }
+                DisplayCommand::DrawBoxShadow { x, y, width, height, offset_x, offset_y, blur_radius, spread_radius, color, .. } => {
+                    let y_adj = y - scroll_y;
+                    let (r, g, b, a) = Self::parse_color_hex(color);
+                    let spread = spread_radius + blur_radius * 0.5;
+                    let sx = *x + *offset_x - spread;
+                    let sy = y_adj + *offset_y - spread;
+                    let sw = *width + 2.0 * spread;
+                    let sh = *height + 2.0 * spread;
+                    let alpha = (a as f32 / 255.0) * 0.4;
+                    let c = [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, alpha];
+                    self.quads.push(Self::solid_quad(sx, sy, sw, sh, c));
                 }
                 _ => {}
             }
@@ -835,30 +906,148 @@ impl NativeGpuCompositor {
 
     fn parse_color_hex(hex: &str) -> (u8, u8, u8, u8) {
         let clean = hex.trim();
-        match clean.to_lowercase().as_str() {
+        let lower = clean.to_lowercase();
+        match lower.as_str() {
             "white" => return (255, 255, 255, 255),
             "black" => return (0, 0, 0, 255),
             "red" => return (255, 0, 0, 255),
             "green" => return (0, 128, 0, 255),
             "blue" => return (0, 0, 255, 255),
+            "yellow" => return (255, 255, 0, 255),
+            "cyan" | "aqua" => return (0, 255, 255, 255),
+            "magenta" | "fuchsia" => return (255, 0, 255, 255),
+            "orange" => return (255, 165, 0, 255),
+            "purple" => return (128, 0, 128, 255),
+            "pink" => return (255, 192, 203, 255),
+            "brown" => return (165, 42, 42, 255),
+            "navy" => return (0, 0, 128, 255),
+            "teal" => return (0, 128, 128, 255),
+            "olive" => return (128, 128, 0, 255),
+            "maroon" => return (128, 0, 0, 255),
+            "silver" => return (192, 192, 192, 255),
+            "lime" => return (0, 255, 0, 255),
             "transparent" => return (0, 0, 0, 0),
             "gray" | "grey" => return (128, 128, 128, 255),
+            "lightgray" | "lightgrey" => return (211, 211, 211, 255),
+            "darkgray" | "darkgrey" => return (169, 169, 169, 255),
+            "dimgray" | "dimgrey" => return (105, 105, 105, 255),
+            "whitesmoke" => return (245, 245, 245, 255),
+            "gainsboro" => return (220, 220, 220, 255),
+            "cornflowerblue" => return (100, 149, 237, 255),
+            "dodgerblue" => return (30, 144, 255, 255),
+            "steelblue" => return (70, 130, 180, 255),
+            "tomato" => return (255, 99, 71, 255),
+            "coral" => return (255, 127, 80, 255),
+            "crimson" => return (220, 20, 60, 255),
+            "darkblue" => return (0, 0, 139, 255),
+            "darkred" => return (139, 0, 0, 255),
+            "darkgreen" => return (0, 100, 0, 255),
+            "indianred" => return (205, 92, 92, 255),
+            "gold" => return (255, 215, 0, 255),
+            "khaki" => return (240, 230, 140, 255),
+            "linen" => return (250, 240, 230, 255),
+            "ivory" => return (255, 255, 240, 255),
+            "beige" => return (245, 245, 220, 255),
+            "wheat" => return (245, 222, 179, 255),
+            "lavender" => return (230, 230, 250, 255),
+            "aliceblue" => return (240, 248, 255, 255),
+            "ghostwhite" => return (248, 248, 255, 255),
+            "mintcream" => return (245, 255, 250, 255),
+            "honeydew" => return (240, 255, 240, 255),
+            "seashell" => return (255, 245, 238, 255),
+            "snow" => return (255, 250, 250, 255),
+            "slategray" | "slategrey" => return (112, 128, 144, 255),
+            "lightslategray" | "lightslategrey" => return (119, 136, 153, 255),
             _ => {}
         }
-        let clean = clean.trim_start_matches('#');
-        if clean.len() == 6 {
-            let r = u8::from_str_radix(&clean[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&clean[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&clean[4..6], 16).unwrap_or(0);
+
+        if lower.starts_with("rgb") {
+            return Self::parse_rgb_color(&lower);
+        }
+        if lower.starts_with("hsl") {
+            return Self::parse_hsl_color(&lower);
+        }
+
+        let hex_str = clean.trim_start_matches('#');
+        if hex_str.len() == 3 {
+            let r = u8::from_str_radix(&hex_str[0..1], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&hex_str[1..2], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&hex_str[2..3], 16).unwrap_or(0);
+            (r * 17, g * 17, b * 17, 255)
+        } else if hex_str.len() == 6 {
+            let r = u8::from_str_radix(&hex_str[0..2], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&hex_str[2..4], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&hex_str[4..6], 16).unwrap_or(0);
             (r, g, b, 255)
-        } else if clean.len() == 8 {
-            let r = u8::from_str_radix(&clean[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&clean[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&clean[4..6], 16).unwrap_or(0);
-            let a = u8::from_str_radix(&clean[6..8], 16).unwrap_or(255);
+        } else if hex_str.len() == 8 {
+            let r = u8::from_str_radix(&hex_str[0..2], 16).unwrap_or(0);
+            let g = u8::from_str_radix(&hex_str[2..4], 16).unwrap_or(0);
+            let b = u8::from_str_radix(&hex_str[4..6], 16).unwrap_or(0);
+            let a = u8::from_str_radix(&hex_str[6..8], 16).unwrap_or(255);
             (r, g, b, a)
         } else {
-            (15, 23, 42, 255)
+            (0, 0, 0, 255)
         }
     }
+
+    fn parse_rgb_color(s: &str) -> (u8, u8, u8, u8) {
+        let inner = s.trim_start_matches("rgba(")
+            .trim_start_matches("rgb(")
+            .trim_end_matches(')');
+        let parts: Vec<&str> = inner.split(|c| c == ',' || c == '/').collect();
+        let r = parts.get(0).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+        let g = parts.get(1).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+        let b = parts.get(2).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+        let a = parts.get(3).and_then(|v| {
+            let t = v.trim();
+            if t.ends_with('%') {
+                t.trim_end_matches('%').parse::<f32>().ok().map(|p| p / 100.0)
+            } else {
+                t.parse::<f32>().ok()
+            }
+        }).unwrap_or(1.0);
+        (r.clamp(0.0, 255.0) as u8, g.clamp(0.0, 255.0) as u8, b.clamp(0.0, 255.0) as u8, (a.clamp(0.0, 1.0) * 255.0) as u8)
+    }
+
+    fn parse_hsl_color(s: &str) -> (u8, u8, u8, u8) {
+        let inner = s.trim_start_matches("hsla(")
+            .trim_start_matches("hsl(")
+            .trim_end_matches(')');
+        let parts: Vec<&str> = inner.split(|c| c == ',' || c == '/').collect();
+        let h = parts.get(0).and_then(|v| v.trim().trim_end_matches("deg").parse::<f32>().ok()).unwrap_or(0.0) / 360.0;
+        let s_val = parts.get(1).and_then(|v| v.trim().trim_end_matches('%').parse::<f32>().ok()).unwrap_or(0.0) / 100.0;
+        let l = parts.get(2).and_then(|v| v.trim().trim_end_matches('%').parse::<f32>().ok()).unwrap_or(0.0) / 100.0;
+        let a = parts.get(3).and_then(|v| {
+            let t = v.trim();
+            if t.ends_with('%') {
+                t.trim_end_matches('%').parse::<f32>().ok().map(|p| p / 100.0)
+            } else {
+                t.parse::<f32>().ok()
+            }
+        }).unwrap_or(1.0);
+
+        let (r, g, b) = hsl_to_rgb(h, s_val, l);
+        ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, (a.clamp(0.0, 1.0) * 255.0) as u8)
+    }
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s == 0.0 {
+        return (l, l, l);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let r = hue_to_rgb(p, q, h + 1.0 / 3.0);
+    let g = hue_to_rgb(p, q, h);
+    let b = hue_to_rgb(p, q, h - 1.0 / 3.0);
+    (r, g, b)
+}
+
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 { t += 1.0; }
+    if t > 1.0 { t -= 1.0; }
+    if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+    if t < 1.0 / 2.0 { return q; }
+    if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+    p
 }

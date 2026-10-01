@@ -53,10 +53,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Load initial page
     if let Ok(mut eng) = engine.lock() {
         let _ = eng.load_html(
-            "<html><body style='margin:0;padding:40px;font-family:system-ui;background:#f8fafc'>\
+            "<html><body style='margin:0;padding:40px;font-family:system-ui;background:white'>\
              <h1 style='color:#0f172a;font-size:32px'>Axomai Browser</h1>\
              <p style='color:#475569;font-size:18px'>Native GPU-rendered browser engine. No WebView.</p>\
-             <p style='color:#64748b;font-size:14px'>Type a URL in the address bar to navigate.</p>\
+             <div style='margin-top:16px;padding:16px;border:2px solid #3b82f6;background:#eff6ff'>\
+               <p style='color:#1e40af;font-size:16px'>This box has a blue border and light blue background.</p>\
+             </div>\
+             <p style='color:#64748b;font-size:14px;margin-top:12px'>Type a URL in the address bar to navigate.</p>\
              </body></html>",
             size.width as f32,
             size.height as f32,
