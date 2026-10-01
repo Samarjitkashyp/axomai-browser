@@ -1,8 +1,8 @@
-# 🚀 Axomai Browser `v1.5.0`
+# 🚀 Axomai Browser `v1.6.0` (Final Production Edition)
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, AI Smart Workspaces & Tab Hibernation, Built-in Secure VPN & DNS-over-HTTPS, Floating PiP with 300% Audio Booster, Split-Screen Dual Browsing Studio, Full-Page Screenshot & Annotation Studio, Opera GX Resource Performance Limiter, Native Web3 Multi-Chain Wallet, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Automated Background Updater & Cryptographic Signature Verification, Heritage Theme Engine (Assam Cultural Presets), AI Smart Workspaces & Tab Hibernation, Built-in Secure VPN & DNS-over-HTTPS, Floating PiP with 300% Audio Booster, Split-Screen Dual Browsing Studio, Full-Page Screenshot & Annotation Studio, Opera GX Resource Performance Limiter, Native Web3 Multi-Chain Wallet, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
@@ -17,6 +17,8 @@ A modern, high-performance web browser designed with an independent Rust engine 
 - CSS Engine (Cascade, Custom Properties var(--*), calc/clamp)
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
+- Heritage Design & Theme Engine (Kaziranga, Brahmaputra, Bihu)
+- Auto-Updater & Binary Signature Verification Engine
 - AI Smart Workspaces & Tab Hibernation Memory Saver
 - Split-Screen Dual Browsing & Vertical Tabs
 - Floating PiP & 300% Audio Booster
@@ -54,17 +56,20 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.5.0`)
+## 📊 Subsystem Status Overview (`v1.6.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
-| **AI Smart Workspaces** | 🟢 **NEW** | Context-based tab workspaces, auto-categorization, 80% RAM tab hibernation |
-| **Built-in VPN & DoH** | 🟢 **NEW** | DNS-over-HTTPS (Cloudflare/Quad9), WireGuard proxy tunnel, Kill Switch |
-| **Floating PiP & Sound Booster** | 🟢 **NEW** | Always-on-top detached video player, 300% audio boost, live AI subtitles |
-| **Split-Screen Studio** | 🟢 **NEW** | Side-by-side dual and quad browsing, vertical tabs, synchronized scrolling |
-| **Capture & Annotation Studio** | 🟢 **NEW** | Full-height scrolling webpage screenshot, markup arrows, text, blur redaction |
-| **Resource Performance Limiter** | 🟢 **NEW** | RAM, CPU, and Bandwidth limiter sliders (Opera GX style) to prevent lag |
-| **Web3 Multi-Chain Wallet** | 🟢 **NEW** | Native `window.ethereum` & `window.solana` provider injection and transaction signing |
+| **Auto-Updater & Verification** | 🟢 **NEW** | Background delta updates, Ed25519 signature checks, SHA-256 integrity |
+| **Heritage & Theme Engine** | 🟢 **NEW** | Dynamic dark/light, glassmorphic acrylic shaders, Assamese heritage presets (Kaziranga, Brahmaputra, Bihu) |
+| **Multi-OS CI/CD Pipeline** | 🟢 **NEW** | GitHub Actions matrix build & automated testing (Windows, Linux, macOS) |
+| **AI Smart Workspaces** | 🟢 | Context-based tab workspaces, auto-categorization, 80% RAM tab hibernation |
+| **Built-in VPN & DoH** | 🟢 | DNS-over-HTTPS (Cloudflare/Quad9), WireGuard proxy tunnel, Kill Switch |
+| **Floating PiP & Sound Booster** | 🟢 | Always-on-top detached video player, 300% audio boost, live AI subtitles |
+| **Split-Screen Studio** | 🟢 | Side-by-side dual and quad browsing, vertical tabs, synchronized scrolling |
+| **Capture & Annotation Studio** | 🟢 | Full-height scrolling webpage screenshot, markup arrows, text, blur redaction |
+| **Resource Performance Limiter** | 🟢 | RAM, CPU, and Bandwidth limiter sliders (Opera GX style) to prevent lag |
+| **Web3 Multi-Chain Wallet** | 🟢 | Native `window.ethereum` & `window.solana` provider injection and transaction signing |
 | **Reader Mode Engine** | 🟢 | Readability scoring algorithm, declutters ads/navigation, calculates estimated reading time |
 | **Download Manager** | 🟢 | Multi-threaded range chunk downloader (`Range: bytes=X-Y`), pause, resume, speed estimation |
 | **SVG & PDF Vector Engine** | 🟢 | SVG Path syntax parser (`M`, `L`, `C`, `Z`), 2D bezier curves rasterizer, native PDF stream viewer |
