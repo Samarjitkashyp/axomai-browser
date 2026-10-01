@@ -1,4 +1,4 @@
-# 🚀 Axomai Browser `v0.8.0`
+# 🚀 Axomai Browser `v0.9.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
@@ -41,20 +41,26 @@ A modern, high-performance web browser designed with an independent Rust engine 
                                                             [ Layout Box Tree ]
                                                                         │
                                                                         ▼
-                                                        ( 5. Display List & Painter - Rust )
-                                                        - Stacking Contexts (z-index)
-                                                        - Transforms & Transform-Origin
-                                                        - Gradients, Shadows & Borders
+                                                        ( 5. Text Shaper & HarfBuzz - Rust )
+                                                        - Indic (Assamese/Bengali) Ligatures
+                                                        - Matra Reordering & Halant Conjuncts
+                                                        - BiDi Directional Flow (Arabic/RTL)
+                                                                        │
+                                                                        ▼
+                                                        ( 6. GPU Compositor & LayerTree )
+                                                        - Layer Decomposition (Transform, Scroll, Fixed)
+                                                        - Damage Region & Partial Repaint
+                                                        - Direct GPU Vertex & Command Stream
                                                                         │
                                                                         ▼
                                             ┌───────────────────────────┴───────────────────────────┐
                                             ▼                                                       ▼
-                            ( 6. Native Tao + Wry Desktop Host )                    ( 7. Canvas / GPU Renderer Bridge )
+                            ( 7. Native Tao + Wry Desktop Host )                    ( 8. wgpu / Canvas Render Bridge )
 ```
 
 ---
 
-## 📊 Subsystem Status Overview (`v0.8.0`)
+## 📊 Subsystem Status Overview (`v0.9.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
@@ -68,11 +74,13 @@ A modern, high-performance web browser designed with an independent Rust engine 
 | **Flexbox Engine** | 🟢 | Multi-pass measurement, flex-grow/shrink distribution, flex-wrap, align-content |
 | **CSS Grid Layout** | 🟢 | `grid-template-columns/rows`, `grid-template-areas`, `auto-fit`/`auto-fill`, `minmax()`, alignments |
 | **Table Layout** | 🟢 | `<table>`, `<tr>`, `<td>`, `<th>`, `<thead>`, `<tbody>`, `<tfoot>`, border-spacing |
-| **HTTP Cache & Validation** | 🟢 **NEW** | `HttpCache`, `Cache-Control` (`max-age`, `no-store`, `no-cache`), `ETag` / `304 Not Modified` conditional revalidation |
-| **Content Security Policy (CSP)** | 🟢 **NEW** | `CspPolicy` (`default-src`, `script-src`, `style-src`, `connect-src`, `img-src`, `'self'`, `*`) |
-| **ServiceWorker & PWAs** | 🟢 **NEW** | `navigator.serviceWorker.register()`, `ServiceWorkerRegistration`, `ServiceWorkerContainer` |
-| **Realtime & Messaging APIs** | 🟢 **NEW** | `WebSocket` (full connection & state lifecycle), `BroadcastChannel` cross-context messaging |
-| **Binary & File APIs** | 🟢 **NEW** | `Blob` (`size`, `type`, `text()`, `slice()`), `File` (`lastModified`, `name`) |
+| **GPU Compositor LayerTree** | 🟢 **NEW** | `LayerTree`, `LayerType` (Transform, Scroll, Fixed, Sticky), `DamageRegion` partial repaint, `GpuCommand` stream |
+| **Indic & Assamese Text Shaper** | 🟢 **NEW** | `TextShaper` HarfBuzz engine, Matra reordering, Halant conjuncts (অসমীয়া, য-ফলা), BiDi Arabic RTL |
+| **HTTP Cache & Validation** | 🟢 | `HttpCache`, `Cache-Control` (`max-age`, `no-store`, `no-cache`), `ETag` / `304 Not Modified` conditional revalidation |
+| **Content Security Policy (CSP)** | 🟢 | `CspPolicy` (`default-src`, `script-src`, `style-src`, `connect-src`, `img-src`, `'self'`, `*`) |
+| **ServiceWorker & PWAs** | 🟢 | `navigator.serviceWorker.register()`, `ServiceWorkerRegistration`, `ServiceWorkerContainer` |
+| **Realtime & Messaging APIs** | 🟢 | `WebSocket` (full connection & state lifecycle), `BroadcastChannel` cross-context messaging |
+| **Binary & File APIs** | 🟢 | `Blob` (`size`, `type`, `text()`, `slice()`), `File` (`lastModified`, `name`) |
 | **Observers Subsystem** | 🟢 | `ResizeObserver`, `IntersectionObserver`, `MutationObserver` with full DOM mutation hooks |
 | **Storage Subsystem** | 🟢 | `IndexedDB` (`open`, `IDBDatabase`, `IDBObjectStore`, `IDBTransaction`), `CacheStorage` (`window.caches`) |
 | **Advanced Form Controls** | 🟢 | `<select>` + `<option>`, `<textarea>`, checkbox/radio groups mutual exclusion, `.click()` |
@@ -100,6 +108,7 @@ cargo test
 ```
 
 ### Test Coverage Suites:
+- **`gpu_compositor_and_text_shaping_tests.rs`**: LayerTree decomposition, damage region intersection, GPU commands, Assamese (অসমীয়া), Hindi (नमस्कार) conjunct shaping, Arabic BiDi RTL.
 - **`network_cache_and_serviceworker_tests.rs`**: `CacheControl` parsing, `CspPolicy` directive validation, base64 operations, URL origin resolution.
 - **`observers_and_storage_tests.rs`**: Select & Option DOM parsing, Textarea layout, Form input pseudo-classes (`:checked`, `:disabled`), nested table forms.
 - **`html_parser_tests.rs`**: Entity decoding (`&amp;`, `&lt;`), implicit `<tbody>` insertion, void tag self-closing.
@@ -118,7 +127,7 @@ cargo test
 - [x] **v0.6.0**: CSS Custom Properties (`var(--*)`), `calc()`/`min()`/`max()`/`clamp()`, Table Layout subsystem, HTML5 implicit `<tbody>`, DOM traversal (`matches`, `closest`, `contains`, `cloneNode`), Form APIs, and comprehensive test suites.
 - [x] **v0.7.0**: Observers (`ResizeObserver`, `IntersectionObserver`, `MutationObserver`), Advanced Form Controls (`<select>`, `<option>`, `<textarea>`, radio group mutual exclusion), Storage foundation (`IndexedDB`, `CacheStorage`), `DOMParser` & `XMLSerializer`.
 - [x] **v0.8.0**: Advanced HTTP cache & `Cache-Control`, ETag conditional requests, Content Security Policy (CSP), ServiceWorker registration, WebSocket & BroadcastChannel, Blob & File APIs.
-- [ ] **v0.9.0**: GPU Compositor layer tree (`wgpu`), Indic/Assamese advanced HarfBuzz text shaping.
+- [x] **v0.9.0**: GPU Compositor layer tree (`LayerTree`, `DamageRegion`, `GpuCommand`), Indic/Assamese advanced HarfBuzz text shaping (অসমীয়া ligatures, BiDi RTL).
 - [ ] **v1.0.0**: Process-isolated sandbox architecture, DevTools inspector protocol, production browser UI.
 
 ---

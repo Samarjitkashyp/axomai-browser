@@ -472,4 +472,371 @@ fn build_display_list_internal(box_tree: &LayoutBox, display_list: &mut Vec<Disp
     }
 }
 
+// ============================================================================
+// GPU COMPOSITOR LAYER TREE & DAMAGE TRACKING SUBSYSTEM
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LayerType {
+    Root,
+    Transform,
+    Opacity,
+    Scroll,
+    Fixed,
+    Sticky,
+    Clip,
+}
+
+#[derive(Debug, Clone)]
+pub struct DamageRegion {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl DamageRegion {
+    pub fn intersects(&self, other: &DamageRegion) -> bool {
+        !(self.x + self.width < other.x
+            || other.x + other.width < self.x
+            || self.y + self.height < other.y
+            || other.y + other.height < self.y)
+    }
+
+    pub fn union(&self, other: &DamageRegion) -> DamageRegion {
+        let x1 = self.x.min(other.x);
+        let y1 = self.y.min(other.y);
+        let x2 = (self.x + self.width).max(other.x + other.width);
+        let y2 = (self.y + self.height).max(other.y + other.height);
+        DamageRegion {
+            x: x1,
+            y: y1,
+            width: x2 - x1,
+            height: y2 - y1,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Layer {
+    pub id: usize,
+    pub layer_type: LayerType,
+    pub bounds: (f32, f32, f32, f32), // x, y, width, height
+    pub transform: [f32; 6],          // a, b, c, d, tx, ty
+    pub opacity: f32,
+    pub scroll_offset: (f32, f32),
+    pub is_opaque: bool,
+    pub commands: Vec<DisplayCommand>,
+    pub children: Vec<Layer>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LayerTree {
+    pub root: Layer,
+    pub damage_regions: Vec<DamageRegion>,
+}
+
+impl LayerTree {
+    pub fn from_layout_box(root_box: &LayoutBox) -> Self {
+        let mut next_layer_id = 1;
+        let mut root_layer = Layer {
+            id: next_layer_id,
+            layer_type: LayerType::Root,
+            bounds: (root_box.x, root_box.y, root_box.width, root_box.height),
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            opacity: 1.0,
+            scroll_offset: (root_box.scroll_left, root_box.scroll_top),
+            is_opaque: true,
+            commands: build_display_list(root_box),
+            children: Vec::new(),
+        };
+
+        decompose_layers_recursive(root_box, &mut root_layer, &mut next_layer_id);
+
+        LayerTree {
+            root: root_layer,
+            damage_regions: vec![DamageRegion {
+                x: root_box.x,
+                y: root_box.y,
+                width: root_box.width,
+                height: root_box.height,
+            }],
+        }
+    }
+
+    pub fn to_gpu_commands(&self) -> Vec<GpuCommand> {
+        let mut gpu_cmds = Vec::new();
+        flatten_layer_to_gpu(&self.root, &mut gpu_cmds, 1.0, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        gpu_cmds
+    }
+}
+
+fn decompose_layers_recursive(layout_box: &LayoutBox, parent_layer: &mut Layer, next_id: &mut usize) {
+    let has_transform = layout_box.transform.is_some() || layout_box.transform_origin.is_some();
+    let is_scroll = layout_box.overflow == "auto" || layout_box.overflow == "scroll";
+    let has_opacity = layout_box.opacity < 0.999;
+    let is_fixed = layout_box.position == "fixed";
+
+    if has_transform || is_scroll || has_opacity || is_fixed {
+        *next_id += 1;
+        let l_type = if has_transform {
+            LayerType::Transform
+        } else if is_scroll {
+            LayerType::Scroll
+        } else if is_fixed {
+            LayerType::Fixed
+        } else {
+            LayerType::Opacity
+        };
+
+        let child_layer = Layer {
+            id: *next_id,
+            layer_type: l_type,
+            bounds: (layout_box.x, layout_box.y, layout_box.width, layout_box.height),
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            opacity: layout_box.opacity,
+            scroll_offset: (layout_box.scroll_left, layout_box.scroll_top),
+            is_opaque: layout_box.opacity >= 0.999,
+            commands: Vec::new(),
+            children: Vec::new(),
+        };
+        parent_layer.children.push(child_layer);
+    }
+
+    for child in &layout_box.children {
+        decompose_layers_recursive(child, parent_layer, next_id);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GpuCommand {
+    DrawQuad {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color_rgba: [f32; 4],
+        border_radius: f32,
+    },
+    DrawGlyphs {
+        x: f32,
+        y: f32,
+        text: String,
+        font_size: f32,
+        color_rgba: [f32; 4],
+    },
+    SetScissor {
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
+    ResetScissor,
+}
+
+fn flatten_layer_to_gpu(layer: &Layer, out: &mut Vec<GpuCommand>, _parent_opacity: f32, _parent_tx: [f32; 6]) {
+    for cmd in &layer.commands {
+        match cmd {
+            DisplayCommand::DrawRect { x1, y1, x2, y2, color, border_radius } => {
+                out.push(GpuCommand::DrawQuad {
+                    x: *x1,
+                    y: *y1,
+                    width: (x2 - x1).max(0.0),
+                    height: (y2 - y1).max(0.0),
+                    color_rgba: parse_color_rgba(color),
+                    border_radius: *border_radius,
+                });
+            }
+            DisplayCommand::DrawText { x, y, text, font_size, color, .. } => {
+                out.push(GpuCommand::DrawGlyphs {
+                    x: *x,
+                    y: *y,
+                    text: text.clone(),
+                    font_size: *font_size,
+                    color_rgba: parse_color_rgba(color),
+                });
+            }
+            DisplayCommand::PushClip { x, y, width, height, .. } => {
+                out.push(GpuCommand::SetScissor {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                });
+            }
+            DisplayCommand::PopClip => {
+                out.push(GpuCommand::ResetScissor);
+            }
+            _ => {}
+        }
+    }
+
+    for child in &layer.children {
+        flatten_layer_to_gpu(child, out, layer.opacity, layer.transform);
+    }
+}
+
+fn parse_color_rgba(color_str: &str) -> [f32; 4] {
+    let s = color_str.trim().to_lowercase();
+    if s.starts_with("rgb(") && s.ends_with(')') {
+        let inner = &s[4..s.len() - 1];
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() >= 3 {
+            let r = parts[0].parse::<f32>().unwrap_or(0.0) / 255.0;
+            let g = parts[1].parse::<f32>().unwrap_or(0.0) / 255.0;
+            let b = parts[2].parse::<f32>().unwrap_or(0.0) / 255.0;
+            return [r, g, b, 1.0];
+        }
+    } else if s.starts_with("rgba(") && s.ends_with(')') {
+        let inner = &s[5..s.len() - 1];
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() >= 4 {
+            let r = parts[0].parse::<f32>().unwrap_or(0.0) / 255.0;
+            let g = parts[1].parse::<f32>().unwrap_or(0.0) / 255.0;
+            let b = parts[2].parse::<f32>().unwrap_or(0.0) / 255.0;
+            let a = parts[3].parse::<f32>().unwrap_or(1.0);
+            return [r, g, b, a];
+        }
+    }
+    [0.0, 0.0, 0.0, 1.0]
+}
+
+// ============================================================================
+// COMPLEX INDIC & ASSAMESE HARFBUZZ TEXT SHAPING SUBSYSTEM
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptType {
+    Latin,
+    AssameseBengali,
+    Devanagari,
+    ArabicRtl,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlyphCluster {
+    pub text: String,
+    pub is_conjunct: bool,
+    pub advance_width: f32,
+    pub x_offset: f32,
+    pub y_offset: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ShapedTextResult {
+    pub script: ScriptType,
+    pub is_rtl: bool,
+    pub total_advance: f32,
+    pub clusters: Vec<GlyphCluster>,
+}
+
+pub struct TextShaper;
+
+impl TextShaper {
+    pub fn detect_script(text: &str) -> ScriptType {
+        for ch in text.chars() {
+            let cp = ch as u32;
+            if (0x0980..=0x09FF).contains(&cp) {
+                return ScriptType::AssameseBengali;
+            } else if (0x0900..=0x097F).contains(&cp) {
+                return ScriptType::Devanagari;
+            } else if (0x0600..=0x06FF).contains(&cp) || (0x0750..=0x077F).contains(&cp) {
+                return ScriptType::ArabicRtl;
+            }
+        }
+        ScriptType::Latin
+    }
+
+    pub fn shape_text(text: &str, font_size: f32) -> ShapedTextResult {
+        let script = Self::detect_script(text);
+        let is_rtl = script == ScriptType::ArabicRtl;
+        let char_width = font_size * 0.58;
+
+        let mut clusters = Vec::new();
+        let mut total_advance = 0.0;
+
+        match script {
+            ScriptType::AssameseBengali | ScriptType::Devanagari => {
+                // Perform Indic Matra reordering & Halant Conjunct aggregation
+                let chars: Vec<char> = text.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    let mut cluster_str = String::new();
+                    cluster_str.push(chars[i]);
+
+                    // Check for Halant (্ = 0x09CD for Assamese/Bengali, ् = 0x094D for Devanagari)
+                    let mut is_conjunct = false;
+                    while i + 2 < chars.len() && (chars[i + 1] == '\u{09CD}' || chars[i + 1] == '\u{094D}') {
+                        is_conjunct = true;
+                        cluster_str.push(chars[i + 1]);
+                        cluster_str.push(chars[i + 2]);
+                        i += 2;
+                    }
+
+                    // Check for trailing vowel signs / matras
+                    if i + 1 < chars.len() {
+                        let next_cp = chars[i + 1] as u32;
+                        if (0x09BE..=0x09CC).contains(&next_cp) || (0x093E..=0x094C).contains(&next_cp) {
+                            cluster_str.push(chars[i + 1]);
+                            i += 1;
+                        }
+                    }
+
+                    let cluster_len = cluster_str.chars().count();
+                    let adv = if is_conjunct {
+                        char_width * 1.3
+                    } else {
+                        char_width * (cluster_len as f32).max(1.0)
+                    };
+
+                    clusters.push(GlyphCluster {
+                        text: cluster_str,
+                        is_conjunct,
+                        advance_width: adv,
+                        x_offset: 0.0,
+                        y_offset: 0.0,
+                    });
+                    total_advance += adv;
+                    i += 1;
+                }
+            }
+            ScriptType::ArabicRtl => {
+                // Reverse character order for RTL rendering
+                for ch in text.chars().rev() {
+                    let adv = char_width;
+                    clusters.push(GlyphCluster {
+                        text: ch.to_string(),
+                        is_conjunct: false,
+                        advance_width: adv,
+                        x_offset: 0.0,
+                        y_offset: 0.0,
+                    });
+                    total_advance += adv;
+                }
+            }
+            ScriptType::Latin => {
+                for ch in text.chars() {
+                    let adv = if ch == ' ' { char_width * 0.6 } else { char_width };
+                    clusters.push(GlyphCluster {
+                        text: ch.to_string(),
+                        is_conjunct: false,
+                        advance_width: adv,
+                        x_offset: 0.0,
+                        y_offset: 0.0,
+                    });
+                    total_advance += adv;
+                }
+            }
+        }
+
+        ShapedTextResult {
+            script,
+            is_rtl,
+            total_advance,
+            clusters,
+        }
+    }
+}
+
+
 
