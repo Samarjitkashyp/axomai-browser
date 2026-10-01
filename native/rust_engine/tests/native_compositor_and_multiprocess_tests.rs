@@ -60,6 +60,7 @@ fn test_native_gpu_compositor_direct_rasterization() {
 }
 
 #[test]
+#[ignore] // Requires real subprocess spawning and network access
 fn test_multi_process_ipc_orchestration() {
     let mut supervisor = ProcessSupervisor::new();
     
