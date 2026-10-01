@@ -1,6 +1,6 @@
-use rust_engine::css_parser::CSSParser;
-use rust_engine::html_parser::{find_element_by_id, HTMLParser, NodeType};
-use rust_engine::layout::build_layout_tree;
+use axomai_engine::css_parser::CSSParser;
+use axomai_engine::html_parser::{find_element_by_id, HTMLParser, NodeType};
+use axomai_engine::layout::build_layout_tree;
 
 #[test]
 fn test_select_and_option_dom_parsing() {

@@ -1,5 +1,5 @@
-use rust_engine::layout::{BoxType, LayoutBox};
-use rust_engine::painter::{DamageRegion, LayerTree, ScriptType, TextShaper};
+use axomai_engine::layout::{BoxType, LayoutBox};
+use axomai_engine::painter::{DamageRegion, LayerTree, ScriptType, TextShaper};
 use std::collections::HashMap;
 
 #[test]

@@ -1,6 +1,6 @@
 //! Comprehensive Unicode & Text Shaper Verification for Assamese (অসমীয়া), Bengali, Devanagari, and RTL BiDi.
 
-use rust_engine::painter::TextShaper;
+use axomai_engine::painter::TextShaper;
 
 #[test]
 fn test_assamese_unique_characters_unicode_integrity() {

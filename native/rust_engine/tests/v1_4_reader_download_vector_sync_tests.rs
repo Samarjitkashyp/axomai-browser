@@ -1,10 +1,10 @@
 //! Tests for Axomai Browser v1.4.0: Reader Mode, Download Manager, SVG/PDF Vector Engine, and Encrypted Sync.
 
-use rust_engine::download_manager::{DownloadManager, DownloadState};
-use rust_engine::html_parser::HTMLParser;
-use rust_engine::reader_mode::ReaderModeEngine;
-use rust_engine::sync_engine::{SyncDataType, SyncEngine, SyncRecord};
-use rust_engine::vector_engine::{PdfDocument, SvgParser, SvgPathCommand};
+use axomai_engine::download_manager::{DownloadManager, DownloadState};
+use axomai_engine::html_parser::HTMLParser;
+use axomai_engine::reader_mode::ReaderModeEngine;
+use axomai_engine::sync_engine::{SyncDataType, SyncEngine, SyncRecord};
+use axomai_engine::vector_engine::{PdfDocument, SvgParser, SvgPathCommand};
 
 #[test]
 fn test_reader_mode_article_extraction() {

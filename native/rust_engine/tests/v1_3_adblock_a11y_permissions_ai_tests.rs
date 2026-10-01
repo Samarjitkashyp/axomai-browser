@@ -1,10 +1,10 @@
 //! Tests for Axomai Browser v1.3.0: AdBlocker, Accessibility Tree, Permissions, AI Assistant, and Android FFI.
 
-use rust_engine::accessibility_engine::{AccessibilityTree, AriaRole};
-use rust_engine::adblock_engine::AdBlockEngine;
-use rust_engine::ai_assistant::{AiAssistant, SupportedLanguage};
-use rust_engine::html_parser::HTMLParser;
-use rust_engine::permissions_engine::{PermissionName, PermissionState, PermissionsManager};
+use axomai_engine::accessibility_engine::{AccessibilityTree, AriaRole};
+use axomai_engine::adblock_engine::AdBlockEngine;
+use axomai_engine::ai_assistant::{AiAssistant, SupportedLanguage};
+use axomai_engine::html_parser::HTMLParser;
+use axomai_engine::permissions_engine::{PermissionName, PermissionState, PermissionsManager};
 
 #[test]
 fn test_adblock_network_filtering_and_cosmetic_css() {

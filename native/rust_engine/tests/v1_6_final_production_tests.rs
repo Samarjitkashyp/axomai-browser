@@ -1,7 +1,7 @@
 //! Tests for Axomai Browser v1.6.0: Final Production Edition (Auto-Updater & Heritage Theme Engine).
 
-use rust_engine::theme_engine::{HeritagePreset, ThemeEngine};
-use rust_engine::updater_engine::{ReleaseManifest, UpdateChannel, UpdateStatus, UpdaterEngine};
+use axomai_engine::theme_engine::{HeritagePreset, ThemeEngine};
+use axomai_engine::updater_engine::{ReleaseManifest, UpdateChannel, UpdateStatus, UpdaterEngine};
 
 #[test]
 fn test_auto_updater_lifecycle_and_verification() {

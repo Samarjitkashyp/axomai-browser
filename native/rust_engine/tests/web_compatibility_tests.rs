@@ -1,8 +1,8 @@
 //! Real-World Web Compatibility Test Suite for Axomai Browser Engine.
 //! Validates HTML5 DOM tree construction, CSS selectors, and Layout on real-world website patterns.
 
-use rust_engine::html_parser::{HTMLParser, query_selector, query_selector_all};
-use rust_engine::css_parser::CSSParser;
+use axomai_engine::html_parser::{HTMLParser, query_selector, query_selector_all};
+use axomai_engine::css_parser::CSSParser;
 
 #[test]
 fn test_wikipedia_infobox_and_article_structure() {

@@ -1,12 +1,12 @@
 //! Tests for Axomai Browser v1.5.0: Smart Workspaces, VPN/DoH, PiP, Split View, Capture Studio, Limiter & Web3 Wallet.
 
-use rust_engine::capture_studio::{AnnotationType, CaptureStudio};
-use rust_engine::performance_limiter::ResourceLimiter;
-use rust_engine::pip_engine::PipEngine;
-use rust_engine::split_view::{SplitLayoutMode, SplitViewEngine};
-use rust_engine::vpn_doh_engine::{DohProvider, ProxyProtocol, VpnDohEngine};
-use rust_engine::web3_wallet::{SupportedChain, Web3Wallet};
-use rust_engine::workspaces_engine::{TabHibernationState, WorkspaceManager};
+use axomai_engine::capture_studio::{AnnotationType, CaptureStudio};
+use axomai_engine::performance_limiter::ResourceLimiter;
+use axomai_engine::pip_engine::PipEngine;
+use axomai_engine::split_view::{SplitLayoutMode, SplitViewEngine};
+use axomai_engine::vpn_doh_engine::{DohProvider, ProxyProtocol, VpnDohEngine};
+use axomai_engine::web3_wallet::{SupportedChain, Web3Wallet};
+use axomai_engine::workspaces_engine::{TabHibernationState, WorkspaceManager};
 
 #[test]
 fn test_workspaces_and_tab_hibernation() {

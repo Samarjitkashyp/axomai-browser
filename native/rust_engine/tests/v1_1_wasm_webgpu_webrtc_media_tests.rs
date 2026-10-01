@@ -1,9 +1,9 @@
 //! Tests for Axomai Browser v1.1.0: WebAssembly, WebGPU, WebRTC, and Media Pipeline.
 
-use rust_engine::wasm_engine::{WasmInstance, WasmModule, WasmOpcode, WasmVal, WASM_MAGIC, WASM_VERSION};
-use rust_engine::webgpu_engine::{GpuCommandEncoder, GpuDevice, GpuPrimitiveTopology, WebGl2Context};
-use rust_engine::webrtc_engine::{RtcIceCandidate, RtcPeerConnection, RtcSignalingState};
-use rust_engine::media_decoder::{MediaContainerFormat, MediaDemuxer, MediaPlaybackPipeline, VideoCodec, AudioCodec};
+use axomai_engine::wasm_engine::{WasmInstance, WasmModule, WasmOpcode, WasmVal, WASM_MAGIC, WASM_VERSION};
+use axomai_engine::webgpu_engine::{GpuCommandEncoder, GpuDevice, GpuPrimitiveTopology, WebGl2Context};
+use axomai_engine::webrtc_engine::{RtcIceCandidate, RtcPeerConnection, RtcSignalingState};
+use axomai_engine::media_decoder::{MediaContainerFormat, MediaDemuxer, MediaPlaybackPipeline, VideoCodec, AudioCodec};
 
 #[test]
 fn test_wasm_binary_header_validation() {
@@ -22,7 +22,7 @@ fn test_wasm_binary_header_validation() {
 #[test]
 fn test_wasm_vm_arithmetic_execution() {
     let mut module = WasmModule::empty();
-    module.functions.push(rust_engine::wasm_engine::WasmFunc {
+    module.functions.push(axomai_engine::wasm_engine::WasmFunc {
         type_idx: 0,
         locals: vec![],
         instructions: vec![
@@ -37,7 +37,7 @@ fn test_wasm_vm_arithmetic_execution() {
 
     module.exports.insert(
         "compute".to_string(),
-        rust_engine::wasm_engine::WasmExport {
+        axomai_engine::wasm_engine::WasmExport {
             name: "compute".to_string(),
             kind: 0,
             index: 0,

@@ -1,5 +1,5 @@
-use rust_engine::engine::{AxomaiEngine, CdpInspector, IpcBus, IpcMessage, ProcessKind, SandboxPolicy};
-use rust_engine::html_parser::{find_element_by_id, HTMLParser};
+use axomai_engine::engine::{AxomaiEngine, CdpInspector, IpcBus, IpcMessage, ProcessKind, SandboxPolicy};
+use axomai_engine::html_parser::{find_element_by_id, HTMLParser};
 
 #[test]
 fn test_sandbox_policy_and_ipc_bus() {

@@ -1,8 +1,8 @@
 //! Automated Programmatic W3C Web Platform Tests (WPT) Execution & Score Generator.
 
-use rust_engine::wpt_runner::{WptAssertion, WptRunner, WptStatus};
-use rust_engine::html_parser::{HTMLParser, query_selector};
-use rust_engine::css_parser::CSSParser;
+use axomai_engine::wpt_runner::{WptAssertion, WptRunner, WptStatus};
+use axomai_engine::html_parser::{HTMLParser, query_selector};
+use axomai_engine::css_parser::CSSParser;
 
 #[test]
 fn test_w3c_wpt_automated_execution_matrix() {
@@ -42,8 +42,8 @@ fn test_w3c_wpt_automated_execution_matrix() {
     );
 
     // 3. W3C Web Cryptography Digest Test
-    let mut crypto = rust_engine::crypto_engine::CryptoEngine::new();
-    let digest = crypto.digest(rust_engine::crypto_engine::CryptoDigestAlgorithm::Sha256, b"WPT-WebCrypto-Standard");
+    let mut crypto = axomai_engine::crypto_engine::CryptoEngine::new();
+    let digest = crypto.digest(axomai_engine::crypto_engine::CryptoDigestAlgorithm::Sha256, b"WPT-WebCrypto-Standard");
     let crypto_pass = digest.len() == 32;
 
     runner.record_test(

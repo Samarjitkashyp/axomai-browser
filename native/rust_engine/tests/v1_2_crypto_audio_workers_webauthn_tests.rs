@@ -1,10 +1,10 @@
 //! Tests for Axomai Browser v1.2.0: Web Crypto, Web Audio API, Web Workers, WebAuthn, and WPT Runner.
 
-use rust_engine::crypto_engine::{CryptoDigestAlgorithm, CryptoEngine};
-use rust_engine::web_audio::{AudioContext, AudioContextState, OscillatorType, BiquadFilterType};
-use rust_engine::worker_engine::{OffscreenCanvas, WorkerThreadPool, WorkerState};
-use rust_engine::credentials_engine::{CredentialsManager, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions, UserVerificationRequirement};
-use rust_engine::wpt_runner::{WptAssertion, WptRunner, WptStatus};
+use axomai_engine::crypto_engine::{CryptoDigestAlgorithm, CryptoEngine};
+use axomai_engine::web_audio::{AudioContext, AudioContextState, OscillatorType, BiquadFilterType};
+use axomai_engine::worker_engine::{OffscreenCanvas, WorkerThreadPool, WorkerState};
+use axomai_engine::credentials_engine::{CredentialsManager, PublicKeyCredentialCreationOptions, PublicKeyCredentialRequestOptions, UserVerificationRequirement};
+use axomai_engine::wpt_runner::{WptAssertion, WptRunner, WptStatus};
 
 #[test]
 fn test_web_crypto_digest_and_cipher() {

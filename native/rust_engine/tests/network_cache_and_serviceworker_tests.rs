@@ -1,4 +1,4 @@
-use rust_engine::network::{base64_decode, base64_encode, CacheControl, CspPolicy, URL};
+use axomai_engine::network::{base64_decode, base64_encode, CacheControl, CspPolicy, URL};
 
 #[test]
 fn test_cache_control_parsing() {
