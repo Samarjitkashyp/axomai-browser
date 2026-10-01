@@ -678,7 +678,7 @@ pub struct LayoutBox {
 }
 
 impl LayoutBox {
-    pub fn new(box_type: BoxType, style: HashMap<String, String>, href: String) -> Self {
+    pub fn new(box_type: BoxType, mut style: HashMap<String, String>, href: String) -> Self {
         let font_size = parse_px(style.get("font-size").map(|s| s.as_str()).unwrap_or("16px"), 16.0);
         let font_weight = style.get("font-weight").cloned().unwrap_or_else(|| "normal".to_string());
         let font_style = style.get("font-style").cloned().unwrap_or_else(|| "normal".to_string());
@@ -693,13 +693,19 @@ impl LayoutBox {
         let opacity = style.get("opacity").and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(1.0).clamp(0.0, 1.0);
         let transform = style.get("transform").cloned().unwrap_or_default();
 
-        let background_gradient = style.get("background").or_else(|| style.get("background-image")).and_then(|bg| {
+        let bg_shorthand = style.get("background").or_else(|| style.get("background-image")).cloned();
+        let background_gradient = if let Some(ref bg) = bg_shorthand {
             if bg.contains("gradient") {
                 Some(bg.clone())
             } else {
+                if !style.contains_key("background-color") && !bg.is_empty() && bg != "none" && bg != "transparent" {
+                    style.insert("background-color".to_string(), bg.clone());
+                }
                 None
             }
-        });
+        } else {
+            None
+        };
 
         LayoutBox {
             box_type,
