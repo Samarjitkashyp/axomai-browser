@@ -79,7 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let window = WindowBuilder::new()
         .with_title("Axomai Browser")
-        .with_inner_size(LogicalSize::new(1380.0, 860.0))
+        .with_inner_size(LogicalSize::new(1200.0, 700.0))
         .with_min_inner_size(LogicalSize::new(800.0, 500.0))
         .build(&event_loop)?;
 
@@ -697,71 +697,93 @@ fn build_chrome_quads(
     item_y += 6.0;
     render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, blue, SIDEBAR_W);
 
-    // === TAB BAR ===
+    // === TAB BAR (Chrome-style) ===
+    // Tab strip background - slightly darker than toolbar
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, 0.0, viewport_w - SIDEBAR_W, TAB_BAR_H, tab_bar_bg));
 
     let tab_title = if title.is_empty() { "New Tab" } else { title };
-    let tab_x = SIDEBAR_W + 6.0;
-    let tab_w = 220.0;
-    // Active tab (white, rounded top)
-    quads.push(rq(tab_x, 6.0, tab_w, TAB_BAR_H - 4.0, 10.0, white));
-    // Tab icon dot
-    quads.push(rq(tab_x + 14.0, 16.0, 12.0, 12.0, 6.0, blue));
-    render_text(compositor, &mut quads, tab_title, tab_x + 32.0, 28.0, 12.0, text_primary, tab_x + tab_w - 24.0);
-    render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 11.0, text_secondary, tab_x + tab_w);
+    let tab_x = SIDEBAR_W + 8.0;
+    let tab_w = 240.0;
+    let tab_h = TAB_BAR_H - 8.0;
+    // Active tab: white rounded top, flat bottom (connects to toolbar)
+    quads.push(rq(tab_x, 8.0, tab_w, tab_h + 2.0, 8.0, white));
+    // Bottom fill to merge tab into toolbar seamlessly
+    quads.push(NativeGpuCompositor::solid_quad(tab_x, TAB_BAR_H - 2.0, tab_w, 2.0, white));
+    // Favicon circle
+    quads.push(rq(tab_x + 12.0, 15.0, 16.0, 16.0, 8.0, c(66, 133, 244, 255)));
+    render_text(compositor, &mut quads, "A", tab_x + 15.0, 27.0, 10.0, white, tab_x + 30.0);
+    // Tab title
+    render_text(compositor, &mut quads, tab_title, tab_x + 34.0, 27.0, 12.0, text_primary, tab_x + tab_w - 30.0);
+    // Close button (x)
+    render_text(compositor, &mut quads, "x", tab_x + tab_w - 20.0, 27.0, 12.0, text_disabled, tab_x + tab_w);
 
-    // + New tab button
-    let plus_x = tab_x + tab_w + 6.0;
-    quads.push(rq(plus_x, 10.0, 28.0, 22.0, 11.0, c(0, 0, 0, 0)));
-    render_text(compositor, &mut quads, "+", plus_x + 8.0, 26.0, 16.0, text_secondary, plus_x + 28.0);
+    // + New tab button (circular)
+    let plus_x = tab_x + tab_w + 8.0;
+    render_text(compositor, &mut quads, "+", plus_x + 4.0, 27.0, 16.0, text_secondary, plus_x + 24.0);
 
-    // === TOOLBAR ===
+    // === TOOLBAR (Chrome-style clean white) ===
     let ty = TAB_BAR_H;
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, viewport_w - SIDEBAR_W, TOOLBAR_H, toolbar_bg));
+    // Thin border at bottom
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.0, viewport_w - SIDEBAR_W, 1.0, border));
 
-    let ny = ty + 7.0;
-    let nb = SIDEBAR_W + 10.0;
-    let back_c = if history_back { text_primary } else { text_disabled };
-    let fwd_c = if history_fwd { text_primary } else { text_disabled };
-    render_text(compositor, &mut quads, "<", nb + 6.0, ny + 19.0, 18.0, back_c, nb + 28.0);
-    render_text(compositor, &mut quads, ">", nb + 36.0, ny + 19.0, 18.0, fwd_c, nb + 58.0);
-    render_text(compositor, &mut quads, "R", nb + 68.0, ny + 18.0, 14.0, text_secondary, nb + 88.0);
+    // Navigation buttons (Chrome-style: circular hover areas)
+    let nav_y = ty + TOOLBAR_H / 2.0;
+    let nb = SIDEBAR_W + 16.0;
+    let back_c = if history_back { text_primary } else { c(189, 193, 198, 255) };
+    let fwd_c = if history_fwd { text_primary } else { c(189, 193, 198, 255) };
+    // Back arrow
+    render_text(compositor, &mut quads, "<", nb + 2.0, nav_y + 6.0, 16.0, back_c, nb + 20.0);
+    // Forward arrow
+    render_text(compositor, &mut quads, ">", nb + 30.0, nav_y + 6.0, 16.0, fwd_c, nb + 50.0);
+    // Refresh
+    render_text(compositor, &mut quads, "R", nb + 60.0, nav_y + 5.0, 13.0, text_secondary, nb + 78.0);
+    // Home button
+    render_text(compositor, &mut quads, "H", nb + 88.0, nav_y + 5.0, 13.0, text_secondary, nb + 106.0);
 
-    // Address bar
-    let ax = SIDEBAR_W + 120.0;
-    let ay = ty + 7.0;
-    let ah = 32.0;
-    let aw = viewport_w - ax - 180.0;
-    let addr_bg = if focused { white } else { c(241, 243, 244, 255) };
-    let addr_border = if focused { blue } else { c(241, 243, 244, 255) };
-    quads.push(rq(ax, ay, aw, ah, 16.0, addr_border));
-    quads.push(rq(ax + 1.5, ay + 1.5, aw - 3.0, ah - 3.0, 15.0, addr_bg));
-
-    // Search/lock icon
-    render_text(compositor, &mut quads, "O", ax + 12.0, ay + 22.0, 12.0, text_secondary, ax + 28.0);
-
-    let display = if address_text == "about:home" && !focused { "Search Axomai or enter address" } else { address_text };
-    let dtc = if address_text == "about:home" && !focused { text_disabled } else { text_primary };
-    let end_x = render_text(compositor, &mut quads, display, ax + 30.0, ay + 22.0, 13.0, dtc, ax + aw - 12.0);
-
+    // Address bar (Chrome-style: wide rounded pill, centered feel)
+    let ax = SIDEBAR_W + 130.0;
+    let ay = ty + 6.0;
+    let ah = TOOLBAR_H - 12.0;
+    let aw = viewport_w - ax - 140.0;
     if focused {
-        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 7.0, 1.5, ah - 14.0, blue));
+        // Focused: white bg with blue border
+        quads.push(rq(ax, ay, aw, ah, ah / 2.0, blue));
+        quads.push(rq(ax + 2.0, ay + 2.0, aw - 4.0, ah - 4.0, (ah - 4.0) / 2.0, white));
+    } else {
+        // Unfocused: subtle gray pill
+        quads.push(rq(ax, ay, aw, ah, ah / 2.0, c(241, 243, 244, 255)));
     }
 
-    // Right toolbar buttons
-    let rx = viewport_w - 170.0;
-    render_text(compositor, &mut quads, "*", rx, ny + 18.0, 18.0, text_secondary, rx + 22.0);
-    render_text(compositor, &mut quads, "C", rx + 30.0, ny + 18.0, 13.0, text_secondary, rx + 48.0);
-    render_text(compositor, &mut quads, "v", rx + 56.0, ny + 18.0, 14.0, text_secondary, rx + 74.0);
-    // AI button (blue pill)
-    quads.push(rq(rx + 82.0, ny + 3.0, 32.0, 24.0, 12.0, blue));
-    render_text(compositor, &mut quads, "AI", rx + 87.0, ny + 17.0, 11.0, white, rx + 114.0);
-    // Profile
-    quads.push(rq(rx + 120.0, ny + 3.0, 24.0, 24.0, 12.0, c(232, 234, 237, 255)));
-    render_text(compositor, &mut quads, "U", rx + 125.0, ny + 17.0, 12.0, text_secondary, rx + 144.0);
-    // Menu
-    render_text(compositor, &mut quads, "=", rx + 150.0, ny + 18.0, 14.0, text_secondary, rx + 170.0);
+    // Search/lock icon
+    let icon_c = if focused { text_secondary } else { text_secondary };
+    render_text(compositor, &mut quads, "O", ax + 14.0, ay + ah / 2.0 + 6.0, 13.0, icon_c, ax + 30.0);
+
+    let is_placeholder = (address_text == "about:home" || address_text == "about:settings") && !focused;
+    let display = if is_placeholder { "Search Google or type a URL" } else { address_text };
+    let dtc = if is_placeholder { c(154, 160, 166, 255) } else { text_primary };
+    let end_x = render_text(compositor, &mut quads, display, ax + 34.0, ay + ah / 2.0 + 6.0, 14.0, dtc, ax + aw - 14.0);
+
+    if focused {
+        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, blue));
+    }
+
+    // Right toolbar icons (Chrome-style, compact)
+    let iy = ty + 11.0;
+    let ih = TOOLBAR_H - 22.0;
+    let icy = iy + ih / 2.0 + 5.0;
+
+    // AI button (branded pill)
+    let ai_x = viewport_w - 120.0;
+    quads.push(rq(ai_x, iy, 40.0, ih, ih / 2.0, blue));
+    render_text(compositor, &mut quads, "AI", ai_x + 12.0, icy, 12.0, white, viewport_w);
+    // Profile avatar circle
+    let prof_x = viewport_w - 70.0;
+    quads.push(rq(prof_x, iy, ih, ih, ih / 2.0, c(138, 180, 248, 255)));
+    render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
+    // Three-dot menu
+    let menu_x = viewport_w - 36.0;
+    render_text(compositor, &mut quads, ":", menu_x, icy, 18.0, text_secondary, viewport_w);
 
     quads
 }
