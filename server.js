@@ -42,6 +42,26 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Axomai Browser UI server running at http://localhost:${PORT}`);
+let currentPort = parseInt(process.env.PORT, 10) || 3000;
+
+function startServer(port) {
+  server.listen(port, () => {
+    console.log(`\n🚀 Axomai Browser UI server running at:`);
+    console.log(`   - Main Browser: http://localhost:${port}`);
+    console.log(`   - Interactive Demo: http://localhost:${port}/demo.html\n`);
+  });
+}
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`⚠️ Port ${currentPort} is in use, trying port ${currentPort + 1}...`);
+    currentPort += 1;
+    setTimeout(() => {
+      startServer(currentPort);
+    }, 200);
+  } else {
+    console.error('Server error:', err);
+  }
 });
+
+startServer(currentPort);
