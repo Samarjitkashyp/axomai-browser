@@ -4,14 +4,22 @@ pub mod ffi;
 pub mod html_parser;
 pub mod js_engine;
 pub mod layout;
+pub mod media_decoder;
 pub mod network;
 pub mod painter;
+pub mod wasm_engine;
+pub mod webgpu_engine;
+pub mod webrtc_engine;
 
 pub use css_parser::CSSParser;
 pub use engine::AxomaiEngine;
 pub use ffi::*;
 pub use html_parser::HTMLParser;
 pub use js_engine::V8JSEngine;
+pub use media_decoder::{MediaDemuxer, MediaPlaybackPipeline};
+pub use wasm_engine::{WasmInstance, WasmModule, WasmVal};
+pub use webgpu_engine::{GpuCanvasContext, GpuDevice, WebGl2Context};
+pub use webrtc_engine::{RtcDataChannel, RtcPeerConnection};
 
 #[no_mangle]
 pub extern "C" fn rust_parse_css_count(css_text: *const std::os::raw::c_char) -> usize {

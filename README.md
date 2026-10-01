@@ -1,8 +1,8 @@
-# 🚀 Axomai Browser `v1.0.0`
+# 🚀 Axomai Browser `v1.1.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
-A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript/WebAssembly runtime, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
+A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 
 ---
 
@@ -18,14 +18,18 @@ A modern, high-performance web browser designed with an independent Rust engine 
 - Layout Engine (Block, Flexbox, 2D CSS Grid, Tables)
 - Indic Text Shaper (Assamese/Bengali, Devanagari, BiDi RTL)
 - Google V8 Runtime (DOM, Web APIs, Workers, IndexedDB, WebSocket)
+- WebAssembly (WASM) Bytecode Engine (LEB128 decoder, stack VM)
+- WebRTC Subsystem (RTCPeerConnection, RTCDataChannel, SDP exchange)
 - Chrome DevTools Protocol (CDP) Server
 - WebExtensions Runtime (chrome.runtime, chrome.storage, chrome.tabs)
             │
             ▼
-[ GPU Compositor Process ]
+[ GPU Compositor & Graphics Process ]
+- WebGPU (WGSL pipeline, render passes) & WebGL 2.0 State Machine
 - LayerTree Decomposition (Transform, Scroll, Fixed, Sticky, Opacity)
 - Damage Region Tracking & Partial Repaint
 - Direct GPU Command Stream (Vertex & Quad Shaders)
+- Native Media Codec Demuxer (MP4/WebM -> AV1/VP9/H.264/AAC/Opus)
             │
             ▼
 [ Screen / Display ]
@@ -33,10 +37,15 @@ A modern, high-performance web browser designed with an independent Rust engine 
 
 ---
 
-## 📊 Subsystem Status Overview (`v1.0.0`)
+## 📊 Subsystem Status Overview (`v1.1.0`)
 
 | Subsystem | Status | Description |
 | :--- | :---: | :--- |
+| **WebAssembly (WASM) Engine** | 🟢 **NEW** | Binary parser (`\0asm\1`), LEB128 decoder, linear memory pages, stack bytecode VM (`i32.add/sub/mul/div`, `local.get/set`, `call`) |
+| **WebGPU 3D Engine** | 🟢 **NEW** | `GpuDevice`, `GpuBuffer`, `GpuShaderModule` (WGSL), `GpuRenderPipeline`, `GpuCommandEncoder` |
+| **WebGL 2.0 State Machine** | 🟢 **NEW** | `WebGl2Context`, VAO, shader compile, `bindBuffer`, `drawArrays`, `drawElements` |
+| **WebRTC Peer-to-Peer** | 🟢 **NEW** | `RTCPeerConnection`, `RTCDataChannel`, ICE candidates, SDP offer/answer exchange state machine |
+| **Media Demuxer & Codecs** | 🟢 **NEW** | Container demuxing (MP4 ISO-BMFF / WebM EBML), AV1/VP9/H.264/AAC/Opus pipeline, playback lifecycle |
 | **V8 ECMAScript Engine** | 🟢 | Full Google V8 isolate, closures, microtasks, Promise lifecycle |
 | **HTML5 Parser** | 🟢 | Tokenizer, entity decoding, implicit `<tbody>`, void tags, template parsing |
 | **CSS Selectors** | 🟢 | `#id`, `.class`, tags, combinators (`>`, `+`, `~`, ` `), pseudo-classes (`:first-child`, `:last-child`, `:nth-child`, `:not`, `:disabled`, `:checked`) |
@@ -47,10 +56,10 @@ A modern, high-performance web browser designed with an independent Rust engine 
 | **Flexbox Engine** | 🟢 | Multi-pass measurement, flex-grow/shrink distribution, flex-wrap, align-content |
 | **CSS Grid Layout** | 🟢 | `grid-template-columns/rows`, `grid-template-areas`, `auto-fit`/`auto-fill`, `minmax()`, alignments |
 | **Table Layout** | 🟢 | `<table>`, `<tr>`, `<td>`, `<th>`, `<thead>`, `<tbody>`, `<tfoot>`, border-spacing |
-| **Multi-Process Sandbox** | 🟢 **NEW** | `ProcessKind` (`BrowserMain`, `RendererSandbox`, `NetworkProcess`, `GpuCompositor`), `SandboxPolicy`, `IpcBus` |
-| **DevTools Protocol (CDP)** | 🟢 **NEW** | `CdpInspector` server (`DOM.getDocument`, `DOM.querySelector`, `Runtime.evaluate`, `Page.navigate`, `Network.getResponseBody`) |
-| **WebExtensions Runtime** | 🟢 **NEW** | Manifest v3 runtime (`chrome.runtime`, `chrome.storage.local`, `chrome.tabs`, `browser.*`) |
-| **HTML5 Media APIs** | 🟢 **NEW** | `<video>` & `<audio>` player lifecycle (`play()`, `pause()`, `currentTime`, `duration`, `volume`, `muted`) |
+| **Multi-Process Sandbox** | 🟢 | `ProcessKind` (`BrowserMain`, `RendererSandbox`, `NetworkProcess`, `GpuCompositor`), `SandboxPolicy`, `IpcBus` |
+| **DevTools Protocol (CDP)** | 🟢 | `CdpInspector` server (`DOM.getDocument`, `DOM.querySelector`, `Runtime.evaluate`, `Page.navigate`, `Network.getResponseBody`) |
+| **WebExtensions Runtime** | 🟢 | Manifest v3 runtime (`chrome.runtime`, `chrome.storage.local`, `chrome.tabs`, `browser.*`) |
+| **HTML5 Media APIs** | 🟢 | `<video>` & `<audio>` player lifecycle (`play()`, `pause()`, `currentTime`, `duration`, `volume`, `muted`) |
 | **GPU Compositor LayerTree** | 🟢 | `LayerTree`, `LayerType` (Transform, Scroll, Fixed, Sticky), `DamageRegion` partial repaint, `GpuCommand` stream |
 | **Indic & Assamese Text Shaper** | 🟢 | `TextShaper` HarfBuzz engine, Matra reordering, Halant conjuncts (অসমীয়া, য-ফলা), BiDi Arabic RTL |
 | **HTTP Cache & Validation** | 🟢 | `HttpCache`, `Cache-Control` (`max-age`, `no-store`, `no-cache`), `ETag` / `304 Not Modified` conditional revalidation |
