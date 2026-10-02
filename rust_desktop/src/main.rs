@@ -1,3 +1,5 @@
+mod internal_pages;
+
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
 use axomai_engine::WgpuRenderer;
@@ -58,11 +60,28 @@ impl SearchEngine {
         }
     }
     fn search_url(&self, query: &str) -> String {
+        let encoded: String = query.bytes().map(|b| {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                b' ' => "+".to_string(),
+                _ => format!("%{:02X}", b),
+            }
+        }).collect();
         match self {
-            SearchEngine::Google => format!("https://www.google.com/search?q={}", query),
-            SearchEngine::Bing => format!("https://www.bing.com/search?q={}", query),
-            SearchEngine::Yahoo => format!("https://search.yahoo.com/search?p={}", query),
-            SearchEngine::DuckDuckGo => format!("https://html.duckduckgo.com/html/?q={}", query),
+            SearchEngine::Google => format!("https://www.google.com/search?q={}", encoded),
+            SearchEngine::Bing => format!("https://www.bing.com/search?q={}", encoded),
+            SearchEngine::Yahoo => format!("https://search.yahoo.com/search?p={}", encoded),
+            SearchEngine::DuckDuckGo => format!("https://html.duckduckgo.com/html/?q={}", encoded),
+        }
+    }
+    fn js_search_template(&self) -> &'static str {
+        match self {
+            SearchEngine::Google => "https://www.google.com/search?q=",
+            SearchEngine::Bing => "https://www.bing.com/search?q=",
+            SearchEngine::Yahoo => "https://search.yahoo.com/search?p=",
+            SearchEngine::DuckDuckGo => "https://html.duckduckgo.com/html/?q=",
         }
     }
     fn all() -> &'static [SearchEngine] {
@@ -77,8 +96,29 @@ struct Extension {
     icon_letter: &'static str,
     icon_color: [u8; 3],
     enabled: bool,
+    auto_inject: bool,
     inject_js: &'static str,
     disable_js: &'static str,
+}
+
+fn serde_json_mini(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn create_extensions() -> Vec<Extension> {
@@ -90,8 +130,9 @@ fn create_extensions() -> Vec<Extension> {
             icon_letter: "A",
             icon_color: [220, 50, 50],
             enabled: false,
-            inject_js: r#"(function(){if(window.__axomai_ab)return;window.__axomai_ab=1;var s=document.createElement('style');s.id='__axomai_ab';s.textContent='[class*="ad-"],[class*="ads-"],[class*="ad_"],[id*="ad-"],[id*="ads-"],[id*="ad_"],[class*="advert"],[id*="advert"],[data-ad],[data-ads],[data-ad-slot],ins.adsbygoogle,.ad-container,.ad-wrapper,.ad-banner,[class*="sponsored"],[class*="banner-ad"],iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adserver"]{display:none!important;height:0!important;overflow:hidden!important}';document.head.appendChild(s);new MutationObserver(function(m){m.forEach(function(r){r.addedNodes.forEach(function(n){if(n.nodeType===1&&(n.className&&(/\bad[s_-]/.test(n.className)||/advert|sponsor/i.test(n.className))||n.tagName==='INS'&&n.classList.contains('adsbygoogle')))n.style.display='none'})})}).observe(document.body||document.documentElement,{childList:true,subtree:true})})()"#,
-            disable_js: r#"(function(){var s=document.getElementById('__axomai_ab');if(s)s.remove();window.__axomai_ab=0})()"#,
+            auto_inject: true,
+            inject_js: r#"(function(){if(window.__axomai_ab)return;window.__axomai_ab=1;var s=document.createElement('style');s.id='__axomai_ab';s.textContent='ins.adsbygoogle,div[id^="google_ads"],div[id^="div-gpt-ad"],iframe[id^="google_ads"],iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adserver"],iframe[src*="ads."],div[class*="ad-container"],div[class*="ad-wrapper"],div[class*="ad-banner"],div[class*="ad-slot"],div[class*="advertisement"],div[id*="advertisement"],div[class*="Ad-"],div[id*="Ad-"],div[data-ad],div[data-ad-slot],div[data-google-query-id],div[class*="sponsored"],div[id*="sponsored"],aside[class*="ad"],section[class*="ad"],div[class*="advert"],div[id*="advert"],div[class*="banner-ad"],div[id*="banner-ad"],amp-ad,amp-sticky-ad,div[class*="sticky-ad"],div[id*="sticky"],div[class*="interstitial"],div[class*="popup-ad"],div[class*="overlay-ad"],div[class*="taboola"],div[id*="taboola"],div[class*="outbrain"],div[id*="outbrain"],div[class*="mgid"],div[id*="mgid"],div[class*="colombiaonline"],div[class*="revContent"],div[class*="native-ad"],a[href*="doubleclick"],div[class*="promo-"],div[class*="dfp-"],div[id*="dfp-"],div[class*="ads-"],div[id*="ads-"],div[class*="adsense"],div[class*="ad_"],div[id*="ad_"],div[class*="leaderboard-ad"],div[class*="sidebar-ad"],div[class*="footer-ad"],div[class*="top-ad"],div[class*="inline-ad"],div[class*="mid-article-ad"],div.ie-int-camp498-498,div[class*="storyAdBox"]{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;opacity:0!important;pointer-events:none!important}';(document.head||document.documentElement).appendChild(s);function hideAds(){document.querySelectorAll('ins.adsbygoogle,div[id^="google_ads"],div[id^="div-gpt-ad"],iframe[id^="google_ads"],div[data-google-query-id],div[class*="taboola"],div[class*="outbrain"],div[class*="advert"],div[class*="sponsored"],div[class*="ad-container"],div[class*="ad-wrapper"],div[class*="ad-slot"],div[class*="sticky-ad"],amp-ad,amp-sticky-ad').forEach(function(e){e.style.setProperty('display','none','important');e.style.setProperty('height','0','important')});document.querySelectorAll('iframe').forEach(function(f){try{var s=f.src||'';if(/doubleclick|googlesyndication|ads\.|adserver|amazon-adsystem|taboola|outbrain/i.test(s)){f.style.setProperty('display','none','important');f.style.setProperty('height','0','important')}}catch(x){}})}hideAds();new MutationObserver(function(){hideAds()}).observe(document.documentElement,{childList:true,subtree:true});setInterval(hideAds,2000)})()"#,
+            disable_js: r#"(function(){var s=document.getElementById('__axomai_ab');if(s)s.remove();window.__axomai_ab=0;clearInterval(window.__axomai_ab_timer)})()"#,
         },
         Extension {
             name: "Reader Mode",
@@ -100,7 +141,8 @@ fn create_extensions() -> Vec<Extension> {
             icon_letter: "R",
             icon_color: [60, 130, 60],
             enabled: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_reader'))return;var a=document.querySelector('article')||document.querySelector('main')||document.querySelector('[role="main"]');if(!a)a=document.body;var d=document.createElement('div');d.id='__axomai_reader';d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;overflow-y:auto;background:#faf9f6';d.innerHTML='<div style="max-width:680px;margin:0 auto;padding:40px 24px;font:18px/1.8 Georgia,serif;color:#333"><div style="display:flex;align-items:center;gap:8px;margin-bottom:16px"><span style="background:#3c823c;color:#fff;padding:4px 10px;border-radius:12px;font:bold 12px sans-serif">READER MODE</span><button onclick="document.getElementById(\'__axomai_reader\').remove()" style="margin-left:auto;background:none;border:1px solid #ccc;padding:4px 12px;border-radius:12px;cursor:pointer;font:12px sans-serif">Exit Reader</button></div><h1 style="font:bold 28px sans-serif;margin-bottom:8px">'+document.title.replace(/</g,'&lt;')+'</h1><hr style="border:0;border-top:1px solid #ddd;margin:20px 0">'+a.innerHTML+'</div>';document.body.appendChild(d)})()"#,
+            auto_inject: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_reader'))return;var sels=['article','.article-body','.story-detail','.article-content','.post-content','.entry-content','.article__content','[itemprop="articleBody"]','.story-body','.full_story','.story_details','.article_content','.content-area'];var a=null;for(var i=0;i<sels.length;i++){a=document.querySelector(sels[i]);if(a&&a.querySelectorAll('p').length>=2)break;a=null}if(!a){var best=null,bestP=0;document.querySelectorAll('div,section').forEach(function(el){var pc=el.querySelectorAll('p').length;if(pc>bestP&&el.textContent.trim().length>300){bestP=pc;best=el}});if(best&&bestP>=3)a=best}var paras=[];var imgs=[];if(a){a.querySelectorAll('p').forEach(function(p){var t=p.textContent.trim();if(t.length>20)paras.push('<p>'+p.innerHTML+'</p>')});a.querySelectorAll('img[src]').forEach(function(img){var w=img.naturalWidth||img.width||parseInt(img.getAttribute('width'))||0;if(w>150||(!img.width&&!img.height&&img.src)){imgs.push('<img src="'+img.src.replace(/"/g,'&quot;')+'" style="max-width:100%;height:auto;border-radius:8px;margin:16px 0">')}})}var html='';if(paras.length<2){html='<p style="color:#888;font-size:16px;text-align:center;padding:60px 20px">This page does not have enough article content for Reader Mode.<br><br>Try opening a specific article page.</p>'}else{if(imgs.length>0)html+=imgs[0];html+=paras.join('');if(paras.length>50)html=paras.slice(0,50).join('')+'<p style="color:#888">...</p>'}var d=document.createElement('div');d.id='__axomai_reader';d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;overflow-y:auto;background:#faf9f6';var title=document.title.replace(/</g,'&lt;').replace(/>/g,'&gt;');d.innerHTML='<div style="max-width:700px;margin:0 auto;padding:40px 24px;font:19px/1.9 Georgia,Times,serif;color:#1a1a1a"><div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap"><span style="background:#3c823c;color:#fff;padding:5px 14px;border-radius:14px;font:bold 12px sans-serif;letter-spacing:.5px">READER MODE</span><span style="color:#888;font:12px sans-serif">'+window.location.hostname+'</span><button id="__axomai_reader_exit" style="margin-left:auto;background:#f5f5f5;border:1px solid #ddd;padding:6px 16px;border-radius:14px;cursor:pointer;font:13px sans-serif;color:#555">Exit Reader</button></div><h1 style="font:bold 30px/1.3 -apple-system,Segoe UI,sans-serif;margin-bottom:12px;color:#111">'+title+'</h1><hr style="border:0;border-top:2px solid #eee;margin:24px 0">'+html+'</div>';document.body.appendChild(d);document.getElementById('__axomai_reader_exit').onclick=function(){d.remove()};d.querySelectorAll('script,style,iframe,ins,[class*="ad"],[class*="social"],[class*="share"]').forEach(function(e){e.remove()});d.querySelectorAll('a').forEach(function(a){a.style.color='#2563eb'})})()"#,
             disable_js: r#"(function(){var d=document.getElementById('__axomai_reader');if(d)d.remove()})()"#,
         },
         Extension {
@@ -110,7 +152,8 @@ fn create_extensions() -> Vec<Extension> {
             icon_letter: "T",
             icon_color: [66, 133, 244],
             enabled: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_translate'))return;var b=document.createElement('div');b.id='__axomai_translate';b.innerHTML='<button style="position:fixed;bottom:20px;right:20px;z-index:999999;padding:10px 18px;background:#4285f4;color:#fff;border:none;border-radius:24px;font:bold 13px sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(66,133,244,.4);display:flex;align-items:center;gap:6px" title="Translate this page"><span style="font-size:16px">T</span> Translate</button>';b.querySelector('button').onclick=function(){window.location.href='https://translate.google.com/translate?sl=auto&tl=en&u='+encodeURIComponent(window.location.href)};document.body.appendChild(b)})()"#,
+            auto_inject: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_translate'))return;var b=document.createElement('div');b.id='__axomai_translate';b.innerHTML='<button style="position:fixed;bottom:24px;right:24px;z-index:999999;padding:12px 20px;background:linear-gradient(135deg,#4285f4,#5b6abf);color:#fff;border:none;border-radius:28px;font:bold 13px -apple-system,Segoe UI,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(66,133,244,.4);display:flex;align-items:center;gap:8px;transition:transform .2s,box-shadow .2s" onmouseover="this.style.transform=\'scale(1.05)\';this.style.boxShadow=\'0 6px 24px rgba(66,133,244,.5)\'" onmouseout="this.style.transform=\'scale(1)\';this.style.boxShadow=\'0 4px 16px rgba(66,133,244,.4)\'" title="Translate this page to English"><svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04M18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12m-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg> Translate</button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){window.location.href='https://translate.google.com/translate?sl=auto&tl=en&u='+encodeURIComponent(window.location.href)}})()"#,
             disable_js: r#"(function(){var d=document.getElementById('__axomai_translate');if(d)d.remove()})()"#,
         },
         Extension {
@@ -120,7 +163,8 @@ fn create_extensions() -> Vec<Extension> {
             icon_letter: "X",
             icon_color: [180, 80, 200],
             enabled: false,
-            inject_js: r#"(function(){if(window.__axomai_tb)return;window.__axomai_tb=1;var s=document.createElement('style');s.id='__axomai_tb';s.textContent='img[src*="pixel"],img[src*="track"],img[src*="beacon"],img[src*="analytics"],img[width="1"][height="1"],img[width="0"],script[src*="analytics"],script[src*="tracker"],script[src*="facebook.net"],script[src*="connect.facebook"],script[src*="hotjar"],script[src*="mouseflow"],script[src*="clarity.ms"]{display:none!important}';document.head.appendChild(s);var origFetch=window.fetch;window.fetch=function(u,o){var url=typeof u==='string'?u:(u&&u.url?u.url:'');if(/analytics|tracker|facebook\.net|hotjar|mouseflow|clarity\.ms/i.test(url))return Promise.resolve(new Response('',{status:200}));return origFetch.apply(this,arguments)}})()"#,
+            auto_inject: true,
+            inject_js: r#"(function(){if(window.__axomai_tb)return;window.__axomai_tb=1;var s=document.createElement('style');s.id='__axomai_tb';s.textContent='img[src*="pixel"],img[src*="track"],img[src*="beacon"],img[src*="analytics"],img[width="1"][height="1"],img[width="0"]{display:none!important}';(document.head||document.documentElement).appendChild(s);var blockList=/google-analytics\.com|googletagmanager\.com|facebook\.net|connect\.facebook|analytics\.|tracker\.|hotjar\.com|mouseflow\.com|clarity\.ms|doubleclick\.net|googlesyndication|amazon-adsystem|scorecardresearch|quantserve|taboola|outbrain|criteo|adnxs\.com|pubmatic|rubiconproject|openx\.net|casalemedia|indexexchange|33across/i;if(window.XMLHttpRequest){var origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'&&blockList.test(u)){this.__blocked=true}return origOpen.apply(this,arguments)};var origSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){if(this.__blocked)return;return origSend.apply(this,arguments)}}if(window.fetch){var origFetch=window.fetch;window.fetch=function(u,o){var url=typeof u==='string'?u:(u&&u.url?u.url:'');if(blockList.test(url))return Promise.resolve(new Response('',{status:200}));return origFetch.apply(this,arguments)}}new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.tagName==='SCRIPT'&&n.src&&blockList.test(n.src)){n.type='javascript/blocked';n.remove()}if(n.tagName==='IMG'&&n.src&&blockList.test(n.src)){n.remove()}if(n.tagName==='IFRAME'&&n.src&&blockList.test(n.src)){n.remove()}})})}).observe(document.documentElement,{childList:true,subtree:true})})()"#,
             disable_js: r#"(function(){var s=document.getElementById('__axomai_tb');if(s)s.remove();window.__axomai_tb=0})()"#,
         },
         Extension {
@@ -130,10 +174,23 @@ fn create_extensions() -> Vec<Extension> {
             icon_letter: "S",
             icon_color: [34, 168, 83],
             enabled: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_ss'))return;var b=document.createElement('div');b.id='__axomai_ss';b.innerHTML='<button style="position:fixed;bottom:20px;right:80px;z-index:999999;width:44px;height:44px;background:#22a853;color:#fff;border:none;border-radius:50%;font:bold 18px sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(34,168,83,.4);display:flex;align-items:center;justify-content:center" title="Screenshot">S</button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){var flash=document.createElement('div');flash.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.6);z-index:999998;pointer-events:none;transition:opacity 0.3s';document.body.appendChild(flash);setTimeout(function(){flash.style.opacity='0'},50);setTimeout(function(){flash.remove()},350);navigator.clipboard.writeText('[Screenshot] '+document.title+' - '+window.location.href).catch(function(){});var n=document.createElement('div');n.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;background:#333;color:#fff;border-radius:8px;z-index:999999;font:14px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)';n.textContent='Page info copied to clipboard!';document.body.appendChild(n);setTimeout(function(){n.style.opacity='0';n.style.transition='opacity 0.3s'},1500);setTimeout(function(){n.remove()},2000)}})()"#,
+            auto_inject: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_ss'))return;var b=document.createElement('div');b.id='__axomai_ss';b.innerHTML='<button style="position:fixed;bottom:24px;right:90px;z-index:999999;width:48px;height:48px;background:linear-gradient(135deg,#22a853,#1e8e47);color:#fff;border:none;border-radius:50%;font:bold 20px sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(34,168,83,.4);display:flex;align-items:center;justify-content:center;transition:transform .2s,box-shadow .2s" onmouseover="this.style.transform=\'scale(1.1)\';this.style.boxShadow=\'0 6px 24px rgba(34,168,83,.5)\'" onmouseout="this.style.transform=\'scale(1)\';this.style.boxShadow=\'0 4px 16px rgba(34,168,83,.4)\'" title="Capture Screenshot"><svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12zM12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/></svg></button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){var flash=document.createElement('div');flash.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.7);z-index:999998;pointer-events:none;transition:opacity 0.3s';document.body.appendChild(flash);setTimeout(function(){flash.style.opacity='0'},80);setTimeout(function(){flash.remove()},400);navigator.clipboard.writeText('[Screenshot] '+document.title+'\n'+window.location.href).catch(function(){});var n=document.createElement('div');n.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:14px 28px;background:rgba(30,30,30,.9);color:#fff;border-radius:12px;z-index:999999;font:14px -apple-system,Segoe UI,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.3);backdrop-filter:blur(8px)';n.textContent='Page info copied to clipboard!';document.body.appendChild(n);setTimeout(function(){n.style.opacity='0';n.style.transition='opacity 0.3s'},1800);setTimeout(function(){n.remove()},2200)}})()"#,
             disable_js: r#"(function(){var d=document.getElementById('__axomai_ss');if(d)d.remove()})()"#,
         },
     ]
+}
+
+fn build_extension_init_script(extensions: &[Extension]) -> String {
+    let mut js = String::from("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});\n");
+    for ext in extensions {
+        if ext.enabled && ext.auto_inject {
+            js.push_str("try{");
+            js.push_str(ext.inject_js);
+            js.push_str("}catch(e){}\n");
+        }
+    }
+    js
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -249,7 +306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut address_bar_focused = false;
     let mut home_search_focused = false;
     let mut home_search_text = String::new();
-    let mut ime_active = false;
+    let mut _ime_active = false;
     let mut needs_chrome_redraw = true;
     let mut sidebar_active: usize = 0;
     let mut is_home_page = true;
@@ -263,6 +320,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut is_extensions_page = false;
     let mut extensions = create_extensions();
     let mut hover_ext_idx: Option<usize> = None;
+    let mut ext_inject_time: Option<std::time::Instant> = None;
 
     let scale_factor = window.scale_factor() as f32;
 
@@ -270,7 +328,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut webview: Option<wry::WebView> = None;
     let mut webview_visible = false;
+    let mut load_internal_page: Option<String> = Some("home".to_string());
 
+    #[allow(unused_assignments)]
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(
             std::time::Instant::now() + std::time::Duration::from_millis(16),
@@ -327,14 +387,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 // Extensions page hover tracking
                 if is_extensions_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
+                    let content_x = mouse_x - SIDEBAR_W;
                     let content_y = mouse_y - CHROME_TOP;
+                    let content_w = gpu_renderer.surface_config.width as f32 - SIDEBAR_W;
                     let old_ext_hover = hover_ext_idx;
                     hover_ext_idx = None;
-                    let card_h = 88.0;
-                    let start_y = 70.0;
-                    for i in 0..5 {
-                        let ey = start_y + i as f32 * (card_h + 12.0);
-                        if content_y >= ey && content_y <= ey + card_h && mouse_x - SIDEBAR_W >= 40.0 {
+                    let padding = 24.0;
+                    let gap = 16.0;
+                    let cols = if content_w > 600.0 { 2usize } else { 1 };
+                    let card_w = if cols == 2 { (content_w - padding * 2.0 - gap) / 2.0 } else { content_w - padding * 2.0 };
+                    let card_h = 160.0;
+                    let grid_start_y = 64.0 + 24.0 + 36.0;
+                    for i in 0..extensions.len() {
+                        let col = (i % cols) as f32;
+                        let row = (i / cols) as f32;
+                        let cx = padding + col * (card_w + gap);
+                        let cy = grid_start_y + row * (card_h + gap);
+                        if content_x >= cx && content_x <= cx + card_w
+                            && content_y >= cy && content_y <= cy + card_h {
                             hover_ext_idx = Some(i);
                             break;
                         }
@@ -400,26 +470,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 let w = gpu_renderer.surface_config.width as f32;
-                // Query actual cursor position from OS (CursorMoved events may not fire with automation)
+                // Update mouse coords from Win32 for reliability
+                // (CursorMoved may not fire when clicking from WebView child HWND)
                 {
-                    let hwnd = window.hwnd() as *mut std::ffi::c_void;
-                    #[repr(C)]
-                    struct POINT { x: i32, y: i32 }
-                    extern "system" {
-                        fn GetCursorPos(lp: *mut POINT) -> i32;
-                        fn ScreenToClient(hwnd: *mut std::ffi::c_void, lp: *mut POINT) -> i32;
-                    }
-                    let mut pt = POINT { x: 0, y: 0 };
+                    let pos = window.inner_position().unwrap_or_default();
                     unsafe {
-                        if GetCursorPos(&mut pt) != 0 {
-                            ScreenToClient(hwnd, &mut pt);
-                            mouse_x = pt.x as f32;
-                            mouse_y = pt.y as f32;
+                        extern "system" {
+                            fn GetCursorPos(point: *mut [i32; 2]) -> i32;
                         }
+                        let mut pt: [i32; 2] = [0, 0];
+                        GetCursorPos(&mut pt);
+                        mouse_x = (pt[0] - pos.x) as f32;
+                        mouse_y = (pt[1] - pos.y) as f32;
                     }
                 }
                 if state == ElementState::Pressed && button == MouseButton::Left {
-
                     if mouse_x < SIDEBAR_W {
                         let mut item_y = 50.0;
                         for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
@@ -435,28 +500,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         is_extensions_page = false;
                                         address_bar_text = String::from("about:home");
                                         home_scroll_y = 0.0;
-                                        if webview_visible {
-                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
-                                            webview_visible = false;
-                                        }
+                                        load_internal_page = Some("home".to_string());
                                     } else if i == 5 {
                                         is_extensions_page = true;
                                         is_home_page = false;
                                         is_settings_page = false;
-                                        address_bar_text = String::from("about:extensions");
-                                        if webview_visible {
-                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
-                                            webview_visible = false;
-                                        }
+                                        address_bar_text = String::from("axomai://extensions");
+                                        load_internal_page = Some("extensions".to_string());
                                     } else if i == 7 {
                                         is_settings_page = true;
                                         is_home_page = false;
                                         is_extensions_page = false;
                                         address_bar_text = String::from("about:settings");
-                                        if webview_visible {
-                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
-                                            webview_visible = false;
-                                        }
+                                        load_internal_page = Some("settings".to_string());
                                     } else {
                                         is_settings_page = false;
                                         is_extensions_page = false;
@@ -490,32 +546,80 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     // Settings
                                     is_settings_page = true;
                                     is_home_page = false;
+                                    is_extensions_page = false;
                                     sidebar_active = 7;
                                     address_bar_text = String::from("about:settings");
-                                    if let Some(ref wv) = webview {
-                                        let _ = wv.set_visible(false);
-                                        webview_visible = false;
-                                    }
+                                    load_internal_page = Some("settings".to_string());
                                 }
                                 _ => {}
                             }
                         }
                         needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
-                        // 3-dot menu button
-                        let menu_btn_x = w - 120.0 + 46.0;
+                        let tab_x = SIDEBAR_W + 8.0;
+                        let tab_w = 240.0;
+                        if mouse_y <= TAB_BAR_H {
+                            // Close "x" button — wider hit area (last 30px of tab)
+                            let close_x = tab_x + tab_w - 30.0;
+                            // "+" new tab button — after the tab with generous hit area
+                            let plus_x = tab_x + tab_w + 4.0;
+                            if mouse_x >= close_x && mouse_x <= tab_x + tab_w {
+                                is_home_page = true;
+                                is_extensions_page = false;
+                                is_settings_page = false;
+                                home_search_text.clear();
+                                home_search_focused = false;
+                                address_bar_text = String::from("about:home");
+                                address_bar_focused = false;
+                                load_internal_page = Some("home".to_string());
+                                needs_chrome_redraw = true;
+                            } else if mouse_x >= plus_x && mouse_x <= plus_x + 44.0 {
+                                is_home_page = true;
+                                is_extensions_page = false;
+                                is_settings_page = false;
+                                home_search_text.clear();
+                                home_search_focused = false;
+                                address_bar_text = String::from("about:home");
+                                address_bar_focused = false;
+                                load_internal_page = Some("home".to_string());
+                                needs_chrome_redraw = true;
+                            }
+                        }
+                        // Extension icons + 3-dot menu button area
+                        let n_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
+                        let right_w = 120.0 + n_ext * 30.0;
+                        let icons_start_x = w - right_w;
+                        let prof_end_x = icons_start_x + 8.0 + (TOOLBAR_H - 20.0) + 8.0;
+                        let menu_btn_x = prof_end_x + n_ext * 30.0 + 4.0;
 
-                        if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 20.0
+                        if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 24.0
                             && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
                         {
                             menu_open = !menu_open;
-
                             needs_chrome_redraw = true;
+                        }
+                        // Click on extension icon in toolbar to toggle it off
+                        if mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP {
+                            let mut ex = prof_end_x;
+                            let ih = TOOLBAR_H - 20.0;
+                            for i in 0..extensions.len() {
+                                if extensions[i].enabled {
+                                    if mouse_x >= ex && mouse_x <= ex + ih {
+                                        extensions[i].enabled = false;
+                                        if let Some(ref wv) = webview {
+                                            let _ = wv.evaluate_script(extensions[i].disable_js);
+                                        }
+                                        needs_chrome_redraw = true;
+                                        break;
+                                    }
+                                    ex += 30.0;
+                                }
+                            }
                         }
                         let addr_x = SIDEBAR_W + 60.0;
                         let addr_y = TAB_BAR_H + 7.0;
                         let addr_h = TOOLBAR_H - 14.0;
-                        let addr_w = w - addr_x - 130.0;
+                        let addr_w = w - addr_x - right_w - 10.0;
                         if mouse_x >= addr_x
                             && mouse_x <= addr_x + addr_w
                             && mouse_y >= addr_y
@@ -574,14 +678,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if is_extensions_page {
                         address_bar_focused = false;
                         menu_open = false;
+                        let content_x = mouse_x - SIDEBAR_W;
                         let content_y = mouse_y - CHROME_TOP;
-                        let card_h = 88.0;
-                        let start_y = 70.0;
+                        let content_w = w - SIDEBAR_W;
+                        let padding = 24.0;
+                        let gap = 16.0;
+                        let cols = if content_w > 600.0 { 2usize } else { 1 };
+                        let card_w = if cols == 2 { (content_w - padding * 2.0 - gap) / 2.0 } else { content_w - padding * 2.0 };
+                        let card_h = 160.0;
+                        let grid_start_y = 64.0 + 24.0 + 36.0;
                         for i in 0..extensions.len() {
-                            let ey = start_y + i as f32 * (card_h + 12.0);
-                            let toggle_y = ey + card_h / 2.0 - 12.0;
-                            if content_y >= ey && content_y <= ey + card_h
-                                && mouse_x - SIDEBAR_W >= 40.0
+                            let col = (i % cols) as f32;
+                            let row = (i / cols) as f32;
+                            let cx = padding + col * (card_w + gap);
+                            let cy = grid_start_y + row * (card_h + gap);
+                            if content_x >= cx && content_x <= cx + card_w
+                                && content_y >= cy && content_y <= cy + card_h
                             {
                                 extensions[i].enabled = !extensions[i].enabled;
                                 let is_on = extensions[i].enabled;
@@ -677,12 +789,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if key_event.state == ElementState::Pressed {
                     if address_bar_focused {
                         match key_event.logical_key {
-                            Key::Character(ref ch) => {
-                                if !ime_active {
-                                    address_bar_text.push_str(ch.as_ref());
-                                    needs_chrome_redraw = true;
-                                }
-                            }
                             Key::Backspace => {
                                 address_bar_text.pop();
                                 needs_chrome_redraw = true;
@@ -706,10 +812,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let cw = w_of(&gpu_renderer);
                                     let ch = h_of(&gpu_renderer);
                                     let nav_clone = nav_url_shared.clone();
+                                    let init_js = build_extension_init_script(&extensions);
                                     webview = WebViewBuilder::new()
                                         .with_url(&url)
                                         .with_devtools(false)
-                                        .with_initialization_script("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});")
+                                        .with_initialization_script(&init_js)
                                         .with_bounds(Rect {
                                             position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
                                             size: wry::dpi::LogicalSize::new(
@@ -753,12 +860,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else if home_search_focused {
                         match key_event.logical_key {
-                            Key::Character(ref ch) => {
-                                if !ime_active {
-                                    home_search_text.push_str(ch.as_ref());
-                                    needs_chrome_redraw = true;
-                                }
-                            }
                             Key::Backspace => {
                                 home_search_text.pop();
                                 needs_chrome_redraw = true;
@@ -781,10 +882,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         let cw = w_of(&gpu_renderer);
                                         let ch = h_of(&gpu_renderer);
                                         let nav_clone = nav_url_shared.clone();
+                                        let init_js = build_extension_init_script(&extensions);
                                         webview = WebViewBuilder::new()
                                             .with_url(&url)
                                             .with_devtools(false)
-                                            .with_initialization_script("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});")
+                                            .with_initialization_script(&init_js)
                                             .with_bounds(Rect {
                                                 position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
                                                 size: wry::dpi::LogicalSize::new(
@@ -824,18 +926,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else {
                         if is_home_page {
-                            if let Key::Character(ref ch) = key_event.logical_key {
-                                if !ime_active {
-                                    home_search_focused = true;
-                                    home_search_text.clear();
-                                    home_search_text.push_str(ch.as_ref());
-                                    needs_chrome_redraw = true;
-                                    unsafe {
-                                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                        SetFocus(window.hwnd() as _);
-                                    }
-                                }
-                            }
+                            // Character input handled by ReceivedImeText
                         } else if !is_home_page {
                             let key_str = match key_event.logical_key {
                                 Key::Character(ref ch) => ch.to_string(),
@@ -869,7 +960,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::ReceivedImeText(ref text),
                 ..
             } => {
-                ime_active = true;
                 if address_bar_focused {
                     address_bar_text.push_str(text);
                     needs_chrome_redraw = true;
@@ -881,6 +971,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     home_search_text.clear();
                     home_search_text.push_str(text);
                     needs_chrome_redraw = true;
+                    unsafe {
+                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                        SetFocus(window.hwnd() as _);
+                    }
                 }
             }
             Event::WindowEvent {
@@ -908,11 +1002,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::MainEventsCleared => {
                 if let Ok(mut nav) = nav_url_shared.lock() {
                     if let Some(url) = nav.take() {
-                        address_bar_text = url;
-                        needs_chrome_redraw = true;
+                        if url.starts_with("axomai://ext-toggle/") {
+                            if let Ok(idx) = url.trim_start_matches("axomai://ext-toggle/").parse::<usize>() {
+                                if idx < extensions.len() {
+                                    extensions[idx].enabled = !extensions[idx].enabled;
+                                    if is_extensions_page {
+                                        load_internal_page = Some("extensions".to_string());
+                                    }
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                        } else if url.starts_with("axomai://set-engine/") {
+                            let name = url.trim_start_matches("axomai://set-engine/");
+                            selected_search_engine = match name {
+                                "Bing" => SearchEngine::Bing,
+                                "Yahoo" => SearchEngine::Yahoo,
+                                "DuckDuckGo" => SearchEngine::DuckDuckGo,
+                                _ => SearchEngine::Google,
+                            };
+                            if is_settings_page {
+                                load_internal_page = Some("settings".to_string());
+                            }
+                        } else if url.starts_with("data:") {
+                            // Internal page data URL — don't update address bar
+                        } else {
+                            address_bar_text = url;
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            needs_chrome_redraw = true;
+                            let has_auto_ext = extensions.iter().any(|e| e.enabled && e.auto_inject);
+                            if has_auto_ext {
+                                ext_inject_time = Some(std::time::Instant::now() + std::time::Duration::from_millis(1200));
+                            }
+                        }
+                    }
+                }
+                if let Some(page) = load_internal_page.take() {
+                    let html = match page.as_str() {
+                        "home" => internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template()),
+                        "extensions" => internal_pages::extensions_page_html(&extensions),
+                        "settings" => internal_pages::settings_page_html(selected_search_engine),
+                        _ => internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template()),
+                    };
+                    let cw = w_of(&gpu_renderer);
+                    let ch = h_of(&gpu_renderer);
+                    if webview.is_none() {
+                        let nav_clone = nav_url_shared.clone();
+                        webview = WebViewBuilder::new()
+                            .with_html(&html)
+                            .with_devtools(false)
+                            .with_bounds(Rect {
+                                position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
+                                size: wry::dpi::LogicalSize::new(
+                                    (cw - SIDEBAR_W) as u32,
+                                    (ch - CHROME_TOP) as u32,
+                                ).into(),
+                            })
+                            .with_navigation_handler(move |nav_url: String| {
+                                if nav_url.starts_with("axomai://") {
+                                    if let Ok(mut nav) = nav_clone.lock() {
+                                        *nav = Some(nav_url);
+                                    }
+                                    return false;
+                                }
+                                if let Ok(mut nav) = nav_clone.lock() {
+                                    *nav = Some(nav_url);
+                                }
+                                true
+                            })
+                            .build_as_child(&window)
+                            .ok();
+                        webview_visible = webview.is_some();
+                    } else if let Some(ref wv) = webview {
+                        let js = format!(
+                            "document.open();document.write({});document.close();",
+                            serde_json_mini(&html)
+                        );
+                        let _ = wv.evaluate_script(&js);
+                        if !webview_visible {
+                            let _ = wv.set_visible(true);
+                            webview_visible = true;
+                        }
+                    }
+                    needs_chrome_redraw = true;
+                }
+                if let Some(t) = ext_inject_time {
+                    if std::time::Instant::now() >= t {
+                        ext_inject_time = None;
                         if let Some(ref wv) = webview {
                             for ext in &extensions {
-                                if ext.enabled {
+                                if ext.enabled && ext.auto_inject {
                                     let _ = wv.evaluate_script(ext.inject_js);
                                 }
                             }
@@ -958,44 +1138,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut quads = build_chrome_quads(
                         &mut compositor, w, h, &address_bar_text, address_bar_focused,
                         &title, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
-                        menu_open, hover_menu_idx, &toolbar_icons,
+                        menu_open, hover_menu_idx, &toolbar_icons, &extensions,
                     );
 
-                    if is_home_page {
-                        let home_quads = build_home_page_quads(
-                            &mut compositor, content_w, content_h, home_scroll_y,
-                            home_search_focused, &home_search_text,
-                        );
-                        for mut q in home_quads {
-                            for v in &mut q.vertices {
-                                v.position[0] += SIDEBAR_W;
-                                v.position[1] += CHROME_TOP;
-                            }
-                            quads.push(q);
-                        }
-                    } else if is_extensions_page {
-                        let ext_quads = build_extensions_page_quads(
-                            &mut compositor, content_w, content_h, &extensions, hover_ext_idx,
-                        );
-                        for mut q in ext_quads {
-                            for v in &mut q.vertices {
-                                v.position[0] += SIDEBAR_W;
-                                v.position[1] += CHROME_TOP;
-                            }
-                            quads.push(q);
-                        }
-                    } else if is_settings_page {
-                        let settings_quads = build_settings_page_quads(
-                            &mut compositor, content_w, content_h,
-                            selected_search_engine, hover_engine_idx,
-                        );
-                        for mut q in settings_quads {
-                            for v in &mut q.vertices {
-                                v.position[0] += SIDEBAR_W;
-                                v.position[1] += CHROME_TOP;
-                            }
-                            quads.push(q);
-                        }
+                    if is_home_page || is_extensions_page || is_settings_page {
+                        // Internal pages rendered via WebView HTML — no GPU quads needed
                     } else {
                         if let Ok(eng) = engine.lock() {
                             let mut page_quads = compositor.extract_gpu_quads(&eng.display_list);
@@ -1074,6 +1221,7 @@ fn render_text(
     x
 }
 
+#[allow(dead_code)]
 fn render_text_centered(
     compositor: &mut NativeGpuCompositor,
     quads: &mut Vec<GpuQuad>,
@@ -1109,23 +1257,24 @@ fn build_chrome_quads(
     history_fwd: bool,
     sidebar_active: usize,
     hover_sidebar: Option<usize>,
-    menu_open: bool,
-    hover_menu: Option<usize>,
+    _menu_open: bool,
+    _hover_menu: Option<usize>,
     icons: &[GlyphInfo; 4], // [back, forward, home, menu]
+    extensions: &[Extension],
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
     // Chrome light theme colors
     let white = c(255, 255, 255, 255);
     let tab_bar_bg = c(222, 225, 230, 255);
-    let toolbar_bg = white;
-    let border = c(218, 220, 224, 255);
+    let _toolbar_bg = white;
+    let _border = c(218, 220, 224, 255);
     let text_primary = c(32, 33, 36, 255);
     let text_secondary = c(95, 99, 104, 255);
     let text_disabled = c(155, 160, 168, 255);
-    let blue = c(26, 115, 232, 255);
-    let hover_bg = c(232, 234, 237, 200);
-    let active_bg = c(210, 227, 252, 200);
+    let _blue = c(26, 115, 232, 255);
+    let _hover_bg = c(232, 234, 237, 200);
+    let _active_bg = c(210, 227, 252, 200);
 
     // === SIDEBAR (Glassmorphism gradient) ===
     // Gradient background: deep blue-purple to teal
@@ -1232,7 +1381,8 @@ fn build_chrome_quads(
     let ax = SIDEBAR_W + 60.0;
     let ay = ty + 7.0;
     let ah = TOOLBAR_H - 14.0;
-    let right_icons_w = 120.0;
+    let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
+    let right_icons_w = 120.0 + n_enabled_ext * 30.0;
     let aw = viewport_w - ax - right_icons_w - 10.0;
     let bar_radius = ah / 2.0;
 
@@ -1255,7 +1405,8 @@ fn build_chrome_quads(
     let url_icon_y = ay + (ah - url_icon_s) / 2.0;
     quads.push(NativeGpuCompositor::icon_quad(ax + 10.0, url_icon_y, url_icon_s, &icons[2], c(130, 135, 150, 255)));
 
-    let is_placeholder = (address_text == "about:home" || address_text == "about:settings" || address_text == "about:extensions") && !focused;
+    let is_placeholder = address_text == "about:home" && !focused;
+    let _is_internal = address_text == "axomai://extensions" || address_text == "about:settings";
     let display = if is_placeholder { "Search or type a URL" } else { address_text };
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
     let end_x = render_text(compositor, &mut quads, display, ax + 34.0, icon_y, 13.0, dtc, ax + aw - 14.0);
@@ -1265,7 +1416,11 @@ fn build_chrome_quads(
     }
 
     // Right toolbar icons (modern, compact)
-    let icons_start = viewport_w - right_icons_w;
+    // Count enabled extensions to allocate space
+    let enabled_exts: Vec<(usize, &Extension)> = extensions.iter().enumerate().filter(|(_, e)| e.enabled).collect();
+    let ext_icons_w = enabled_exts.len() as f32 * 30.0;
+    let right_total = 80.0 + ext_icons_w; // profile + extensions + menu
+    let icons_start = viewport_w - right_total;
     let iy = ty + 10.0;
     let ih = TOOLBAR_H - 20.0;
     let icy = iy + ih / 2.0 + 4.0;
@@ -1275,8 +1430,17 @@ fn build_chrome_quads(
     quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(99, 132, 255, 180)));
     render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
 
+    // Enabled extension icons in toolbar (Chrome-style)
+    let mut ext_x = prof_x + ih + 8.0;
+    for (_idx, ext) in &enabled_exts {
+        let ec = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 220);
+        quads.push(rq(ext_x, iy + 1.0, ih, ih, ih / 2.0, ec));
+        render_text(compositor, &mut quads, ext.icon_letter, ext_x + 5.0, icy, 11.0, white, ext_x + ih);
+        ext_x += 30.0;
+    }
+
     // Three-dot menu button (icon)
-    let menu_x = icons_start + 46.0;
+    let menu_x = ext_x + 4.0;
     let menu_icon_s = 18.0;
     let menu_icon_y = ty + (TOOLBAR_H - menu_icon_s) / 2.0;
     quads.push(NativeGpuCompositor::icon_quad(menu_x, menu_icon_y, menu_icon_s, &icons[3], c(80, 85, 100, 255)));
@@ -1326,6 +1490,7 @@ fn build_dropdown_quads(
 
 // ===== SETTINGS PAGE =====
 
+#[allow(dead_code)]
 fn build_settings_page_quads(
     compositor: &mut NativeGpuCompositor,
     content_w: f32,
@@ -1333,7 +1498,6 @@ fn build_settings_page_quads(
     selected: SearchEngine,
     hover_idx: Option<usize>,
 ) -> Vec<GpuQuad> {
-    use axomai_engine::GpuQuad;
     let mut quads = Vec::new();
 
     let white = c(255, 255, 255, 255);
@@ -1418,6 +1582,7 @@ fn build_settings_page_quads(
 
 // ===== EXTENSIONS PAGE =====
 
+#[allow(dead_code)]
 fn build_extensions_page_quads(
     compositor: &mut NativeGpuCompositor,
     content_w: f32,
@@ -1428,97 +1593,138 @@ fn build_extensions_page_quads(
     let mut quads = Vec::new();
 
     let white = c(255, 255, 255, 255);
-    let page_bg = c(246, 247, 248, 255);
+    let page_bg = c(241, 243, 244, 255);
     let text_dark = c(32, 33, 36, 255);
     let text_secondary = c(95, 99, 104, 255);
-    let border = c(218, 220, 224, 255);
-    let hover_bg = c(241, 243, 244, 255);
+    let text_hint = c(154, 160, 166, 255);
+    let blue = c(26, 115, 232, 255);
     let green = c(34, 168, 83, 255);
-    let green_light = c(34, 168, 83, 60);
-    let gray_track = c(180, 185, 195, 255);
+    let gray_track = c(189, 193, 198, 255);
+    let card_border = c(218, 220, 224, 255);
 
-    // Background
+    // Full page background
     quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, page_bg));
 
-    // Header
-    render_text(compositor, &mut quads, "Extensions", 40.0, 40.0, 24.0, text_dark, content_w);
-    render_text(compositor, &mut quads, "Manage your browser extensions", 40.0, 58.0, 12.0, text_secondary, content_w);
-    quads.push(NativeGpuCompositor::solid_quad(40.0, 65.0, content_w - 80.0, 1.0, border));
+    // Top header bar (white)
+    let header_h = 64.0;
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, header_h, white));
+    quads.push(NativeGpuCompositor::solid_quad(0.0, header_h - 1.0, content_w, 1.0, card_border));
 
-    let card_x = 40.0;
-    let card_w = (content_w - 80.0).min(600.0);
-    let card_h = 88.0;
-    let start_y = 70.0;
+    // Axomai puzzle icon
+    let icon_s = 28.0;
+    quads.push(rq(24.0, (header_h - icon_s) / 2.0, icon_s, icon_s, 6.0, blue));
+    render_text(compositor, &mut quads, "E", 31.0, header_h / 2.0 + 6.0, 16.0, white, 60.0);
 
-    for (i, ext) in extensions.iter().enumerate() {
-        let ey = start_y + i as f32 * (card_h + 12.0);
-        let is_hovered = hover_idx == Some(i);
+    // Title
+    render_text(compositor, &mut quads, "Extensions", 64.0, header_h / 2.0 + 7.0, 20.0, text_dark, content_w);
 
-        // Card background
-        let bg = if is_hovered { hover_bg } else { white };
-        quads.push(rq(card_x, ey, card_w, card_h, 12.0, bg));
-        // Card border
-        quads.push(rq(card_x, ey, card_w, 1.0, 0.0, c(218, 220, 224, 80)));
-        quads.push(rq(card_x, ey + card_h - 1.0, card_w, 1.0, 0.0, c(218, 220, 224, 80)));
-
-        // Extension icon circle
-        let icon_x = card_x + 20.0;
-        let icon_y = ey + card_h / 2.0;
-        let icon_r = 20.0;
-        let ic = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 255);
-        quads.push(rq(icon_x - icon_r, icon_y - icon_r, icon_r * 2.0, icon_r * 2.0, icon_r, ic));
-        render_text(compositor, &mut quads, ext.icon_letter, icon_x - 5.0, icon_y + 6.0, 16.0, white, icon_x + icon_r);
-
-        // Extension name
-        let name_x = card_x + 68.0;
-        render_text(compositor, &mut quads, ext.name, name_x, ey + 28.0, 15.0, text_dark, card_x + card_w - 120.0);
-
-        // Description
-        render_text(compositor, &mut quads, ext.description, name_x, ey + 48.0, 11.0, text_secondary, card_x + card_w - 120.0);
-
-        // Version
-        let ver_label = format!("v{}", ext.version);
-        render_text(compositor, &mut quads, &ver_label, name_x, ey + 66.0, 10.0, c(160, 165, 175, 255), card_x + card_w - 120.0);
-
-        // Toggle switch
-        let toggle_x = card_x + card_w - 70.0;
-        let toggle_y = ey + card_h / 2.0 - 12.0;
-        let track_w = 44.0;
-        let track_h = 24.0;
-        let thumb_r = 10.0;
-
-        if ext.enabled {
-            // Green track
-            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, green));
-            // White thumb (right)
-            quads.push(rq(toggle_x + track_w - track_h + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
-            // Status text
-            render_text(compositor, &mut quads, "ON", toggle_x + 6.0, toggle_y + 16.0, 9.0, white, toggle_x + 30.0);
-        } else {
-            // Gray track
-            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, gray_track));
-            // White thumb (left)
-            quads.push(rq(toggle_x + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
-            // Status text
-            render_text(compositor, &mut quads, "OFF", toggle_x + 22.0, toggle_y + 16.0, 9.0, white, toggle_x + track_w);
-        }
+    // Search bar (right side of header)
+    let search_w = 260.0f32.min(content_w - 300.0);
+    if search_w > 100.0 {
+        let sx = content_w - search_w - 24.0;
+        let sy = (header_h - 36.0) / 2.0;
+        quads.push(rq(sx, sy, search_w, 36.0, 18.0, c(241, 243, 244, 255)));
+        render_text(compositor, &mut quads, "Search extensions", sx + 16.0, sy + 23.0, 13.0, text_hint, sx + search_w - 8.0);
     }
 
-    // Info text at bottom
-    let info_y = start_y + extensions.len() as f32 * (card_h + 12.0) + 10.0;
-    render_text(compositor, &mut quads, "Click on an extension card to enable or disable it.", 40.0, info_y + 14.0, 11.0, text_secondary, content_w);
-    render_text(compositor, &mut quads, "Enabled extensions will be injected into web pages automatically.", 40.0, info_y + 30.0, 11.0, text_secondary, content_w);
+    // "All Extensions" section header
+    let section_y = header_h + 24.0;
+    render_text(compositor, &mut quads, "All Extensions", 32.0, section_y + 16.0, 14.0, text_dark, content_w);
+
+    // Grid layout: 2 columns for cards (like Chrome)
+    let grid_start_y = section_y + 36.0;
+    let padding = 24.0;
+    let gap = 16.0;
+    let cols = if content_w > 600.0 { 2 } else { 1 };
+    let card_w = if cols == 2 { (content_w - padding * 2.0 - gap) / 2.0 } else { content_w - padding * 2.0 };
+    let card_h = 160.0;
+
+    for (i, ext) in extensions.iter().enumerate() {
+        let col = (i % cols) as f32;
+        let row = (i / cols) as f32;
+        let cx = padding + col * (card_w + gap);
+        let cy = grid_start_y + row * (card_h + gap);
+        let is_hovered = hover_idx == Some(i);
+
+        // Card shadow
+        if is_hovered {
+            quads.push(rq(cx + 1.0, cy + 3.0, card_w - 2.0, card_h, 12.0, c(0, 0, 0, 20)));
+        }
+
+        // Card background
+        quads.push(rq(cx, cy, card_w, card_h, 12.0, white));
+        // Card border
+        quads.push(rq(cx, cy, card_w, 1.0, 0.0, c(218, 220, 224, 60)));
+        quads.push(rq(cx, cy + card_h - 1.0, card_w, 1.0, 0.0, c(218, 220, 224, 60)));
+        quads.push(rq(cx, cy, 1.0, card_h, 0.0, c(218, 220, 224, 40)));
+        quads.push(rq(cx + card_w - 1.0, cy, 1.0, card_h, 0.0, c(218, 220, 224, 40)));
+
+        // Extension icon (large colored circle)
+        let icon_size = 44.0;
+        let icon_x = cx + 20.0;
+        let icon_y = cy + 20.0;
+        let ic = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 255);
+        quads.push(rq(icon_x, icon_y, icon_size, icon_size, icon_size / 2.0, ic));
+        render_text(compositor, &mut quads, ext.icon_letter, icon_x + 13.0, icon_y + 30.0, 20.0, white, icon_x + icon_size);
+
+        // Extension name + version
+        let name_x = icon_x + icon_size + 14.0;
+        let name_end = cx + card_w - 80.0;
+        render_text(compositor, &mut quads, ext.name, name_x, icon_y + 18.0, 15.0, text_dark, name_end);
+        let ver_label = format!("  {}", ext.version);
+        let name_w = ext.name.len() as f32 * 8.5;
+        render_text(compositor, &mut quads, &ver_label, name_x + name_w, icon_y + 18.0, 11.0, text_hint, name_end + 60.0);
+
+        // Description
+        render_text(compositor, &mut quads, ext.description, name_x, icon_y + 38.0, 11.0, text_secondary, cx + card_w - 20.0);
+
+        // Toggle switch (top-right corner of card)
+        let toggle_x = cx + card_w - 64.0;
+        let toggle_y = cy + 24.0;
+        let track_w = 44.0;
+        let track_h = 22.0;
+        let thumb_r = 9.0;
+
+        if ext.enabled {
+            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, blue));
+            quads.push(rq(toggle_x + track_w - track_h + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
+        } else {
+            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, gray_track));
+            quads.push(rq(toggle_x + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
+        }
+
+        // Bottom section: divider + details/remove buttons
+        let bottom_y = cy + card_h - 44.0;
+        quads.push(NativeGpuCompositor::solid_quad(cx + 16.0, bottom_y, card_w - 32.0, 1.0, c(218, 220, 224, 120)));
+
+        // Details button
+        let btn_y = bottom_y + 10.0;
+        let details_x = cx + 20.0;
+        quads.push(rq(details_x, btn_y, 68.0, 26.0, 13.0, c(232, 240, 254, 255)));
+        render_text(compositor, &mut quads, "Details", details_x + 10.0, btn_y + 17.0, 11.0, blue, details_x + 66.0);
+
+        // Remove button
+        let remove_x = details_x + 78.0;
+        quads.push(rq(remove_x, btn_y, 72.0, 26.0, 13.0, c(232, 240, 254, 255)));
+        render_text(compositor, &mut quads, "Remove", remove_x + 10.0, btn_y + 17.0, 11.0, blue, remove_x + 70.0);
+
+        // Status indicator
+        let status_text = if ext.enabled { "Active" } else { "Inactive" };
+        let status_c = if ext.enabled { green } else { text_hint };
+        render_text(compositor, &mut quads, status_text, cx + card_w - 70.0, btn_y + 17.0, 10.0, status_c, cx + card_w);
+    }
 
     quads
 }
 
 // ===== HOME PAGE (drawn entirely via GPU quads — no HTML engine) =====
 
+#[allow(dead_code)]
 fn build_home_page_quads(
     compositor: &mut NativeGpuCompositor,
     content_w: f32,
     content_h: f32,
-    scroll_y: f32,
+    _scroll_y: f32,
     search_focused: bool,
     search_text: &str,
 ) -> Vec<GpuQuad> {

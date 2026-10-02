@@ -19,6 +19,9 @@ Thumbs.db
 native/rust_engine/target/
 target/
 
+# Debug logs
+*.log
+
 # C++ binaries and build artifacts
 *.exe
 *.dll

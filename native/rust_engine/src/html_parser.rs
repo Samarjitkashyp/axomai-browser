@@ -160,6 +160,7 @@ pub enum HTMLToken {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum TokenizerState {
     Data,
     TagOpen,
@@ -471,7 +472,6 @@ impl HTMLTokenizer {
 
                 TokenizerState::SelfClosingStartTag => {
                     if c == '>' {
-                        is_self_closing = true;
                         self.pos += 1;
                         self.state = TokenizerState::Data;
                         return HTMLToken::StartTag {
@@ -576,6 +576,7 @@ impl HTMLTokenizer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum InsertionMode {
     Initial,
     BeforeHtml,
@@ -838,7 +839,7 @@ impl<'a> HTMLParser<'a> {
         self.open_elements.last().map(Rc::clone).or_else(|| self.root.as_ref().map(Rc::clone))
     }
 
-    fn finish(mut self) -> NodePtr {
+    fn finish(self) -> NodePtr {
         if let Some(root) = self.root {
             // Ensure <body> exists
             if find_body(&root).is_none() {

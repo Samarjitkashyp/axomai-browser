@@ -1323,6 +1323,7 @@ pub enum ScriptEntry {
     External { src: String, kind: ScriptKind },
 }
 
+#[allow(dead_code)]
 fn extract_script_tags(node: &NodePtr, script_list: &mut Vec<ScriptEntry>) {
     let b = node.borrow();
     if let NodeType::Element {
@@ -1540,7 +1541,7 @@ impl CdpInspector {
             }
             "Runtime.evaluate" => {
                 let script = params.trim().trim_matches('"');
-                engine.js_engine.execute(script);
+                let _ = engine.js_engine.execute(script);
                 format!(r#"{{"id":{},"result":{{"result":{{"type":"string","value":"evaluated"}}}}}}"#, id)
             }
             "Network.getResponseBody" => {
