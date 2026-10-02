@@ -178,21 +178,13 @@ body {
   cursor: pointer;
 }
 
-.brand-flame-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: flamePulse 3s infinite ease-in-out;
-}
-
-@keyframes flamePulse {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.4)); }
-  50% { transform: scale(1.08); filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.8)); }
-}
-
-.flame-icon-small {
-  width: 22px;
-  height: 22px;
+.brand-logo-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  display: block;
 }
 
 .brand-name {
@@ -1408,23 +1400,24 @@ body {
   margin-top: 20px;
 }
 
-.hero-flame-circle {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(10px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
-  margin-bottom: 12px;
-  border: 1.5px solid rgba(255, 255, 255, 0.4);
+.hero-logo-wrapper {
+  margin-bottom: 14px;
 }
 
-.hero-flame-svg {
-  width: 44px;
-  height: 44px;
+.hero-brand-logo-img {
+  width: 92px;
+  height: 92px;
+  border-radius: 22px;
+  object-fit: cover;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: block;
+}
+
+.hero-brand-logo-img:hover {
+  transform: scale(1.06) translateY(-2px);
+  box-shadow: 0 20px 48px rgba(16, 185, 129, 0.4);
 }
 
 .hero-title {

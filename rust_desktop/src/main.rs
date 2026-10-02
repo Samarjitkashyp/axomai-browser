@@ -373,11 +373,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Arc::new(Mutex::new(AxomaiEngine::new()));
     let event_loop = EventLoop::new();
 
-    let window = WindowBuilder::new()
+    let icon_data = {
+        let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons").join("axomai_logo.png");
+        if icon_path.exists() {
+            if let Ok(img) = image::open(&icon_path) {
+                let rgba = img.to_rgba8();
+                let (w, h) = (rgba.width(), rgba.height());
+                tao::window::Icon::from_rgba(rgba.into_raw(), w, h).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let mut wb = WindowBuilder::new()
         .with_title("Axomai Browser")
         .with_inner_size(LogicalSize::new(1200.0, 700.0))
-        .with_min_inner_size(LogicalSize::new(800.0, 500.0))
-        .build(&event_loop)?;
+        .with_min_inner_size(LogicalSize::new(800.0, 500.0));
+    if let Some(icon) = icon_data {
+        wb = wb.with_window_icon(Some(icon));
+    }
+    let window = wb.build(&event_loop)?;
 
     let size: PhysicalSize<u32> = window.inner_size();
 

@@ -41,13 +41,13 @@ body{
   margin-bottom:8px;letter-spacing:0.5px;
 }
 .logo{
-  width:68px;height:68px;
-  background:linear-gradient(135deg,#10b981,#059669,#0284c7);
-  border-radius:20px;display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:32px;font-weight:800;
+  width:84px;height:84px;
+  border-radius:20px;
   margin-bottom:16px;
-  box-shadow:0 8px 32px rgba(16,185,129,0.45);
-  border:1.5px solid rgba(255,255,255,0.4);
+  box-shadow:0 12px 36px rgba(0,0,0,0.5);
+  border:2px solid rgba(255,255,255,0.4);
+  object-fit:cover;
+  display:block;
 }
 h1{
   font-size:26px;font-weight:800;margin-bottom:6px;
@@ -112,9 +112,9 @@ h1{
 </head>
 <body>
 <div class="greeting">নমস্কাৰ • অসম</div>
-<div class="logo">A</div>
+<img src="assets/icons/axomai_logo.png" class="logo" alt="Axomai Logo">
 <h1>Axomai Browser</h1>
-<p class="tagline">Lush. Fast. Indic-Enabled. Built with Rust & HarfBuzz.</p>
+<p class="tagline">Smart. Assamese. AI For All. Built with Rust & HarfBuzz.</p>
 <div class="search-box">
   <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
   <input type="text" id="searchInput" placeholder="Search the web with Axomai or enter URL..." autofocus>
