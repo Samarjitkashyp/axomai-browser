@@ -935,6 +935,24 @@ impl NativeGpuCompositor {
         }
     }
 
+    pub fn icon_quad(x: f32, y: f32, size: f32, glyph: &crate::glyph_atlas::GlyphInfo, color: [f32; 4]) -> GpuQuad {
+        GpuQuad {
+            vertices: [
+                GpuVertex { position: [x, y], uv: [glyph.u0, glyph.v0], color },
+                GpuVertex { position: [x + size, y], uv: [glyph.u1, glyph.v0], color },
+                GpuVertex { position: [x + size, y + size], uv: [glyph.u1, glyph.v1], color },
+                GpuVertex { position: [x, y + size], uv: [glyph.u0, glyph.v1], color },
+            ],
+            indices: [0, 1, 2, 0, 2, 3],
+            clip_rect: None,
+            opacity: 1.0,
+            is_textured: true,
+            texture_mode: 1,
+            rect_bounds: None,
+            corner_radius: 0.0,
+        }
+    }
+
     fn push_border_quads(&mut self, x: f32, y: f32, w: f32, h: f32, bw: f32, color: [f32; 4]) {
         self.quads.push(Self::solid_quad(x, y, w, bw, color));
         self.quads.push(Self::solid_quad(x, y + h - bw, w, bw, color));

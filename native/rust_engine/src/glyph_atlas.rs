@@ -112,4 +112,72 @@ impl GlyphAtlas {
         self.dirty = true;
         info
     }
+
+    /// Blit an RGBA icon into the atlas, converting to grayscale alpha.
+    /// Returns a GlyphInfo with UV coordinates for the icon.
+    pub fn blit_icon(&mut self, name: &str, rgba: &[u8], width: u32, height: u32, target_size: u32) -> GlyphInfo {
+        let key_char = match name {
+            "back" => '\u{E000}',
+            "forward" => '\u{E001}',
+            "home" => '\u{E002}',
+            "menu" => '\u{E003}',
+            _ => '\u{E010}',
+        };
+        let key = (key_char, target_size);
+        if let Some(info) = self.cache.get(&key) {
+            return *info;
+        }
+
+        let ts = target_size;
+        if self.cursor_x + ts + 1 > self.size {
+            self.cursor_x = 1;
+            self.cursor_y += self.row_height + 1;
+            self.row_height = 0;
+        }
+
+        let ox = self.cursor_x;
+        let oy = self.cursor_y;
+
+        for row in 0..ts {
+            for col in 0..ts {
+                let src_x = (col as f32 / ts as f32 * width as f32) as u32;
+                let src_y = (row as f32 / ts as f32 * height as f32) as u32;
+                let src_idx = ((src_y * width + src_x) * 4) as usize;
+                if src_idx + 3 < rgba.len() {
+                    let r = rgba[src_idx] as f32;
+                    let g = rgba[src_idx + 1] as f32;
+                    let b = rgba[src_idx + 2] as f32;
+                    let a = rgba[src_idx + 3] as f32 / 255.0;
+                    // Invert: dark pixels → high alpha, white → transparent
+                    let luminance = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+                    let coverage = (1.0 - luminance) * a;
+                    let dst = ((oy + row) * self.size + ox + col) as usize;
+                    if dst < self.pixels.len() {
+                        self.pixels[dst] = (coverage * 255.0) as u8;
+                    }
+                }
+            }
+        }
+
+        let info = GlyphInfo {
+            u0: ox as f32 / self.size as f32,
+            v0: oy as f32 / self.size as f32,
+            u1: (ox + ts) as f32 / self.size as f32,
+            v1: (oy + ts) as f32 / self.size as f32,
+            width: ts as f32,
+            height: ts as f32,
+            advance_width: ts as f32,
+            offset_x: 0.0,
+            offset_y: 0.0,
+        };
+
+        self.cursor_x += ts + 1;
+        if ts > self.row_height {
+            self.row_height = ts;
+        }
+
+        self.cache.insert(key, info);
+        self.dirty = true;
+        info
+    }
 }

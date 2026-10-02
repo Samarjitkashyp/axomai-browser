@@ -1,6 +1,7 @@
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
 use axomai_engine::WgpuRenderer;
+use axomai_engine::glyph_atlas::GlyphInfo;
 use std::sync::{Arc, Mutex};
 use tao::{
     dpi::{LogicalSize, PhysicalSize},
@@ -156,6 +157,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mouse_x: f32 = 0.0;
     let mut mouse_y: f32 = 0.0;
     let mut compositor = NativeGpuCompositor::new(size.width, size.height);
+
+    // Load toolbar icons into glyph atlas
+    let icon_size: u32 = 20;
+    let icons_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons");
+    let icon_back = {
+        let img = image::open(icons_dir.join("arrow_back.png")).expect("icon").to_rgba8();
+        compositor.glyph_atlas.blit_icon("back", img.as_raw(), img.width(), img.height(), icon_size)
+    };
+    let icon_forward = {
+        let img = image::open(icons_dir.join("arrow_forward.png")).expect("icon").to_rgba8();
+        compositor.glyph_atlas.blit_icon("forward", img.as_raw(), img.width(), img.height(), icon_size)
+    };
+    let icon_home = {
+        let img = image::open(icons_dir.join("home.png")).expect("icon").to_rgba8();
+        compositor.glyph_atlas.blit_icon("home", img.as_raw(), img.width(), img.height(), icon_size)
+    };
+    let icon_menu = {
+        let img = image::open(icons_dir.join("menu_dots.png")).expect("icon").to_rgba8();
+        compositor.glyph_atlas.blit_icon("menu", img.as_raw(), img.width(), img.height(), icon_size)
+    };
+    println!("[Axomai] Toolbar icons loaded ({}px)", icon_size);
 
     let mut address_bar_text = String::from("about:home");
     let mut address_bar_focused = false;
@@ -384,7 +406,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
                         // 3-dot menu button
-                        let menu_btn_x = w - 120.0 + 46.0 + 4.0;
+                        let menu_btn_x = w - 120.0 + 46.0;
 
                         if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 20.0
                             && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
@@ -411,8 +433,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 SetFocus(window.hwnd() as _);
                             }
                         } else if mouse_y >= TAB_BAR_H {
-                            let nav_base_x = SIDEBAR_W + 12.0;
-                            if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 24.0 {
+                            let nav_base_x = SIDEBAR_W + 10.0;
+                            if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 22.0 {
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index > 0 {
                                         eng.history_index -= 1;
@@ -425,7 +447,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         needs_chrome_redraw = true;
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 26.0 && mouse_x <= nav_base_x + 50.0 {
+                            } else if mouse_x >= nav_base_x + 28.0 && mouse_x <= nav_base_x + 50.0 {
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index + 1 < eng.history.len() {
                                         eng.history_index += 1;
@@ -802,10 +824,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let history_back = if let Ok(eng) = engine.lock() { eng.history_index > 0 } else { false };
                     let history_fwd = if let Ok(eng) = engine.lock() { eng.history_index + 1 < eng.history.len() } else { false };
 
+                    let toolbar_icons = [icon_back, icon_forward, icon_home, icon_menu];
                     let mut quads = build_chrome_quads(
                         &mut compositor, w, h, &address_bar_text, address_bar_focused,
                         &title, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
-                        menu_open, hover_menu_idx,
+                        menu_open, hover_menu_idx, &toolbar_icons,
                     );
 
                     if is_home_page {
@@ -947,6 +970,7 @@ fn build_chrome_quads(
     hover_sidebar: Option<usize>,
     menu_open: bool,
     hover_menu: Option<usize>,
+    icons: &[GlyphInfo; 4], // [back, forward, home, menu]
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
@@ -1054,13 +1078,14 @@ fn build_chrome_quads(
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(99, 132, 255, 50)));
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(168, 120, 255, 40)));
 
-    // Navigation buttons (compact, modern)
-    let nav_cy = ty + TOOLBAR_H / 2.0 + 5.0;
-    let nb = SIDEBAR_W + 12.0;
-    let back_c = if history_back { c(60, 65, 75, 255) } else { c(180, 185, 195, 255) };
-    let fwd_c = if history_fwd { c(60, 65, 75, 255) } else { c(180, 185, 195, 255) };
-    render_text(compositor, &mut quads, "<", nb + 4.0, nav_cy, 15.0, back_c, nb + 22.0);
-    render_text(compositor, &mut quads, ">", nb + 30.0, nav_cy, 15.0, fwd_c, nb + 48.0);
+    // Navigation buttons (icon-based)
+    let icon_s = 18.0;
+    let nav_iy = ty + (TOOLBAR_H - icon_s) / 2.0;
+    let nb = SIDEBAR_W + 10.0;
+    let back_c = if history_back { c(60, 65, 75, 255) } else { c(180, 185, 195, 180) };
+    let fwd_c = if history_fwd { c(60, 65, 75, 255) } else { c(180, 185, 195, 180) };
+    quads.push(NativeGpuCompositor::icon_quad(nb, nav_iy, icon_s, &icons[0], back_c));
+    quads.push(NativeGpuCompositor::icon_quad(nb + 28.0, nav_iy, icon_s, &icons[1], fwd_c));
 
     // Full-width address bar (modern glassmorphism pill)
     let ax = SIDEBAR_W + 60.0;
@@ -1083,9 +1108,11 @@ fn build_chrome_quads(
         quads.push(NativeGpuCompositor::solid_quad(ax + 8.0, ay + 1.0, aw - 16.0, 1.0, c(255, 255, 255, 100)));
     }
 
-    // Search/lock icon
+    // Search/lock icon (home icon in URL bar)
     let icon_y = ay + ah / 2.0 + 5.0;
-    render_text(compositor, &mut quads, "O", ax + 14.0, icon_y, 13.0, c(130, 135, 150, 255), ax + 30.0);
+    let url_icon_s = 14.0;
+    let url_icon_y = ay + (ah - url_icon_s) / 2.0;
+    quads.push(NativeGpuCompositor::icon_quad(ax + 10.0, url_icon_y, url_icon_s, &icons[2], c(130, 135, 150, 255)));
 
     let is_placeholder = (address_text == "about:home" || address_text == "about:settings") && !focused;
     let display = if is_placeholder { "Search or type a URL" } else { address_text };
@@ -1107,9 +1134,11 @@ fn build_chrome_quads(
     quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(99, 132, 255, 180)));
     render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
 
-    // Three-dot menu button
+    // Three-dot menu button (icon)
     let menu_x = icons_start + 46.0;
-    render_text(compositor, &mut quads, ":", menu_x + 4.0, icy - 1.0, 18.0, c(80, 85, 100, 255), viewport_w);
+    let menu_icon_s = 18.0;
+    let menu_icon_y = ty + (TOOLBAR_H - menu_icon_s) / 2.0;
+    quads.push(NativeGpuCompositor::icon_quad(menu_x, menu_icon_y, menu_icon_s, &icons[3], c(80, 85, 100, 255)));
 
     quads
 }
