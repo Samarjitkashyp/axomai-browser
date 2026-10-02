@@ -1498,8 +1498,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if is_settings_page {
                                 load_internal_page = Some("settings".to_string());
                             }
-                        } else if url.starts_with("data:") {
-                            // Internal page data URL — don't update address bar
+                        } else if url.contains("axomai_home.html") || url == "about:home" || url == "axomai://home" || url == "axomai://newtab" {
+                            address_bar_text = String::from("about:home");
+                            is_home_page = true;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            needs_chrome_redraw = true;
+                        } else if url.contains("axomai_extensions.html") || url == "axomai://extensions" {
+                            address_bar_text = String::from("axomai://extensions");
+                            is_extensions_page = true;
+                            is_home_page = false;
+                            is_settings_page = false;
+                            needs_chrome_redraw = true;
+                        } else if url.contains("axomai_settings.html") || url == "axomai://settings" || url == "about:settings" || url == "axomai://themes" {
+                            address_bar_text = String::from("about:settings");
+                            is_settings_page = true;
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("data:") || (url.starts_with("file:") && url.contains("axomai_")) {
+                            // Internal page temp file/data URL — don't update address bar
                         } else {
                             address_bar_text = url;
                             is_home_page = false;
@@ -1918,9 +1936,9 @@ fn build_chrome_quads(
     let url_icon_y = ay + (ah - url_icon_s) / 2.0;
     quads.push(NativeGpuCompositor::icon_quad(ax + 10.0, url_icon_y, url_icon_s, &icons[2], c(130, 135, 150, 255)));
 
-    let is_placeholder = address_text == "about:home" && !focused;
-    let _is_internal = address_text == "axomai://extensions" || address_text == "about:settings";
-    let display = if is_placeholder { "Search or type a URL" } else { address_text };
+    let is_home = address_text == "about:home" || address_text == "axomai://home" || address_text == "axomai://newtab" || address_text.contains("axomai_home.html") || address_text.is_empty();
+    let is_placeholder = is_home && !focused;
+    let display = if is_placeholder { "Search with Google or type a URL" } else if is_home && focused && address_text == "about:home" { "" } else { address_text };
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
     let end_x = render_text(compositor, &mut quads, display, ax + 34.0, icon_y, 13.0, dtc, ax + aw - 14.0);
 
