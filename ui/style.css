@@ -572,6 +572,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  position: relative;
 }
 
 .shield-pill-btn {
@@ -675,8 +676,8 @@ body {
 /* Google Chrome-Style Extensions Popover */
 .chrome-ext-popover {
   position: absolute;
-  top: 48px;
-  right: 170px;
+  top: 44px;
+  right: 60px;
   width: 320px;
   background: var(--bg-glass-strong);
   backdrop-filter: blur(24px);
@@ -687,7 +688,7 @@ body {
   padding: 8px 6px;
   display: none;
   flex-direction: column;
-  z-index: 1000;
+  z-index: 999999;
   animation: menuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -895,8 +896,8 @@ body {
 
 .chrome-menu-dropdown {
   position: absolute;
-  top: 48px;
-  right: 12px;
+  top: 44px;
+  right: 0px;
   width: 290px;
   background: var(--bg-glass-strong);
   backdrop-filter: blur(24px);
@@ -908,7 +909,7 @@ body {
   display: none;
   flex-direction: column;
   gap: 2px;
-  z-index: 1000;
+  z-index: 999999;
   animation: menuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
