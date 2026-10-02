@@ -10,12 +10,12 @@ use tao::{
     event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     keyboard::Key,
-    window::WindowBuilder,
+    window::{CursorIcon, WindowBuilder},
 };
 use tao::platform::windows::WindowExtWindows;
 use wry::{Rect, WebViewBuilder};
 
-const SIDEBAR_W: f32 = 180.0;
+const SIDEBAR_W: f32 = 0.0;
 const TAB_BAR_H: f32 = 40.0;
 const TOOLBAR_H: f32 = 44.0;
 const CHROME_TOP: f32 = TAB_BAR_H + TOOLBAR_H;
@@ -99,6 +99,15 @@ struct Extension {
     auto_inject: bool,
     inject_js: &'static str,
     disable_js: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct DesktopTab {
+    title: String,
+    url: String,
+    is_home: bool,
+    is_extensions: bool,
+    is_settings: bool,
 }
 
 fn serde_json_mini(s: &str) -> String {
@@ -322,6 +331,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hover_ext_idx: Option<usize> = None;
     let mut ext_inject_time: Option<std::time::Instant> = None;
 
+    let mut tabs: Vec<DesktopTab> = vec![
+        DesktopTab {
+            title: String::from("Axomai Browser"),
+            url: String::from("about:home"),
+            is_home: true,
+            is_extensions: false,
+            is_settings: false,
+        }
+    ];
+    let mut active_tab_idx: usize = 0;
+
     let scale_factor = window.scale_factor() as f32;
 
     let nav_url_shared: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -443,13 +463,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if menu_open {
                     let old_menu_hover = hover_menu_idx;
                     hover_menu_idx = None;
-                    let dm_w = 240.0;
-                    let dm_x = gpu_renderer.surface_config.width as f32 - dm_w - 20.0;
+                    let dm_w = 250.0;
+                    let dm_x = gpu_renderer.surface_config.width as f32 - dm_w - 16.0;
                     let dm_y = CHROME_TOP + 4.0;
-                    for i in 0..8 {
-                        let iy = dm_y + 8.0 + i as f32 * 38.0;
+                    for i in 0..11 {
+                        let iy = dm_y + 8.0 + i as f32 * 36.0;
                         if mouse_x >= dm_x && mouse_x <= dm_x + dm_w
-                            && mouse_y >= iy && mouse_y <= iy + 36.0
+                            && mouse_y >= iy && mouse_y <= iy + 34.0
                         {
                             hover_menu_idx = Some(i);
                             break;
@@ -464,6 +484,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = eng.handle_pointer_move(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP);
                     }
                 }
+
+                // Chrome-style cursor pointer effect (Hand tool / Text / Default)
+                let mut cursor_icon = CursorIcon::Default;
+                let w = gpu_renderer.surface_config.width as f32;
+
+                if mouse_x < SIDEBAR_W {
+                    if hover_sidebar_idx.is_some() || mouse_y > 450.0 {
+                        cursor_icon = CursorIcon::Hand;
+                    }
+                } else if mouse_y <= TAB_BAR_H {
+                    // Over tab bar
+                    let available_w = w - SIDEBAR_W - 80.0;
+                    let tab_count = tabs.len().max(1);
+                    let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
+                    let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 4.0;
+                    let tab_bar_end = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0);
+                    if mouse_x >= SIDEBAR_W + 8.0 && mouse_x <= tab_bar_end {
+                        cursor_icon = CursorIcon::Hand;
+                    } else if mouse_x >= plus_x - 4.0 && mouse_x <= plus_x + 36.0 {
+                        cursor_icon = CursorIcon::Hand;
+                    }
+                } else if mouse_y <= CHROME_TOP {
+                    // Over toolbar
+                    let nb = SIDEBAR_W + 10.0;
+                    let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
+                    let right_icons_w = 120.0 + n_enabled_ext * 30.0;
+                    let ax = SIDEBAR_W + 60.0;
+                    let aw = w - ax - right_icons_w - 10.0;
+
+                    if mouse_x >= nb && mouse_x <= nb + 56.0 {
+                        // Back / Forward buttons
+                        cursor_icon = CursorIcon::Hand;
+                    } else if mouse_x >= ax && mouse_x <= ax + aw {
+                        // Address input
+                        cursor_icon = CursorIcon::Text;
+                    } else if mouse_x > ax + aw {
+                        // Extensions / Menu icon
+                        cursor_icon = CursorIcon::Hand;
+                    }
+                } else if menu_open && hover_menu_idx.is_some() {
+                    cursor_icon = CursorIcon::Hand;
+                } else if is_settings_page && hover_engine_idx.is_some() {
+                    cursor_icon = CursorIcon::Hand;
+                } else if is_extensions_page && hover_ext_idx.is_some() {
+                    cursor_icon = CursorIcon::Hand;
+                }
+
+                window.set_cursor_icon(cursor_icon);
             }
             Event::WindowEvent {
                 event: WindowEvent::MouseInput { state, button, .. },
@@ -485,7 +553,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 if state == ElementState::Pressed && button == MouseButton::Left {
-                    if mouse_x < SIDEBAR_W {
+                    if SIDEBAR_W > 0.0 && mouse_x < SIDEBAR_W {
                         let mut item_y = 50.0;
                         for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
                             if item.is_section {
@@ -525,15 +593,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     } else if menu_open {
                         // Check if click is on a menu item
-                        let menu_x = w - 260.0;
+                        let menu_x = w - 266.0;
                         let menu_y_start = CHROME_TOP + 4.0;
-                        let menu_w = 240.0;
-                        let menu_items = ["Profile Management", "Dark Theme", "Light Theme", "Font Size +", "Font Size -", "Clear Memory", "Theme Management", "Settings"];
+                        let menu_w = 250.0;
+                        let menu_items = [
+                            "New Tab", "Home", "Bookmarks", "History",
+                            "Downloads", "Extensions", "Passwords",
+                            "Heritage Themes", "Clear RAM & Cache", "Settings", "Exit"
+                        ];
                         let mut clicked_item = None;
                         for (i, _item) in menu_items.iter().enumerate() {
-                            let iy = menu_y_start + 8.0 + i as f32 * 38.0;
+                            let iy = menu_y_start + 8.0 + i as f32 * 36.0;
                             if mouse_x >= menu_x && mouse_x <= menu_x + menu_w
-                                && mouse_y >= iy && mouse_y <= iy + 36.0
+                                && mouse_y >= iy && mouse_y <= iy + 34.0
                             {
                                 clicked_item = Some(i);
                                 break;
@@ -542,7 +614,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         menu_open = false;
                         if let Some(idx) = clicked_item {
                             match idx {
+                                0 => {
+                                    // New Tab
+                                    tabs.push(DesktopTab {
+                                        title: String::from("New Tab"),
+                                        url: String::from("about:home"),
+                                        is_home: true,
+                                        is_extensions: false,
+                                        is_settings: false,
+                                    });
+                                    active_tab_idx = tabs.len() - 1;
+                                    is_home_page = true;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
+                                    address_bar_text = String::from("about:home");
+                                    load_internal_page = Some("home".to_string());
+                                }
+                                1 => {
+                                    // Home
+                                    is_home_page = true;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
+                                    address_bar_text = String::from("about:home");
+                                    load_internal_page = Some("home".to_string());
+                                }
+                                2 => {
+                                    // Bookmarks
+                                    address_bar_text = String::from("axomai://bookmarks");
+                                    load_internal_page = Some("home".to_string());
+                                }
+                                3 => {
+                                    // History
+                                    address_bar_text = String::from("axomai://history");
+                                    load_internal_page = Some("home".to_string());
+                                }
+                                4 => {
+                                    // Downloads
+                                    address_bar_text = String::from("axomai://downloads");
+                                    load_internal_page = Some("home".to_string());
+                                }
+                                5 => {
+                                    // Extensions
+                                    is_extensions_page = true;
+                                    is_home_page = false;
+                                    is_settings_page = false;
+                                    sidebar_active = 5;
+                                    address_bar_text = String::from("axomai://extensions");
+                                    load_internal_page = Some("extensions".to_string());
+                                }
+                                6 => {
+                                    // Passwords
+                                    address_bar_text = String::from("axomai://passwords");
+                                    load_internal_page = Some("home".to_string());
+                                }
                                 7 => {
+                                    // Themes
+                                    is_settings_page = true;
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    address_bar_text = String::from("about:settings");
+                                    load_internal_page = Some("settings".to_string());
+                                }
+                                8 => {
+                                    // Clear RAM
+                                    println!("[Axomai] RAM & Cache cleared");
+                                }
+                                9 => {
                                     // Settings
                                     is_settings_page = true;
                                     is_home_page = false;
@@ -551,38 +688,109 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     address_bar_text = String::from("about:settings");
                                     load_internal_page = Some("settings".to_string());
                                 }
+                                10 => {
+                                    // Exit
+                                    *control_flow = ControlFlow::Exit;
+                                }
                                 _ => {}
                             }
                         }
                         needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
-                        let tab_x = SIDEBAR_W + 8.0;
-                        let tab_w = 240.0;
+                        let available_w = w - SIDEBAR_W - 80.0;
+                        let tab_count = tabs.len().max(1);
+                        let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
+                        let mut tab_action = None; // (index, is_close)
+
                         if mouse_y <= TAB_BAR_H {
-                            // Close "x" button — wider hit area (last 30px of tab)
-                            let close_x = tab_x + tab_w - 30.0;
-                            // "+" new tab button — after the tab with generous hit area
-                            let plus_x = tab_x + tab_w + 4.0;
-                            if mouse_x >= close_x && mouse_x <= tab_x + tab_w {
+                            for (i, _) in tabs.iter().enumerate() {
+                                let tab_x = SIDEBAR_W + 8.0 + i as f32 * (tab_w + 4.0);
+                                let close_x = tab_x + tab_w - 24.0;
+                                if mouse_x >= close_x && mouse_x <= tab_x + tab_w + 2.0 {
+                                    tab_action = Some((i, true));
+                                    break;
+                                } else if mouse_x >= tab_x && mouse_x < close_x {
+                                    tab_action = Some((i, false));
+                                    break;
+                                }
+                            }
+
+                            let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 4.0;
+                            if mouse_x >= plus_x - 4.0 && mouse_x <= plus_x + 36.0 {
+                                // + New Tab
+                                tabs.push(DesktopTab {
+                                    title: String::from("New Tab"),
+                                    url: String::from("about:home"),
+                                    is_home: true,
+                                    is_extensions: false,
+                                    is_settings: false,
+                                });
+                                active_tab_idx = tabs.len() - 1;
                                 is_home_page = true;
                                 is_extensions_page = false;
                                 is_settings_page = false;
+                                address_bar_text = String::from("about:home");
                                 home_search_text.clear();
                                 home_search_focused = false;
-                                address_bar_text = String::from("about:home");
-                                address_bar_focused = false;
                                 load_internal_page = Some("home".to_string());
                                 needs_chrome_redraw = true;
-                            } else if mouse_x >= plus_x && mouse_x <= plus_x + 44.0 {
-                                is_home_page = true;
-                                is_extensions_page = false;
-                                is_settings_page = false;
-                                home_search_text.clear();
-                                home_search_focused = false;
-                                address_bar_text = String::from("about:home");
-                                address_bar_focused = false;
-                                load_internal_page = Some("home".to_string());
-                                needs_chrome_redraw = true;
+                            } else if let Some((i, is_close)) = tab_action {
+                                if is_close {
+                                    if tabs.len() > 1 {
+                                        tabs.remove(i);
+                                        if active_tab_idx >= tabs.len() {
+                                            active_tab_idx = tabs.len() - 1;
+                                        } else if active_tab_idx > i {
+                                            active_tab_idx -= 1;
+                                        }
+                                    } else {
+                                        tabs[0] = DesktopTab {
+                                            title: String::from("Axomai Browser"),
+                                            url: String::from("about:home"),
+                                            is_home: true,
+                                            is_extensions: false,
+                                            is_settings: false,
+                                        };
+                                        active_tab_idx = 0;
+                                    }
+                                    let cur = &tabs[active_tab_idx];
+                                    is_home_page = cur.is_home;
+                                    is_extensions_page = cur.is_extensions;
+                                    is_settings_page = cur.is_settings;
+                                    address_bar_text = cur.url.clone();
+                                    if cur.is_home {
+                                        load_internal_page = Some("home".to_string());
+                                    } else if cur.is_extensions {
+                                        load_internal_page = Some("extensions".to_string());
+                                    } else if cur.is_settings {
+                                        load_internal_page = Some("settings".to_string());
+                                    } else if let Some(ref wv) = webview {
+                                        let _ = wv.load_url(&cur.url);
+                                        let _ = wv.set_visible(true);
+                                        webview_visible = true;
+                                    }
+                                    needs_chrome_redraw = true;
+                                } else {
+                                    // Switch tab
+                                    active_tab_idx = i;
+                                    let cur = &tabs[active_tab_idx];
+                                    is_home_page = cur.is_home;
+                                    is_extensions_page = cur.is_extensions;
+                                    is_settings_page = cur.is_settings;
+                                    address_bar_text = cur.url.clone();
+                                    if cur.is_home {
+                                        load_internal_page = Some("home".to_string());
+                                    } else if cur.is_extensions {
+                                        load_internal_page = Some("extensions".to_string());
+                                    } else if cur.is_settings {
+                                        load_internal_page = Some("settings".to_string());
+                                    } else if let Some(ref wv) = webview {
+                                        let _ = wv.load_url(&cur.url);
+                                        let _ = wv.set_visible(true);
+                                        webview_visible = true;
+                                    }
+                                    needs_chrome_redraw = true;
+                                }
                             }
                         }
                         // Extension icons + 3-dot menu button area
@@ -1135,9 +1343,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let history_fwd = if let Ok(eng) = engine.lock() { eng.history_index + 1 < eng.history.len() } else { false };
 
                     let toolbar_icons = [icon_back, icon_forward, icon_home, icon_menu];
+                    if active_tab_idx < tabs.len() {
+                        tabs[active_tab_idx].url = address_bar_text.clone();
+                        tabs[active_tab_idx].is_home = is_home_page;
+                        tabs[active_tab_idx].is_extensions = is_extensions_page;
+                        tabs[active_tab_idx].is_settings = is_settings_page;
+                        tabs[active_tab_idx].title = title.clone();
+                    }
                     let mut quads = build_chrome_quads(
                         &mut compositor, w, h, &address_bar_text, address_bar_focused,
-                        &title, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
+                        &tabs, active_tab_idx, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
                         menu_open, hover_menu_idx, &toolbar_icons, &extensions,
                     );
 
@@ -1252,7 +1467,8 @@ fn build_chrome_quads(
     viewport_h: f32,
     address_text: &str,
     focused: bool,
-    title: &str,
+    tabs: &[DesktopTab],
+    active_tab_idx: usize,
     history_back: bool,
     history_fwd: bool,
     sidebar_active: usize,
@@ -1276,86 +1492,107 @@ fn build_chrome_quads(
     let _hover_bg = c(232, 234, 237, 200);
     let _active_bg = c(210, 227, 252, 200);
 
-    // === SIDEBAR (Glassmorphism gradient) ===
-    // Gradient background: deep blue-purple to teal
-    let bands = 8;
-    for i in 0..bands {
-        let t = i as f32 / bands as f32;
-        let r = (15.0 + t * 10.0) as u8;
-        let g = (20.0 + t * 30.0) as u8;
-        let b = (50.0 + t * 30.0) as u8;
-        let band_h = viewport_h / bands as f32;
-        quads.push(NativeGpuCompositor::solid_quad(0.0, i as f32 * band_h, SIDEBAR_W, band_h + 1.0, c(r, g, b, 255)));
-    }
-    // Glass overlay (frosted white)
-    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, c(255, 255, 255, 18)));
-    // Right border glow
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, c(100, 140, 200, 80)));
-
-    // Sidebar colors (light on dark glass)
-    let sb_text = c(220, 225, 235, 255);
-    let sb_text_dim = c(140, 155, 180, 255);
-    let sb_accent = c(100, 180, 255, 255);
-    let sb_divider = c(255, 255, 255, 20);
-    let sb_hover = c(255, 255, 255, 20);
-    let sb_active = c(100, 180, 255, 30);
-
-    // Logo
-    render_text(compositor, &mut quads, "Axomai", 16.0, 28.0, 16.0, sb_accent, SIDEBAR_W);
-    render_text(compositor, &mut quads, "Browser", 88.0, 28.0, 10.0, sb_text_dim, SIDEBAR_W);
-    quads.push(NativeGpuCompositor::solid_quad(12.0, 40.0, SIDEBAR_W - 24.0, 1.0, sb_divider));
-
-    let mut item_y = 50.0;
-    for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
-        if item.is_section {
-            item_y += 8.0;
-            quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, sb_divider));
-            item_y += 10.0;
-            render_text(compositor, &mut quads, item.label, 16.0, item_y + 12.0, 10.0, sb_text_dim, SIDEBAR_W);
-            item_y += 22.0;
-        } else {
-            let is_active = i == sidebar_active;
-            let is_hovered = hover_sidebar == Some(i);
-            let h = 32.0;
-            if is_active {
-                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_active));
-                // Left accent bar
-                quads.push(NativeGpuCompositor::solid_quad(2.0, item_y + 6.0, 3.0, h - 12.0, sb_accent));
-            } else if is_hovered {
-                quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_hover));
-            }
-            let tc = if is_active { sb_accent } else { sb_text };
-            render_text(compositor, &mut quads, item.icon, 18.0, item_y + 21.0, 13.0, tc, 36.0);
-            render_text(compositor, &mut quads, item.label, 38.0, item_y + 21.0, 13.0, tc, SIDEBAR_W - 8.0);
-            item_y += h + 1.0;
+    // === SIDEBAR (Only rendered if SIDEBAR_W > 0) ===
+    if SIDEBAR_W > 0.0 {
+        let bands = 8;
+        for i in 0..bands {
+            let t = i as f32 / bands as f32;
+            let r = (15.0 + t * 10.0) as u8;
+            let g = (20.0 + t * 30.0) as u8;
+            let b = (50.0 + t * 30.0) as u8;
+            let band_h = viewport_h / bands as f32;
+            quads.push(NativeGpuCompositor::solid_quad(0.0, i as f32 * band_h, SIDEBAR_W, band_h + 1.0, c(r, g, b, 255)));
         }
-    }
-    item_y += 6.0;
-    render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, sb_accent, SIDEBAR_W);
+        quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, SIDEBAR_W, viewport_h, c(255, 255, 255, 18)));
+        quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W - 1.0, 0.0, 1.0, viewport_h, c(100, 140, 200, 80)));
 
-    // === TAB BAR (Chrome-style) ===
-    // Tab strip background - slightly darker than toolbar
+        let sb_text = c(220, 225, 235, 255);
+        let sb_text_dim = c(140, 155, 180, 255);
+        let sb_accent = c(100, 180, 255, 255);
+        let sb_divider = c(255, 255, 255, 20);
+        let sb_hover = c(255, 255, 255, 20);
+        let sb_active = c(100, 180, 255, 30);
+
+        render_text(compositor, &mut quads, "Axomai", 16.0, 28.0, 16.0, sb_accent, SIDEBAR_W);
+        render_text(compositor, &mut quads, "Browser", 88.0, 28.0, 10.0, sb_text_dim, SIDEBAR_W);
+        quads.push(NativeGpuCompositor::solid_quad(12.0, 40.0, SIDEBAR_W - 24.0, 1.0, sb_divider));
+
+        let mut item_y = 50.0;
+        for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
+            if item.is_section {
+                item_y += 8.0;
+                quads.push(NativeGpuCompositor::solid_quad(12.0, item_y, SIDEBAR_W - 24.0, 1.0, sb_divider));
+                item_y += 10.0;
+                render_text(compositor, &mut quads, item.label, 16.0, item_y + 12.0, 10.0, sb_text_dim, SIDEBAR_W);
+                item_y += 22.0;
+            } else {
+                let is_active = i == sidebar_active;
+                let is_hovered = hover_sidebar == Some(i);
+                let h = 32.0;
+                if is_active {
+                    quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_active));
+                    quads.push(NativeGpuCompositor::solid_quad(2.0, item_y + 6.0, 3.0, h - 12.0, sb_accent));
+                } else if is_hovered {
+                    quads.push(rq(6.0, item_y, SIDEBAR_W - 12.0, h, 16.0, sb_hover));
+                }
+                let tc = if is_active { sb_accent } else { sb_text };
+                render_text(compositor, &mut quads, item.icon, 18.0, item_y + 21.0, 13.0, tc, 36.0);
+                render_text(compositor, &mut quads, item.label, 38.0, item_y + 21.0, 13.0, tc, SIDEBAR_W - 8.0);
+                item_y += h + 1.0;
+            }
+        }
+        item_y += 6.0;
+        render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, sb_accent, SIDEBAR_W);
+    }
+
+    // === TAB BAR (Chrome-style Multi-Tab Strip) ===
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, 0.0, viewport_w - SIDEBAR_W, TAB_BAR_H, tab_bar_bg));
 
-    let tab_title = if title.is_empty() { "New Tab" } else { title };
-    let tab_x = SIDEBAR_W + 8.0;
-    let tab_w = 240.0;
+    let available_w = viewport_w - SIDEBAR_W - 80.0;
+    let tab_count = tabs.len().max(1);
+    let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
     let tab_h = TAB_BAR_H - 8.0;
-    // Active tab: white rounded top, flat bottom (connects to toolbar)
-    quads.push(rq(tab_x, 8.0, tab_w, tab_h + 2.0, 8.0, white));
-    // Bottom fill to merge tab into toolbar seamlessly
-    quads.push(NativeGpuCompositor::solid_quad(tab_x, TAB_BAR_H - 2.0, tab_w, 2.0, white));
-    // Favicon circle
-    quads.push(rq(tab_x + 12.0, 15.0, 16.0, 16.0, 8.0, c(66, 133, 244, 255)));
-    render_text(compositor, &mut quads, "A", tab_x + 15.0, 27.0, 10.0, white, tab_x + 30.0);
-    // Tab title
-    render_text(compositor, &mut quads, tab_title, tab_x + 34.0, 27.0, 12.0, text_primary, tab_x + tab_w - 30.0);
-    // Close button (x)
-    render_text(compositor, &mut quads, "x", tab_x + tab_w - 20.0, 27.0, 12.0, text_disabled, tab_x + tab_w);
+
+    for (i, t) in tabs.iter().enumerate() {
+        let tab_x = SIDEBAR_W + 8.0 + i as f32 * (tab_w + 4.0);
+        let is_active = i == active_tab_idx;
+        let t_title = if t.title.is_empty() { "New Tab" } else { &t.title };
+
+        if is_active {
+            // Active tab: white rounded top
+            quads.push(rq(tab_x, 8.0, tab_w, tab_h + 2.0, 8.0, white));
+            quads.push(NativeGpuCompositor::solid_quad(tab_x, TAB_BAR_H - 2.0, tab_w, 2.0, white));
+            
+            // Top accent indicator (emerald green)
+            quads.push(NativeGpuCompositor::solid_quad(tab_x + 8.0, 8.0, tab_w - 16.0, 2.0, c(16, 185, 129, 255)));
+
+            // Favicon circle
+            quads.push(rq(tab_x + 10.0, 15.0, 16.0, 16.0, 8.0, c(16, 185, 129, 255)));
+            render_text(compositor, &mut quads, "A", tab_x + 13.0, 27.0, 10.0, white, tab_x + 28.0);
+
+            // Tab title
+            render_text(compositor, &mut quads, t_title, tab_x + 32.0, 27.0, 12.0, text_primary, tab_x + tab_w - 28.0);
+            // Close button (x)
+            render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 12.0, text_secondary, tab_x + tab_w);
+        } else {
+            // Inactive tab
+            quads.push(rq(tab_x, 10.0, tab_w, tab_h, 6.0, c(235, 238, 242, 180)));
+
+            // Favicon circle dim
+            quads.push(rq(tab_x + 10.0, 16.0, 14.0, 14.0, 7.0, c(180, 190, 200, 255)));
+            render_text(compositor, &mut quads, "A", tab_x + 13.0, 27.0, 9.0, white, tab_x + 26.0);
+
+            // Tab title dim
+            render_text(compositor, &mut quads, t_title, tab_x + 30.0, 27.0, 11.5, text_secondary, tab_x + tab_w - 26.0);
+            // Close button (x)
+            render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 11.5, text_disabled, tab_x + tab_w);
+        }
+    }
 
     // + New tab button (circular)
-    let plus_x = tab_x + tab_w + 8.0;
-    render_text(compositor, &mut quads, "+", plus_x + 4.0, 27.0, 16.0, text_secondary, plus_x + 24.0);
+    let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 6.0;
+    quads.push(rq(plus_x, 12.0, 24.0, 24.0, 12.0, c(235, 238, 245, 220)));
+    render_text(compositor, &mut quads, "+", plus_x + 7.0, 28.0, 15.0, text_secondary, plus_x + 24.0);
 
     // === TOOLBAR (Modern glassmorphism) ===
     let ty = TAB_BAR_H;
@@ -1455,36 +1692,37 @@ fn build_dropdown_quads(
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
     let text_primary = c(32, 33, 36, 255);
-    let text_secondary = c(95, 99, 104, 255);
-    let dm_w = 240.0;
-    let dm_x = viewport_w - dm_w - 20.0;
+    let _text_secondary = c(95, 99, 104, 255);
+    let dm_w = 250.0;
+    let dm_x = viewport_w - dm_w - 16.0;
     let dm_y = CHROME_TOP + 4.0;
-    let menu_items = [
-        ("P", "Profile Management"),
-        ("D", "Dark Theme"),
-        ("L", "Light Theme"),
-        ("F", "Font Size +"),
-        ("f", "Font Size -"),
-        ("C", "Clear Memory"),
-        ("T", "Theme Management"),
+    let menu_items: &[(&str, &str)] = &[
+        ("+", "New Tab            Ctrl+T"),
+        ("H", "Home Page"),
+        ("B", "Bookmarks"),
+        ("h", "History"),
+        ("D", "Downloads"),
+        ("E", "Extensions"),
+        ("P", "Passwords"),
+        ("T", "Heritage Themes"),
+        ("C", "Clear RAM & Cache"),
         ("S", "Settings"),
+        ("X", "Exit Axomai"),
     ];
-    let dm_h = 8.0 + menu_items.len() as f32 * 38.0 + 8.0;
+    let dm_h = 10.0 + menu_items.len() as f32 * 36.0 + 8.0;
     quads.push(rq(dm_x + 3.0, dm_y + 3.0, dm_w, dm_h, 12.0, c(0, 0, 0, 40)));
     quads.push(rq(dm_x, dm_y, dm_w, dm_h, 12.0, c(255, 255, 255, 255)));
-    quads.push(rq(dm_x, dm_y, dm_w, dm_h, 12.0, c(218, 220, 224, 30)));
+    quads.push(rq(dm_x, dm_y, dm_w, dm_h, 12.0, c(218, 220, 224, 60)));
 
     for (i, (icon, label)) in menu_items.iter().enumerate() {
-        let iy = dm_y + 8.0 + i as f32 * 38.0;
+        let iy = dm_y + 8.0 + i as f32 * 36.0;
         if hover_menu == Some(i) {
-            quads.push(rq(dm_x + 4.0, iy, dm_w - 8.0, 36.0, 8.0, c(232, 234, 237, 255)));
+            quads.push(rq(dm_x + 6.0, iy, dm_w - 12.0, 34.0, 8.0, c(235, 240, 248, 255)));
         }
-        render_text(compositor, &mut quads, icon, dm_x + 16.0, iy + 24.0, 14.0, text_secondary, dm_x + 36.0);
-        render_text(compositor, &mut quads, label, dm_x + 40.0, iy + 24.0, 13.0, text_primary, dm_x + dm_w - 10.0);
-        if i < menu_items.len() - 1 {
-            quads.push(NativeGpuCompositor::solid_quad(dm_x + 12.0, iy + 36.0, dm_w - 24.0, 1.0, c(218, 220, 224, 60)));
-        }
+        render_text(compositor, &mut quads, icon, dm_x + 16.0, iy + 22.0, 13.0, c(16, 185, 129, 255), dm_x + 36.0);
+        render_text(compositor, &mut quads, label, dm_x + 38.0, iy + 22.0, 12.5, text_primary, dm_x + dm_w - 12.0);
     }
+
     quads
 }
 

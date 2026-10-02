@@ -15,102 +15,115 @@ fn home_page_html_inner(search_url_base: &str) -> String {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Axomai Browser</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#f8f9fc;--fg:#1a1d2e;--muted:#6b7085;
-  --surface:#ffffff;--border:#e4e7f0;
-  --accent:#4f46e5;--accent-light:#eef2ff;
-  --radius:14px;--shadow:0 2px 12px rgba(0,0,0,.06);
-}
-@media(prefers-color-scheme:dark){
-  :root{
-    --bg:#0c0d14;--fg:#e4e6f0;--muted:#7a7f96;
-    --surface:#16171f;--border:#252736;
-    --accent:#818cf8;--accent-light:rgba(129,140,248,.12);
-    --shadow:0 2px 12px rgba(0,0,0,.3);
-    color-scheme:dark;
-  }
+  --primary:#10b981;--primary-hover:#059669;
+  --accent:#f59e0b;
+  --fg:#ffffff;--muted:rgba(255,255,255,0.85);
+  --glass:rgba(15,23,42,0.65);
+  --glass-card:rgba(255,255,255,0.88);
+  --border:rgba(255,255,255,0.25);
+  --radius:16px;--shadow:0 8px 32px rgba(0,0,0,0.35);
 }
 body{
-  background:var(--bg);color:var(--fg);
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+  color:var(--fg);
+  font-family:'Plus Jakarta Sans','Segoe UI',system-ui,-apple-system,sans-serif;
   min-height:100vh;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
   padding:40px 24px;
   -webkit-user-select:none;user-select:none;
+  background:linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.65)), url('assets/tea_garden_bg.jpg') center/cover no-repeat fixed #064e3b;
+}
+.greeting{
+  font-size:15px;font-weight:700;color:#a7f3d0;
+  margin-bottom:8px;letter-spacing:0.5px;
 }
 .logo{
-  width:72px;height:72px;
-  background:linear-gradient(135deg,#4f46e5,#7c3aed);
-  border-radius:18px;display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:36px;font-weight:800;
-  margin-bottom:24px;
-  box-shadow:0 8px 32px rgba(79,70,229,.25);
+  width:68px;height:68px;
+  background:linear-gradient(135deg,#10b981,#059669,#0284c7);
+  border-radius:20px;display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:32px;font-weight:800;
+  margin-bottom:16px;
+  box-shadow:0 8px 32px rgba(16,185,129,0.45);
+  border:1.5px solid rgba(255,255,255,0.4);
 }
 h1{
-  font-size:22px;font-weight:700;margin-bottom:6px;
-  letter-spacing:-.02em;
+  font-size:26px;font-weight:800;margin-bottom:6px;
+  letter-spacing:-.02em;text-shadow:0 2px 10px rgba(0,0,0,0.6);
 }
-.tagline{color:var(--muted);font-size:14px;margin-bottom:32px}
+.tagline{color:var(--muted);font-size:14px;margin-bottom:32px;text-shadow:0 1px 4px rgba(0,0,0,0.6)}
 .search-box{
-  width:min(100%,560px);position:relative;margin-bottom:40px;
+  width:min(100%,580px);position:relative;margin-bottom:32px;
 }
 .search-box input{
   width:100%;padding:16px 20px 16px 48px;
-  background:var(--surface);color:var(--fg);
-  border:1px solid var(--border);border-radius:28px;
+  background:rgba(255,255,255,0.9);color:#0f172a;
+  border:1.5px solid rgba(255,255,255,0.6);border-radius:28px;
   font-size:15px;outline:none;
   box-shadow:var(--shadow);
-  transition:border-color .2s,box-shadow .2s;
+  backdrop-filter:blur(12px);
+  transition:all .25s ease;
 }
 .search-box input:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 3px var(--accent-light),var(--shadow);
+  background:#ffffff;
+  border-color:var(--primary);
+  box-shadow:0 0 0 4px rgba(16,185,129,0.35),var(--shadow);
+  transform:translateY(-2px);
 }
-.search-box input::placeholder{color:var(--muted)}
+.search-box input::placeholder{color:#64748b}
 .search-icon{
   position:absolute;left:18px;top:50%;transform:translateY(-50%);
-  color:var(--muted);pointer-events:none;
+  color:#10b981;pointer-events:none;
 }
 .shortcuts{
   display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(88px,1fr));
-  gap:16px;width:min(100%,560px);margin-bottom:40px;
+  grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+  gap:16px;width:min(100%,580px);margin-bottom:36px;
 }
 .shortcut{
-  display:flex;flex-direction:column;align-items:center;gap:10px;
-  padding:16px 8px;border-radius:var(--radius);
-  background:var(--surface);border:1px solid var(--border);
-  cursor:pointer;transition:transform .15s,border-color .2s,box-shadow .2s;
-  text-decoration:none;color:var(--fg);
+  display:flex;flex-direction:column;align-items:center;gap:8px;
+  padding:14px 8px;border-radius:var(--radius);
+  background:rgba(255,255,255,0.85);border:1px solid rgba(255,255,255,0.6);
+  cursor:pointer;transition:transform .2s,border-color .2s,box-shadow .2s;
+  text-decoration:none;color:#0f172a;
+  backdrop-filter:blur(10px);
+  box-shadow:0 6px 20px rgba(0,0,0,0.25);
 }
 .shortcut:hover{
-  transform:translateY(-2px);border-color:var(--accent);
-  box-shadow:var(--shadow);
+  transform:translateY(-4px);border-color:var(--primary);
+  box-shadow:0 10px 28px rgba(0,0,0,0.35);
+  background:#ffffff;
 }
 .shortcut-icon{
-  width:44px;height:44px;border-radius:12px;
+  width:42px;height:42px;border-radius:12px;
   display:flex;align-items:center;justify-content:center;
-  font-size:20px;font-weight:700;color:#fff;
+  font-size:18px;font-weight:700;color:#fff;
 }
-.shortcut-label{font-size:12px;font-weight:500;color:var(--muted)}
+.shortcut-label{font-size:12px;font-weight:600;color:#1e293b}
 .footer-info{
   color:var(--muted);font-size:12px;
-  display:flex;align-items:center;gap:6px;
+  display:flex;align-items:center;gap:8px;
+  text-shadow:0 1px 4px rgba(0,0,0,0.7);
 }
-.footer-info .dot{width:4px;height:4px;border-radius:50%;background:var(--muted)}
+.footer-info .dot{width:4px;height:4px;border-radius:50%;background:#10b981}
 </style>
 </head>
 <body>
+<div class="greeting">নমস্কাৰ • অসম</div>
 <div class="logo">A</div>
 <h1>Axomai Browser</h1>
-<p class="tagline">GPU-accelerated browsing, built with Rust</p>
+<p class="tagline">Lush. Fast. Indic-Enabled. Built with Rust & HarfBuzz.</p>
 <div class="search-box">
-  <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-  <input type="text" id="searchInput" placeholder="Search the web or enter a URL..." autofocus>
+  <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+  <input type="text" id="searchInput" placeholder="Search the web with Axomai or enter URL..." autofocus>
 </div>
 <div class="shortcuts">
+  <a class="shortcut" data-url="https://tourism.assam.gov.in">
+    <div class="shortcut-icon" style="background:linear-gradient(135deg,#10b981,#059669)">🏞️</div>
+    <span class="shortcut-label">Assam</span>
+  </a>
   <a class="shortcut" data-url="https://www.google.com">
     <div class="shortcut-icon" style="background:#4285f4">G</div>
     <span class="shortcut-label">Google</span>
@@ -119,25 +132,21 @@ h1{
     <div class="shortcut-icon" style="background:#ff0000">Y</div>
     <span class="shortcut-label">YouTube</span>
   </a>
-  <a class="shortcut" data-url="https://github.com">
-    <div class="shortcut-icon" style="background:#24292f">G</div>
+  <a class="shortcut" data-url="https://github.com/Samarjitkashyp/axomai-browser">
+    <div class="shortcut-icon" style="background:#24292f">🐙</div>
     <span class="shortcut-label">GitHub</span>
   </a>
-  <a class="shortcut" data-url="https://twitter.com">
-    <div class="shortcut-icon" style="background:#1da1f2">X</div>
+  <a class="shortcut" data-url="https://x.com">
+    <div class="shortcut-icon" style="background:#0f172a">X</div>
     <span class="shortcut-label">Twitter</span>
-  </a>
-  <a class="shortcut" data-url="https://www.reddit.com">
-    <div class="shortcut-icon" style="background:#ff4500">R</div>
-    <span class="shortcut-label">Reddit</span>
   </a>
 </div>
 <div class="footer-info">
-  <span>Axomai v1.0</span>
+  <span>Axomai v1.6.0 Pro</span>
   <span class="dot"></span>
-  <span>GPU Rendered</span>
+  <span>WGSL GPU Composited</span>
   <span class="dot"></span>
-  <span>Rust Powered</span>
+  <span>HarfBuzz Shaper</span>
 </div>
 <script>
 document.getElementById('searchInput').addEventListener('keydown',function(e){
