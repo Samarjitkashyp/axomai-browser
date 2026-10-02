@@ -538,18 +538,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 let w = gpu_renderer.surface_config.width as f32;
-                // Update mouse coords from Win32 for reliability
-                // (CursorMoved may not fire when clicking from WebView child HWND)
+                // Accurate client mouse coordinates via ScreenToClient
+                #[cfg(target_os = "windows")]
                 {
-                    let pos = window.inner_position().unwrap_or_default();
                     unsafe {
                         extern "system" {
                             fn GetCursorPos(point: *mut [i32; 2]) -> i32;
+                            fn ScreenToClient(hwnd: *mut std::ffi::c_void, point: *mut [i32; 2]) -> i32;
                         }
                         let mut pt: [i32; 2] = [0, 0];
                         GetCursorPos(&mut pt);
-                        mouse_x = (pt[0] - pos.x) as f32;
-                        mouse_y = (pt[1] - pos.y) as f32;
+                        ScreenToClient(window.hwnd() as _, &mut pt);
+                        mouse_x = pt[0] as f32;
+                        mouse_y = pt[1] as f32;
                     }
                 }
                 if state == ElementState::Pressed && button == MouseButton::Left {
@@ -612,6 +613,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         menu_open = false;
+                        if let Some(ref wv) = webview {
+                            let _ = wv.set_visible(!is_home_page && !is_settings_page && !is_extensions_page);
+                        }
                         if let Some(idx) = clicked_item {
                             match idx {
                                 0 => {
@@ -793,17 +797,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        // Extension icons + 3-dot menu button area
+                        // Toolbar right controls (Profile + Extensions + 3-Dot Menu)
                         let n_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
-                        let right_w = 120.0 + n_ext * 30.0;
+                        let right_w = 80.0 + n_ext * 30.0;
                         let icons_start_x = w - right_w;
                         let prof_end_x = icons_start_x + 8.0 + (TOOLBAR_H - 20.0) + 8.0;
-                        let menu_btn_x = prof_end_x + n_ext * 30.0 + 4.0;
 
-                        if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 24.0
+                        // 3-dot menu button area (top-right of toolbar)
+                        let menu_btn_x = w - 46.0;
+                        if mouse_x >= menu_btn_x && mouse_x <= w
                             && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
                         {
                             menu_open = !menu_open;
+                            if let Some(ref wv) = webview {
+                                let _ = wv.set_visible(!menu_open && !is_home_page && !is_settings_page && !is_extensions_page);
+                            }
                             needs_chrome_redraw = true;
                         }
                         // Click on extension icon in toolbar to toggle it off
