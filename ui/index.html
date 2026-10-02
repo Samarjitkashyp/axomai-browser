@@ -1046,59 +1046,348 @@
       </div>
     </div>
 
-    <!-- 7. Extensions Modal -->
+    <!-- 7. Extensions Hub Modal (Individual UI for Every Extension) -->
     <div class="modal-backdrop" id="extensionsModal">
-      <div class="modal-card glass-card">
+      <div class="modal-card glass-card ext-hub-modal">
         <div class="modal-header">
-          <h3 class="modal-title">🧩 WebExtensions & Add-ons</h3>
+          <div class="ext-modal-title-wrap">
+            <h3 class="modal-title">🧩 Axomai WebExtensions Studio</h3>
+            <span class="ext-active-count-badge" id="extActiveCountBadge">6 Extensions Active</span>
+          </div>
           <button class="modal-close" id="btnCloseExtensionsModal">&times;</button>
         </div>
-        <div class="modal-body">
-          <div class="modal-list-group">
-            <div class="modal-list-item">
-              <span class="modal-item-icon">🛡️</span>
-              <div class="modal-item-details">
-                <span class="modal-item-title">EasyList AdBlock Shield</span>
-                <span class="modal-item-sub">Blocks intrusive ads, banners & video promotions</span>
+        
+        <div class="ext-hub-container">
+          <!-- Left Navigation Tabs for Each Extension -->
+          <div class="ext-nav-sidebar">
+            <div class="ext-nav-btn active" data-ext-tab="adblock">
+              <span class="ext-nav-icon">🛡️</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">AdBlock Shield</span>
+                <span class="ext-nav-status text-green">Active • 1.8k</span>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" checked>
-                <span class="toggle-slider"></span>
-              </label>
             </div>
-            <div class="modal-list-item">
-              <span class="modal-item-icon">📖</span>
-              <div class="modal-item-details">
-                <span class="modal-item-title">Reader Mode Pro</span>
-                <span class="modal-item-sub">Clutter-free article reader with serif typography</span>
+            <div class="ext-nav-btn" data-ext-tab="reader">
+              <span class="ext-nav-icon">📖</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">Reader Mode Pro</span>
+                <span class="ext-nav-status">Customizable</span>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" checked>
-                <span class="toggle-slider"></span>
-              </label>
             </div>
-            <div class="modal-list-item">
-              <span class="modal-item-icon">🌐</span>
-              <div class="modal-item-details">
-                <span class="modal-item-title">Assam Auto-Translate</span>
-                <span class="modal-item-sub">Instantly translate English to Assamese & Bengali</span>
+            <div class="ext-nav-btn" data-ext-tab="translate">
+              <span class="ext-nav-icon">🌐</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">Auto-Translate</span>
+                <span class="ext-nav-status">Assamese & Indic</span>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" checked>
-                <span class="toggle-slider"></span>
-              </label>
             </div>
-            <div class="modal-list-item">
-              <span class="modal-item-icon">🔒</span>
-              <div class="modal-item-details">
-                <span class="modal-item-title">Anti-Fingerprint Privacy Guard</span>
-                <span class="modal-item-sub">Stops cross-site canvas & audio fingerprinting</span>
+            <div class="ext-nav-btn" data-ext-tab="privacy">
+              <span class="ext-nav-icon">🔒</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">Privacy Guard</span>
+                <span class="ext-nav-status text-green">Anti-Fingerprint</span>
               </div>
-              <label class="toggle-switch">
-                <input type="checkbox" checked>
-                <span class="toggle-slider"></span>
-              </label>
             </div>
+            <div class="ext-nav-btn" data-ext-tab="capture">
+              <span class="ext-nav-icon">📸</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">Screen Capture</span>
+                <span class="ext-nav-status">4K Studio Snip</span>
+              </div>
+            </div>
+            <div class="ext-nav-btn" data-ext-tab="booster">
+              <span class="ext-nav-icon">⚡</span>
+              <div class="ext-nav-info">
+                <span class="ext-nav-name">Turbo RAM Booster</span>
+                <span class="ext-nav-status text-green">84% Saved</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Content Panel: Individual Extension UI Panels -->
+          <div class="ext-panels-wrapper">
+            
+            <!-- PANEL 1: AdBlock Shield UI -->
+            <div class="ext-panel active" id="panel-adblock">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>🛡️ EasyList AdBlock Shield & Tracker Blocker</h4>
+                  <p>Blocks intrusive ads, tracking scripts, and video popups in real-time.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="toggleAdblockMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="ext-stats-grid">
+                <div class="ext-stat-card">
+                  <span class="stat-number" id="adsBlockedCount">1,842</span>
+                  <span class="stat-label">Ads Blocked Today</span>
+                </div>
+                <div class="ext-stat-card">
+                  <span class="stat-number" id="trackersBlockedCount">348</span>
+                  <span class="stat-label">Trackers Intercepted</span>
+                </div>
+                <div class="ext-stat-card">
+                  <span class="stat-number">12.4 MB</span>
+                  <span class="stat-label">Bandwidth Saved</span>
+                </div>
+              </div>
+
+              <div class="ext-sub-controls">
+                <h5>Filter Modules:</h5>
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">Cosmetic Element Hiding</span>
+                    <span class="setting-sub">Collapse blank ad spaces and banners</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked id="toggleCosmetic">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">Anti-Cryptominer & Malware Shield</span>
+                    <span class="setting-sub">Prevents unauthorized browser background mining</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked id="toggleCrypto">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="ext-whitelist-box">
+                <label>Whitelist Domain:</label>
+                <div class="whitelist-input-row">
+                  <input type="text" placeholder="e.g. news.assam.gov.in" id="whitelistInput">
+                  <button class="modal-action-btn" id="btnAddWhitelist">Allow Site</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANEL 2: Reader Mode Pro UI -->
+            <div class="ext-panel" id="panel-reader">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>📖 Reader Mode Pro Settings</h4>
+                  <p>Strips web clutter and gives book-like reading aesthetics.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="toggleReaderMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="reader-settings-controls">
+                <div class="reader-control-item">
+                  <label>Typography Style:</label>
+                  <div class="font-selector-pills">
+                    <button class="font-pill active" data-font="Georgia, serif">Georgia (Serif)</button>
+                    <button class="font-pill" data-font="'Plus Jakarta Sans', sans-serif">Jakarta (Sans)</button>
+                    <button class="font-pill" data-font="'JetBrains Mono', monospace">Mono (Code)</button>
+                  </div>
+                </div>
+
+                <div class="reader-control-item">
+                  <div class="slider-label-row">
+                    <label>Font Size:</label>
+                    <span id="readerFontSizeVal">18px</span>
+                  </div>
+                  <input type="range" min="14" max="28" value="18" id="readerFontSizeSlider" class="range-slider">
+                </div>
+
+                <div class="reader-control-item">
+                  <label>Color Theme:</label>
+                  <div class="reader-theme-pills">
+                    <button class="reader-theme-btn theme-light active" data-bg="#ffffff" data-color="#1e293b">Light</button>
+                    <button class="reader-theme-btn theme-sepia" data-bg="#f4ecd8" data-color="#433422">Sepia</button>
+                    <button class="reader-theme-btn theme-dark" data-bg="#0f172a" data-color="#f8fafc">Dark OLED</button>
+                    <button class="reader-theme-btn theme-tea" data-bg="#064e3b" data-color="#f0fdf4">Tea Garden</button>
+                  </div>
+                </div>
+
+                <div class="reader-preview-box" id="readerPreviewBox">
+                  <h5>Assam: Land of the Red River and Blue Hills</h5>
+                  <p>Assam is celebrated for its lush wildlife reserves, unique single-horned rhinoceros, and rich tea garden heritage along the mighty Brahmaputra river.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANEL 3: Auto-Translate UI -->
+            <div class="ext-panel" id="panel-translate">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>🌐 Assam Indic & Global Auto-Translate</h4>
+                  <p>AI powered neural translation for Indian regional and global languages.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="toggleTranslateMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="translate-tool-grid">
+                <div class="translate-select-row">
+                  <label>Translate Pages To:</label>
+                  <select class="custom-select" id="targetLangSelect">
+                    <option value="as" selected>অসমীয়া (Assamese)</option>
+                    <option value="bn">বাংলা (Bengali)</option>
+                    <option value="hi">हिन्दी (Hindi)</option>
+                    <option value="en">English</option>
+                    <option value="ja">日本語 (Japanese)</option>
+                  </select>
+                </div>
+
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">HarfBuzz Ligature Enhancer</span>
+                    <span class="setting-sub">Ensure all complex Assamese conjuncts (ক্ষ, ক্ত, ঙ্গ) shape smoothly</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+
+                <!-- Instant Quick Translate Box -->
+                <div class="quick-translator-card">
+                  <h5>Instant Quick Translator:</h5>
+                  <div class="trans-inputs">
+                    <textarea id="transSourceText" placeholder="Type or paste text in any language..." rows="2">Welcome to Axomai Browser</textarea>
+                    <button class="modal-action-btn btn-primary" id="btnRunTranslate">Translate ✨</button>
+                    <div class="trans-output-box" id="transResultBox">
+                      <span>অক্সমাই ব্ৰাউজাৰলৈ স্বাগতম (Welcome to Axomai Browser)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANEL 4: Privacy & Anti-Fingerprint UI -->
+            <div class="ext-panel" id="panel-privacy">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>🔒 Anti-Fingerprint Privacy Guard</h4>
+                  <p>Protects your identity from tracking heuristics and device fingerprinting.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="togglePrivacyMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="privacy-controls-list">
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">HTML5 Canvas Noise Injector</span>
+                    <span class="setting-sub">Adds subtle random mathematical noise to defeat canvas hashing</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">AudioContext Frequency Jitter</span>
+                    <span class="setting-sub">Masks unique audio hardware fingerprinting</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+                <div class="setting-row">
+                  <div class="setting-text">
+                    <span class="setting-label">Send Global Privacy Control (GPC) & DNT</span>
+                    <span class="setting-sub">Signal websites not to sell or share browsing history</span>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" checked>
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <!-- PANEL 5: Screen Capture Studio UI -->
+            <div class="ext-panel" id="panel-capture">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>📸 Capture Studio & Screen Snip</h4>
+                  <p>High-resolution webpage snapshots with instant annotation & export.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="toggleCaptureMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="capture-actions-grid">
+                <button class="capture-card-btn" id="btnCaptureVisible">
+                  <span class="capture-btn-icon">🖥️</span>
+                  <span class="capture-btn-title">Visible Area</span>
+                  <span class="capture-btn-sub">Snip what's on screen now</span>
+                </button>
+                <button class="capture-card-btn" id="btnCaptureFull">
+                  <span class="capture-btn-icon">📜</span>
+                  <span class="capture-btn-title">Full Scrolling Page</span>
+                  <span class="capture-btn-sub">Render entire page to image</span>
+                </button>
+                <button class="capture-card-btn" id="btnCaptureSelection">
+                  <span class="capture-btn-icon">✂️</span>
+                  <span class="capture-btn-title">Custom Selection</span>
+                  <span class="capture-btn-sub">Draw a box to crop</span>
+                </button>
+              </div>
+
+              <div class="capture-settings-bar">
+                <div class="format-select-row">
+                  <label>Format:</label>
+                  <select class="custom-select" id="captureFormat">
+                    <option value="png" selected>PNG (Lossless 4K)</option>
+                    <option value="jpeg">JPEG (Compressed)</option>
+                    <option value="webp">WebP (Modern)</option>
+                  </select>
+                </div>
+                <label class="checkbox-inline">
+                  <input type="checkbox" checked id="chkAutoCopyClip"> Auto-copy to clipboard
+                </label>
+              </div>
+            </div>
+
+            <!-- PANEL 6: Turbo RAM Booster UI -->
+            <div class="ext-panel" id="panel-booster">
+              <div class="ext-panel-header">
+                <div class="ext-header-left">
+                  <h4>⚡ Turbo RAM Booster & Memory Optimizer</h4>
+                  <p>Auto-hibernates inactive tabs to prevent high RAM & battery drain.</p>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" checked id="toggleBoosterMain">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+
+              <div class="booster-meter-card">
+                <div class="meter-info-row">
+                  <span class="meter-title">System Memory Usage</span>
+                  <span class="meter-value" id="boosterSavedVal">84% Optimized (920 MB Saved)</span>
+                </div>
+                <div class="meter-progress-track">
+                  <div class="meter-progress-bar" style="width: 84%;"></div>
+                </div>
+              </div>
+
+              <div class="booster-actions-row">
+                <button class="modal-action-btn btn-primary" id="btnFlushMemoryNow" style="padding: 10px 24px; font-weight: 700; font-size: 14px;">🧹 Flush Memory & Boost Now</button>
+                <span class="booster-status-tag" id="boosterStatusTag">Active • 3 Tabs Sleeping</span>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
