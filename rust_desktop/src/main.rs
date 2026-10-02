@@ -70,6 +70,72 @@ impl SearchEngine {
     }
 }
 
+struct Extension {
+    name: &'static str,
+    description: &'static str,
+    version: &'static str,
+    icon_letter: &'static str,
+    icon_color: [u8; 3],
+    enabled: bool,
+    inject_js: &'static str,
+    disable_js: &'static str,
+}
+
+fn create_extensions() -> Vec<Extension> {
+    vec![
+        Extension {
+            name: "Ad Blocker",
+            description: "Blocks ads, popups, and intrusive banners on all websites",
+            version: "1.0.0",
+            icon_letter: "A",
+            icon_color: [220, 50, 50],
+            enabled: false,
+            inject_js: r#"(function(){if(window.__axomai_ab)return;window.__axomai_ab=1;var s=document.createElement('style');s.id='__axomai_ab';s.textContent='[class*="ad-"],[class*="ads-"],[class*="ad_"],[id*="ad-"],[id*="ads-"],[id*="ad_"],[class*="advert"],[id*="advert"],[data-ad],[data-ads],[data-ad-slot],ins.adsbygoogle,.ad-container,.ad-wrapper,.ad-banner,[class*="sponsored"],[class*="banner-ad"],iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adserver"]{display:none!important;height:0!important;overflow:hidden!important}';document.head.appendChild(s);new MutationObserver(function(m){m.forEach(function(r){r.addedNodes.forEach(function(n){if(n.nodeType===1&&(n.className&&(/\bad[s_-]/.test(n.className)||/advert|sponsor/i.test(n.className))||n.tagName==='INS'&&n.classList.contains('adsbygoogle')))n.style.display='none'})})}).observe(document.body||document.documentElement,{childList:true,subtree:true})})()"#,
+            disable_js: r#"(function(){var s=document.getElementById('__axomai_ab');if(s)s.remove();window.__axomai_ab=0})()"#,
+        },
+        Extension {
+            name: "Reader Mode",
+            description: "Strips pages to clean, readable format with beautiful typography",
+            version: "1.0.0",
+            icon_letter: "R",
+            icon_color: [60, 130, 60],
+            enabled: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_reader'))return;var a=document.querySelector('article')||document.querySelector('main')||document.querySelector('[role="main"]');if(!a)a=document.body;var d=document.createElement('div');d.id='__axomai_reader';d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;overflow-y:auto;background:#faf9f6';d.innerHTML='<div style="max-width:680px;margin:0 auto;padding:40px 24px;font:18px/1.8 Georgia,serif;color:#333"><div style="display:flex;align-items:center;gap:8px;margin-bottom:16px"><span style="background:#3c823c;color:#fff;padding:4px 10px;border-radius:12px;font:bold 12px sans-serif">READER MODE</span><button onclick="document.getElementById(\'__axomai_reader\').remove()" style="margin-left:auto;background:none;border:1px solid #ccc;padding:4px 12px;border-radius:12px;cursor:pointer;font:12px sans-serif">Exit Reader</button></div><h1 style="font:bold 28px sans-serif;margin-bottom:8px">'+document.title.replace(/</g,'&lt;')+'</h1><hr style="border:0;border-top:1px solid #ddd;margin:20px 0">'+a.innerHTML+'</div>';document.body.appendChild(d)})()"#,
+            disable_js: r#"(function(){var d=document.getElementById('__axomai_reader');if(d)d.remove()})()"#,
+        },
+        Extension {
+            name: "Auto Translate",
+            description: "Adds a translate button to translate any page to English instantly",
+            version: "1.0.0",
+            icon_letter: "T",
+            icon_color: [66, 133, 244],
+            enabled: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_translate'))return;var b=document.createElement('div');b.id='__axomai_translate';b.innerHTML='<button style="position:fixed;bottom:20px;right:20px;z-index:999999;padding:10px 18px;background:#4285f4;color:#fff;border:none;border-radius:24px;font:bold 13px sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(66,133,244,.4);display:flex;align-items:center;gap:6px" title="Translate this page"><span style="font-size:16px">T</span> Translate</button>';b.querySelector('button').onclick=function(){window.location.href='https://translate.google.com/translate?sl=auto&tl=en&u='+encodeURIComponent(window.location.href)};document.body.appendChild(b)})()"#,
+            disable_js: r#"(function(){var d=document.getElementById('__axomai_translate');if(d)d.remove()})()"#,
+        },
+        Extension {
+            name: "Tracker Blocker",
+            description: "Blocks tracking scripts, pixels, and fingerprinting attempts",
+            version: "1.0.0",
+            icon_letter: "X",
+            icon_color: [180, 80, 200],
+            enabled: false,
+            inject_js: r#"(function(){if(window.__axomai_tb)return;window.__axomai_tb=1;var s=document.createElement('style');s.id='__axomai_tb';s.textContent='img[src*="pixel"],img[src*="track"],img[src*="beacon"],img[src*="analytics"],img[width="1"][height="1"],img[width="0"],script[src*="analytics"],script[src*="tracker"],script[src*="facebook.net"],script[src*="connect.facebook"],script[src*="hotjar"],script[src*="mouseflow"],script[src*="clarity.ms"]{display:none!important}';document.head.appendChild(s);var origFetch=window.fetch;window.fetch=function(u,o){var url=typeof u==='string'?u:(u&&u.url?u.url:'');if(/analytics|tracker|facebook\.net|hotjar|mouseflow|clarity\.ms/i.test(url))return Promise.resolve(new Response('',{status:200}));return origFetch.apply(this,arguments)}})()"#,
+            disable_js: r#"(function(){var s=document.getElementById('__axomai_tb');if(s)s.remove();window.__axomai_tb=0})()"#,
+        },
+        Extension {
+            name: "Screenshot Capture",
+            description: "Adds a floating button to capture and save page screenshots",
+            version: "1.0.0",
+            icon_letter: "S",
+            icon_color: [34, 168, 83],
+            enabled: false,
+            inject_js: r#"(function(){if(document.getElementById('__axomai_ss'))return;var b=document.createElement('div');b.id='__axomai_ss';b.innerHTML='<button style="position:fixed;bottom:20px;right:80px;z-index:999999;width:44px;height:44px;background:#22a853;color:#fff;border:none;border-radius:50%;font:bold 18px sans-serif;cursor:pointer;box-shadow:0 2px 12px rgba(34,168,83,.4);display:flex;align-items:center;justify-content:center" title="Screenshot">S</button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){var flash=document.createElement('div');flash.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.6);z-index:999998;pointer-events:none;transition:opacity 0.3s';document.body.appendChild(flash);setTimeout(function(){flash.style.opacity='0'},50);setTimeout(function(){flash.remove()},350);navigator.clipboard.writeText('[Screenshot] '+document.title+' - '+window.location.href).catch(function(){});var n=document.createElement('div');n.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;background:#333;color:#fff;border-radius:8px;z-index:999999;font:14px sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)';n.textContent='Page info copied to clipboard!';document.body.appendChild(n);setTimeout(function(){n.style.opacity='0';n.style.transition='opacity 0.3s'},1500);setTimeout(function(){n.remove()},2000)}})()"#,
+            disable_js: r#"(function(){var d=document.getElementById('__axomai_ss');if(d)d.remove()})()"#,
+        },
+    ]
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--subprocess" {
@@ -194,6 +260,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hover_engine_idx: Option<usize> = None;
     let mut menu_open = false;
     let mut hover_menu_idx: Option<usize> = None;
+    let mut is_extensions_page = false;
+    let mut extensions = create_extensions();
+    let mut hover_ext_idx: Option<usize> = None;
 
     let scale_factor = window.scale_factor() as f32;
 
@@ -255,6 +324,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             item_y += h;
                         }
                     }
+                }
+                // Extensions page hover tracking
+                if is_extensions_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
+                    let content_y = mouse_y - CHROME_TOP;
+                    let old_ext_hover = hover_ext_idx;
+                    hover_ext_idx = None;
+                    let card_h = 88.0;
+                    let start_y = 70.0;
+                    for i in 0..5 {
+                        let ey = start_y + i as f32 * (card_h + 12.0);
+                        if content_y >= ey && content_y <= ey + card_h && mouse_x - SIDEBAR_W >= 40.0 {
+                            hover_ext_idx = Some(i);
+                            break;
+                        }
+                    }
+                    if old_ext_hover != hover_ext_idx { needs_chrome_redraw = true; }
                 }
                 // Settings page hover tracking
                 if is_settings_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
@@ -347,8 +432,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     if i == 0 {
                                         is_home_page = true;
                                         is_settings_page = false;
+                                        is_extensions_page = false;
                                         address_bar_text = String::from("about:home");
                                         home_scroll_y = 0.0;
+                                        if webview_visible {
+                                            if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
+                                            webview_visible = false;
+                                        }
+                                    } else if i == 5 {
+                                        is_extensions_page = true;
+                                        is_home_page = false;
+                                        is_settings_page = false;
+                                        address_bar_text = String::from("about:extensions");
                                         if webview_visible {
                                             if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
                                             webview_visible = false;
@@ -356,6 +451,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     } else if i == 7 {
                                         is_settings_page = true;
                                         is_home_page = false;
+                                        is_extensions_page = false;
                                         address_bar_text = String::from("about:settings");
                                         if webview_visible {
                                             if let Some(ref wv) = webview { let _ = wv.set_visible(false); }
@@ -363,6 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     } else {
                                         is_settings_page = false;
+                                        is_extensions_page = false;
                                     }
                                     needs_chrome_redraw = true;
                                     break;
@@ -473,6 +570,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             address_bar_focused = false;
                             needs_chrome_redraw = true;
+                        }
+                    } else if is_extensions_page {
+                        address_bar_focused = false;
+                        menu_open = false;
+                        let content_y = mouse_y - CHROME_TOP;
+                        let card_h = 88.0;
+                        let start_y = 70.0;
+                        for i in 0..extensions.len() {
+                            let ey = start_y + i as f32 * (card_h + 12.0);
+                            let toggle_y = ey + card_h / 2.0 - 12.0;
+                            if content_y >= ey && content_y <= ey + card_h
+                                && mouse_x - SIDEBAR_W >= 40.0
+                            {
+                                extensions[i].enabled = !extensions[i].enabled;
+                                let is_on = extensions[i].enabled;
+                                let js = if is_on { extensions[i].inject_js } else { extensions[i].disable_js };
+                                if let Some(ref wv) = webview {
+                                    let _ = wv.evaluate_script(js);
+                                }
+                                needs_chrome_redraw = true;
+                                break;
+                            }
                         }
                     } else if is_settings_page {
                         address_bar_focused = false;
@@ -620,6 +739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 address_bar_text = url;
                                 is_home_page = false;
                                 is_settings_page = false;
+                                is_extensions_page = false;
                                 needs_chrome_redraw = true;
                             }
                             Key::Escape => {
@@ -691,6 +811,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     address_bar_text = url;
                                     is_home_page = false;
                                     is_settings_page = false;
+                                    is_extensions_page = false;
                                     needs_chrome_redraw = true;
                                 }
                             }
@@ -789,6 +910,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(url) = nav.take() {
                         address_bar_text = url;
                         needs_chrome_redraw = true;
+                        if let Some(ref wv) = webview {
+                            for ext in &extensions {
+                                if ext.enabled {
+                                    let _ = wv.evaluate_script(ext.inject_js);
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -797,7 +925,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let content_w = w - SIDEBAR_W;
                 let content_h = h - CHROME_TOP;
 
-                let should_render = if is_home_page || is_settings_page {
+                let should_render = if is_home_page || is_settings_page || is_extensions_page {
                     needs_chrome_redraw || gpu_renderer.presented_frames < 3
                 } else if let Ok(mut eng) = engine.lock() {
                     let updated = eng.process_event_loop(content_w, content_h);
@@ -813,6 +941,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     let title = if is_home_page {
                         "Axomai Browser".to_string()
+                    } else if is_extensions_page {
+                        "Extensions".to_string()
                     } else if is_settings_page {
                         "Settings".to_string()
                     } else if let Ok(eng) = engine.lock() {
@@ -837,6 +967,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             home_search_focused, &home_search_text,
                         );
                         for mut q in home_quads {
+                            for v in &mut q.vertices {
+                                v.position[0] += SIDEBAR_W;
+                                v.position[1] += CHROME_TOP;
+                            }
+                            quads.push(q);
+                        }
+                    } else if is_extensions_page {
+                        let ext_quads = build_extensions_page_quads(
+                            &mut compositor, content_w, content_h, &extensions, hover_ext_idx,
+                        );
+                        for mut q in ext_quads {
                             for v in &mut q.vertices {
                                 v.position[0] += SIDEBAR_W;
                                 v.position[1] += CHROME_TOP;
@@ -1114,7 +1255,7 @@ fn build_chrome_quads(
     let url_icon_y = ay + (ah - url_icon_s) / 2.0;
     quads.push(NativeGpuCompositor::icon_quad(ax + 10.0, url_icon_y, url_icon_s, &icons[2], c(130, 135, 150, 255)));
 
-    let is_placeholder = (address_text == "about:home" || address_text == "about:settings") && !focused;
+    let is_placeholder = (address_text == "about:home" || address_text == "about:settings" || address_text == "about:extensions") && !focused;
     let display = if is_placeholder { "Search or type a URL" } else { address_text };
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
     let end_x = render_text(compositor, &mut quads, display, ax + 34.0, icon_y, 13.0, dtc, ax + aw - 14.0);
@@ -1271,6 +1412,102 @@ fn build_settings_page_quads(
     let info_y = start_y + 4.0 * (engine_h + 8.0) + 10.0;
     render_text(compositor, &mut quads, "Click on a search engine to set it as default.", 40.0, info_y + 14.0, 11.0, text_secondary, content_w);
     render_text(compositor, &mut quads, "The selected engine is used when you type in the address bar.", 40.0, info_y + 30.0, 11.0, text_secondary, content_w);
+
+    quads
+}
+
+// ===== EXTENSIONS PAGE =====
+
+fn build_extensions_page_quads(
+    compositor: &mut NativeGpuCompositor,
+    content_w: f32,
+    content_h: f32,
+    extensions: &[Extension],
+    hover_idx: Option<usize>,
+) -> Vec<GpuQuad> {
+    let mut quads = Vec::new();
+
+    let white = c(255, 255, 255, 255);
+    let page_bg = c(246, 247, 248, 255);
+    let text_dark = c(32, 33, 36, 255);
+    let text_secondary = c(95, 99, 104, 255);
+    let border = c(218, 220, 224, 255);
+    let hover_bg = c(241, 243, 244, 255);
+    let green = c(34, 168, 83, 255);
+    let green_light = c(34, 168, 83, 60);
+    let gray_track = c(180, 185, 195, 255);
+
+    // Background
+    quads.push(NativeGpuCompositor::solid_quad(0.0, 0.0, content_w, content_h, page_bg));
+
+    // Header
+    render_text(compositor, &mut quads, "Extensions", 40.0, 40.0, 24.0, text_dark, content_w);
+    render_text(compositor, &mut quads, "Manage your browser extensions", 40.0, 58.0, 12.0, text_secondary, content_w);
+    quads.push(NativeGpuCompositor::solid_quad(40.0, 65.0, content_w - 80.0, 1.0, border));
+
+    let card_x = 40.0;
+    let card_w = (content_w - 80.0).min(600.0);
+    let card_h = 88.0;
+    let start_y = 70.0;
+
+    for (i, ext) in extensions.iter().enumerate() {
+        let ey = start_y + i as f32 * (card_h + 12.0);
+        let is_hovered = hover_idx == Some(i);
+
+        // Card background
+        let bg = if is_hovered { hover_bg } else { white };
+        quads.push(rq(card_x, ey, card_w, card_h, 12.0, bg));
+        // Card border
+        quads.push(rq(card_x, ey, card_w, 1.0, 0.0, c(218, 220, 224, 80)));
+        quads.push(rq(card_x, ey + card_h - 1.0, card_w, 1.0, 0.0, c(218, 220, 224, 80)));
+
+        // Extension icon circle
+        let icon_x = card_x + 20.0;
+        let icon_y = ey + card_h / 2.0;
+        let icon_r = 20.0;
+        let ic = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 255);
+        quads.push(rq(icon_x - icon_r, icon_y - icon_r, icon_r * 2.0, icon_r * 2.0, icon_r, ic));
+        render_text(compositor, &mut quads, ext.icon_letter, icon_x - 5.0, icon_y + 6.0, 16.0, white, icon_x + icon_r);
+
+        // Extension name
+        let name_x = card_x + 68.0;
+        render_text(compositor, &mut quads, ext.name, name_x, ey + 28.0, 15.0, text_dark, card_x + card_w - 120.0);
+
+        // Description
+        render_text(compositor, &mut quads, ext.description, name_x, ey + 48.0, 11.0, text_secondary, card_x + card_w - 120.0);
+
+        // Version
+        let ver_label = format!("v{}", ext.version);
+        render_text(compositor, &mut quads, &ver_label, name_x, ey + 66.0, 10.0, c(160, 165, 175, 255), card_x + card_w - 120.0);
+
+        // Toggle switch
+        let toggle_x = card_x + card_w - 70.0;
+        let toggle_y = ey + card_h / 2.0 - 12.0;
+        let track_w = 44.0;
+        let track_h = 24.0;
+        let thumb_r = 10.0;
+
+        if ext.enabled {
+            // Green track
+            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, green));
+            // White thumb (right)
+            quads.push(rq(toggle_x + track_w - track_h + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
+            // Status text
+            render_text(compositor, &mut quads, "ON", toggle_x + 6.0, toggle_y + 16.0, 9.0, white, toggle_x + 30.0);
+        } else {
+            // Gray track
+            quads.push(rq(toggle_x, toggle_y, track_w, track_h, track_h / 2.0, gray_track));
+            // White thumb (left)
+            quads.push(rq(toggle_x + 2.0, toggle_y + 2.0, thumb_r * 2.0, thumb_r * 2.0, thumb_r, white));
+            // Status text
+            render_text(compositor, &mut quads, "OFF", toggle_x + 22.0, toggle_y + 16.0, 9.0, white, toggle_x + track_w);
+        }
+    }
+
+    // Info text at bottom
+    let info_y = start_y + extensions.len() as f32 * (card_h + 12.0) + 10.0;
+    render_text(compositor, &mut quads, "Click on an extension card to enable or disable it.", 40.0, info_y + 14.0, 11.0, text_secondary, content_w);
+    render_text(compositor, &mut quads, "Enabled extensions will be injected into web pages automatically.", 40.0, info_y + 30.0, 11.0, text_secondary, content_w);
 
     quads
 }
