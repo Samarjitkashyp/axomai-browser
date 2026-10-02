@@ -672,12 +672,89 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Toolbar Quick Action Buttons
+  // ==========================================================================
+  // Chrome Extension Puzzle Icon & Popover Controller
+  // ==========================================================================
   const btnExtensions = document.getElementById('btnExtensions');
+  const extDropdownPopup = document.getElementById('extDropdownPopup');
+  const btnCloseExtPopover = document.getElementById('btnCloseExtPopover');
+  const btnOpenManageExt = document.getElementById('btnOpenManageExt');
+
+  if (btnExtensions && extDropdownPopup) {
+    btnExtensions.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = extDropdownPopup.classList.contains('show');
+      closeAllModals();
+      if (!isOpen) extDropdownPopup.classList.add('show');
+    });
+
+    if (btnCloseExtPopover) {
+      btnCloseExtPopover.addEventListener('click', () => extDropdownPopup.classList.remove('show'));
+    }
+
+    if (btnOpenManageExt) {
+      btnOpenManageExt.addEventListener('click', () => {
+        extDropdownPopup.classList.remove('show');
+        if (extensionsModal) extensionsModal.style.display = 'flex';
+      });
+    }
+
+    document.addEventListener('click', (e) => {
+      if (!extDropdownPopup.contains(e.target) && e.target !== btnExtensions) {
+        extDropdownPopup.classList.remove('show');
+      }
+    });
+  }
+
+  // Real-time Extension Enable / Disable Toggles
+  const extCheckboxes = [
+    { id: 'chkExtAdblock', name: 'EasyList AdBlock Shield' },
+    { id: 'chkExtReader', name: 'Reader Mode Pro' },
+    { id: 'chkExtTranslate', name: 'Assam Auto-Translate' },
+    { id: 'chkExtPrivacy', name: 'Anti-Fingerprint Privacy Guard' },
+    { id: 'chkExtCapture', name: 'Screen Capture Studio' },
+    { id: 'chkExtBooster', name: 'Turbo RAM Booster' }
+  ];
+
+  function updateActiveExtensionsCount() {
+    let activeCount = 0;
+    extCheckboxes.forEach(item => {
+      const chk = document.getElementById(item.id);
+      if (chk && chk.checked) activeCount++;
+    });
+    const badge = document.getElementById('extActiveCountBadge');
+    if (badge) badge.textContent = `${activeCount} Extensions Active`;
+  }
+
+  extCheckboxes.forEach(item => {
+    const chk = document.getElementById(item.id);
+    if (chk) {
+      chk.addEventListener('change', () => {
+        updateActiveExtensionsCount();
+        const parentItem = chk.closest('.ext-popover-item');
+        if (parentItem) {
+          const statusText = parentItem.querySelector('.ext-pop-status');
+          if (statusText) {
+            statusText.textContent = chk.checked ? 'Active' : 'Disabled';
+            statusText.style.color = chk.checked ? '#10b981' : '#64748b';
+          }
+        }
+      });
+    }
+  });
+
+  // Extension Pin Buttons
+  document.querySelectorAll('.ext-pin-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      btn.classList.toggle('active');
+    });
+  });
+
+  // Toolbar Quick Action Buttons
   const btnDownloads = document.getElementById('btnDownloads');
   const btnShield = document.getElementById('btnShield');
 
-  if (btnExtensions) btnExtensions.addEventListener('click', () => { closeAllModals(); if (extensionsModal) extensionsModal.style.display = 'flex'; });
   if (btnDownloads) btnDownloads.addEventListener('click', () => { closeAllModals(); if (downloadsModal) downloadsModal.style.display = 'flex'; });
   if (btnShield) btnShield.addEventListener('click', () => { closeAllModals(); if (extensionsModal) extensionsModal.style.display = 'flex'; });
 

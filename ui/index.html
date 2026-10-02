@@ -229,6 +229,117 @@
           </svg>
         </button>
 
+        <!-- Chrome Extensions Popover Menu -->
+        <div class="chrome-ext-popover glass-card" id="extDropdownPopup">
+          <div class="ext-popover-header">
+            <span class="ext-popover-title">Extensions</span>
+            <button class="ext-popover-close" id="btnCloseExtPopover">&times;</button>
+          </div>
+          <div class="ext-popover-subheader">
+            <span class="ext-access-title">Full access</span>
+            <p class="ext-access-desc">These extensions can see and change information on this site.</p>
+          </div>
+
+          <div class="ext-popover-list">
+            <!-- 1. AdBlock Shield -->
+            <div class="ext-popover-item" data-ext="adblock">
+              <span class="ext-pop-icon">🛡️</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">EasyList AdBlock Shield</span>
+                <span class="ext-pop-status">1,842 blocked</span>
+              </div>
+              <button class="ext-pin-btn active" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtAdblock">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+
+            <!-- 2. Reader Mode Pro -->
+            <div class="ext-popover-item" data-ext="reader">
+              <span class="ext-pop-icon">📖</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">Reader Mode Pro</span>
+                <span class="ext-pop-status">Clutter-free</span>
+              </div>
+              <button class="ext-pin-btn" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtReader">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+
+            <!-- 3. Auto-Translate -->
+            <div class="ext-popover-item" data-ext="translate">
+              <span class="ext-pop-icon">🌐</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">Assam Auto-Translate</span>
+                <span class="ext-pop-status">Indic HarfBuzz</span>
+              </div>
+              <button class="ext-pin-btn" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtTranslate">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+
+            <!-- 4. Anti-Fingerprint Privacy Guard -->
+            <div class="ext-popover-item" data-ext="privacy">
+              <span class="ext-pop-icon">🔒</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">Anti-Fingerprint Privacy</span>
+                <span class="ext-pop-status">Canvas noise active</span>
+              </div>
+              <button class="ext-pin-btn active" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtPrivacy">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+
+            <!-- 5. Screen Capture Studio -->
+            <div class="ext-popover-item" data-ext="capture">
+              <span class="ext-pop-icon">📸</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">Screen Capture Studio</span>
+                <span class="ext-pop-status">4K snip tool</span>
+              </div>
+              <button class="ext-pin-btn" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtCapture">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+
+            <!-- 6. Turbo RAM Booster -->
+            <div class="ext-popover-item" data-ext="booster">
+              <span class="ext-pop-icon">⚡</span>
+              <div class="ext-pop-info">
+                <span class="ext-pop-name">Turbo RAM Booster</span>
+                <span class="ext-pop-status">84% memory saved</span>
+              </div>
+              <button class="ext-pin-btn active" title="Pin to toolbar">📌</button>
+              <label class="toggle-switch-sm">
+                <input type="checkbox" checked id="chkExtBooster">
+                <span class="toggle-slider-sm"></span>
+              </label>
+              <button class="ext-more-btn" title="More actions">⋮</button>
+            </div>
+          </div>
+
+          <div class="ext-popover-divider"></div>
+
+          <div class="ext-popover-footer" id="btnOpenManageExt">
+            <span class="manage-ext-icon">⚙️</span>
+            <span class="manage-ext-text">Manage extensions</span>
+          </div>
+        </div>
+
         <!-- Downloads Button -->
         <button class="tool-btn" id="btnDownloads" title="Download Manager">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">

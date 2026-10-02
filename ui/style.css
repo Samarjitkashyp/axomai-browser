@@ -672,6 +672,220 @@ body {
   border: 1.5px solid #ffffff;
 }
 
+/* Google Chrome-Style Extensions Popover */
+.chrome-ext-popover {
+  position: absolute;
+  top: 48px;
+  right: 170px;
+  width: 320px;
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg), 0 10px 40px rgba(0, 0, 0, 0.5);
+  padding: 8px 6px;
+  display: none;
+  flex-direction: column;
+  z-index: 1000;
+  animation: menuFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chrome-ext-popover.show {
+  display: flex !important;
+}
+
+.ext-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 4px 12px;
+}
+
+.ext-popover-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.ext-popover-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ext-popover-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-heading);
+}
+
+.ext-popover-subheader {
+  padding: 2px 12px 10px 12px;
+}
+
+.ext-access-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-heading);
+  display: block;
+}
+
+.ext-access-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.ext-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+
+.ext-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.ext-popover-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ext-pop-icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+}
+
+.ext-pop-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.ext-pop-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.ext-pop-status {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.ext-pin-btn {
+  background: none;
+  border: none;
+  font-size: 13px;
+  opacity: 0.35;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.ext-pin-btn.active, .ext-pin-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ext-more-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.ext-more-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-heading);
+}
+
+/* Small Toggle Switch */
+.toggle-switch-sm {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.toggle-switch-sm input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider-sm {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(255, 255, 255, 0.2);
+  transition: .3s;
+  border-radius: 18px;
+}
+
+.toggle-slider-sm:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+.toggle-switch-sm input:checked + .toggle-slider-sm {
+  background-color: var(--theme-primary);
+}
+
+.toggle-switch-sm input:checked + .toggle-slider-sm:before {
+  transform: translateX(14px);
+}
+
+.ext-popover-divider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 6px 4px;
+}
+
+.ext-popover-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-heading);
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+}
+
+.ext-popover-footer:hover {
+  background: var(--theme-primary-light);
+  color: var(--theme-primary);
+}
+
 /* Chrome 3-Dots Menu Button & Dropdown */
 .chrome-menu-btn {
   font-size: 18px;
