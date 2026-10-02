@@ -281,6 +281,27 @@ fn serde_json_mini(s: &str) -> String {
     out
 }
 
+fn url_encode_mini(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+fn page_to_file_url(filename: &str, html: &str) -> String {
+    let temp_path = std::env::temp_dir().join(filename);
+    let _ = std::fs::write(&temp_path, html);
+    format!("file:///{}", temp_path.to_string_lossy().replace('\\', "/"))
+}
+
 fn create_extensions() -> Vec<Extension> {
     vec![
         Extension {
@@ -1493,18 +1514,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 if let Some(page) = load_internal_page.take() {
-                    let html = match page.as_str() {
-                        "home" => internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template()),
-                        "extensions" => internal_pages::extensions_page_html(&extensions),
-                        "settings" => internal_pages::settings_page_html(selected_search_engine),
-                        _ => internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template()),
+                    let target_url = match page.as_str() {
+                        "home" => {
+                            let html = internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template());
+                            page_to_file_url("axomai_home.html", &html)
+                        }
+                        "extensions" => {
+                            let html = internal_pages::extensions_page_html(&extensions);
+                            page_to_file_url("axomai_extensions.html", &html)
+                        }
+                        "settings" => {
+                            let html = internal_pages::settings_page_html(selected_search_engine);
+                            page_to_file_url("axomai_settings.html", &html)
+                        }
+                        _ => {
+                            let html = internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template());
+                            page_to_file_url("axomai_home.html", &html)
+                        }
                     };
+
                     let cw = w_of(&gpu_renderer);
                     let ch = h_of(&gpu_renderer);
                     if webview.is_none() {
                         let nav_clone = nav_url_shared.clone();
                         webview = WebViewBuilder::new()
-                            .with_html(&html)
+                            .with_url(&target_url)
                             .with_devtools(false)
                             .with_bounds(Rect {
                                 position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
@@ -1529,11 +1563,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .ok();
                         webview_visible = webview.is_some();
                     } else if let Some(ref wv) = webview {
-                        let js = format!(
-                            "document.open();document.write({});document.close();",
-                            serde_json_mini(&html)
-                        );
-                        let _ = wv.evaluate_script(&js);
+                        let _ = wv.load_url(&target_url);
                         if !webview_visible {
                             let _ = wv.set_visible(true);
                             webview_visible = true;
