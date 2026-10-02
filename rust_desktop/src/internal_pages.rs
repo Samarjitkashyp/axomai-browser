@@ -1,4 +1,5 @@
 use crate::{Extension, SearchEngine};
+use crate::b64_assets::{LOGO_PNG_B64, BG_JPG_B64};
 
 pub fn home_page_html_with_engine(search_url_base: &str) -> String {
     home_page_html_inner(search_url_base)
@@ -34,7 +35,7 @@ body{
   align-items:center;justify-content:center;
   padding:40px 24px;
   -webkit-user-select:none;user-select:none;
-  background:linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.65)), url('assets/tea_garden_bg.jpg') center/cover no-repeat fixed #064e3b;
+  background:linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.65)), url('data:image/jpeg;base64,BG_JPG_B64_PLACEHOLDER') center/cover no-repeat fixed #064e3b;
 }
 .greeting{
   font-size:15px;font-weight:700;color:#a7f3d0;
@@ -112,7 +113,7 @@ h1{
 </head>
 <body>
 <div class="greeting">নমস্কাৰ • অসম</div>
-<img src="assets/icons/axomai_logo.png" class="logo" alt="Axomai Logo">
+<img src="data:image/png;base64,LOGO_PNG_B64_PLACEHOLDER" class="logo" alt="Axomai Logo">
 <h1>Axomai Browser</h1>
 <p class="tagline">Smart. Assamese. AI For All. Built with Rust & HarfBuzz.</p>
 <div class="search-box">
@@ -169,7 +170,10 @@ document.querySelectorAll('.shortcut').forEach(function(el){
 </script>
 </body>
 </html>"##;
-    template.replace("SEARCH_ENGINE_URL_PLACEHOLDER", search_url_base)
+    template
+        .replace("SEARCH_ENGINE_URL_PLACEHOLDER", search_url_base)
+        .replace("LOGO_PNG_B64_PLACEHOLDER", LOGO_PNG_B64)
+        .replace("BG_JPG_B64_PLACEHOLDER", BG_JPG_B64)
 }
 
 pub fn extensions_page_html(extensions: &[Extension]) -> String {

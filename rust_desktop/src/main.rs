@@ -1,4 +1,5 @@
 mod internal_pages;
+pub mod b64_assets;
 
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
