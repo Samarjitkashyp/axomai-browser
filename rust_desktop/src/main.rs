@@ -384,7 +384,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
                         // 3-dot menu button
-                        let menu_btn_x = w - 160.0;
+                        let menu_btn_x = w - 120.0 + 46.0 + 4.0;
 
                         if mouse_x >= menu_btn_x - 10.0 && mouse_x <= menu_btn_x + 20.0
                             && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
@@ -393,10 +393,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             needs_chrome_redraw = true;
                         }
-                        let addr_x = SIDEBAR_W + 140.0;
-                        let addr_y = TAB_BAR_H + 8.0;
-                        let addr_h = 30.0;
-                        let addr_w = w - addr_x - 160.0;
+                        let addr_x = SIDEBAR_W + 60.0;
+                        let addr_y = TAB_BAR_H + 7.0;
+                        let addr_h = TOOLBAR_H - 14.0;
+                        let addr_w = w - addr_x - 130.0;
                         if mouse_x >= addr_x
                             && mouse_x <= addr_x + addr_w
                             && mouse_y >= addr_y
@@ -411,8 +411,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 SetFocus(window.hwnd() as _);
                             }
                         } else if mouse_y >= TAB_BAR_H {
-                            let nav_base_x = SIDEBAR_W + 8.0;
-                            if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 32.0 {
+                            let nav_base_x = SIDEBAR_W + 12.0;
+                            if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 24.0 {
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index > 0 {
                                         eng.history_index -= 1;
@@ -425,7 +425,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         needs_chrome_redraw = true;
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 36.0 && mouse_x <= nav_base_x + 68.0 {
+                            } else if mouse_x >= nav_base_x + 26.0 && mouse_x <= nav_base_x + 50.0 {
                                 if let Ok(mut eng) = engine.lock() {
                                     if eng.history_index + 1 < eng.history.len() {
                                         eng.history_index += 1;
@@ -1043,72 +1043,73 @@ fn build_chrome_quads(
     let plus_x = tab_x + tab_w + 8.0;
     render_text(compositor, &mut quads, "+", plus_x + 4.0, 27.0, 16.0, text_secondary, plus_x + 24.0);
 
-    // === TOOLBAR (Chrome-style clean white) ===
+    // === TOOLBAR (Modern glassmorphism) ===
     let ty = TAB_BAR_H;
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, viewport_w - SIDEBAR_W, TOOLBAR_H, toolbar_bg));
-    // Thin border at bottom
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.0, viewport_w - SIDEBAR_W, 1.0, border));
+    let toolbar_w = viewport_w - SIDEBAR_W;
+    // Glassmorphism toolbar background
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(240, 243, 249, 245)));
+    // Frosted overlay
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(255, 255, 255, 60)));
+    // Bottom glow line (gradient blue-purple)
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(99, 132, 255, 50)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(168, 120, 255, 40)));
 
-    // Navigation buttons (Chrome-style: circular hover areas)
-    let nav_y = ty + TOOLBAR_H / 2.0;
-    let nb = SIDEBAR_W + 16.0;
-    let back_c = if history_back { text_primary } else { c(189, 193, 198, 255) };
-    let fwd_c = if history_fwd { text_primary } else { c(189, 193, 198, 255) };
-    // Back arrow
-    render_text(compositor, &mut quads, "<", nb + 2.0, nav_y + 6.0, 16.0, back_c, nb + 20.0);
-    // Forward arrow
-    render_text(compositor, &mut quads, ">", nb + 30.0, nav_y + 6.0, 16.0, fwd_c, nb + 50.0);
-    // Refresh
-    render_text(compositor, &mut quads, "R", nb + 60.0, nav_y + 5.0, 13.0, text_secondary, nb + 78.0);
-    // Home button
-    render_text(compositor, &mut quads, "H", nb + 88.0, nav_y + 5.0, 13.0, text_secondary, nb + 106.0);
+    // Navigation buttons (compact, modern)
+    let nav_cy = ty + TOOLBAR_H / 2.0 + 5.0;
+    let nb = SIDEBAR_W + 12.0;
+    let back_c = if history_back { c(60, 65, 75, 255) } else { c(180, 185, 195, 255) };
+    let fwd_c = if history_fwd { c(60, 65, 75, 255) } else { c(180, 185, 195, 255) };
+    render_text(compositor, &mut quads, "<", nb + 4.0, nav_cy, 15.0, back_c, nb + 22.0);
+    render_text(compositor, &mut quads, ">", nb + 30.0, nav_cy, 15.0, fwd_c, nb + 48.0);
 
-    // Address bar (Chrome-style omnibox)
-    let ax = SIDEBAR_W + 130.0;
-    let ay = ty + 5.0;
-    let ah = TOOLBAR_H - 10.0;
-    let aw = viewport_w - ax - 140.0;
+    // Full-width address bar (modern glassmorphism pill)
+    let ax = SIDEBAR_W + 60.0;
+    let ay = ty + 7.0;
+    let ah = TOOLBAR_H - 14.0;
+    let right_icons_w = 120.0;
+    let aw = viewport_w - ax - right_icons_w - 10.0;
     let bar_radius = ah / 2.0;
+
     if focused {
-        // Focused: white with blue outline, subtle shadow
-        quads.push(rq(ax - 1.0, ay + 1.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(0, 0, 0, 18)));
-        quads.push(rq(ax - 1.0, ay - 1.0, aw + 2.0, ah + 2.0, bar_radius + 1.0, c(26, 115, 232, 255)));
-        quads.push(rq(ax + 1.0, ay + 1.0, aw - 2.0, ah - 2.0, bar_radius - 1.0, white));
+        // Focused: elevated glass with blue accent glow
+        quads.push(rq(ax - 1.0, ay + 2.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(99, 132, 255, 25)));
+        quads.push(rq(ax - 1.5, ay - 1.5, aw + 3.0, ah + 3.0, bar_radius + 2.0, c(99, 132, 255, 120)));
+        quads.push(rq(ax, ay, aw, ah, bar_radius, c(255, 255, 255, 252)));
     } else {
-        // Unfocused: Chrome's subtle gray pill with slight depth
-        quads.push(rq(ax, ay + 1.0, aw, ah, bar_radius, c(0, 0, 0, 8)));
-        quads.push(rq(ax, ay, aw, ah, bar_radius, c(241, 243, 244, 255)));
+        // Unfocused: frosted glass pill
+        quads.push(rq(ax, ay + 1.0, aw, ah, bar_radius, c(0, 0, 0, 6)));
+        quads.push(rq(ax, ay, aw, ah, bar_radius, c(235, 238, 245, 220)));
+        // Inner highlight at top
+        quads.push(NativeGpuCompositor::solid_quad(ax + 8.0, ay + 1.0, aw - 16.0, 1.0, c(255, 255, 255, 100)));
     }
 
     // Search/lock icon
-    render_text(compositor, &mut quads, "O", ax + 14.0, ay + ah / 2.0 + 6.0, 13.0, text_secondary, ax + 30.0);
+    let icon_y = ay + ah / 2.0 + 5.0;
+    render_text(compositor, &mut quads, "O", ax + 14.0, icon_y, 13.0, c(130, 135, 150, 255), ax + 30.0);
 
     let is_placeholder = (address_text == "about:home" || address_text == "about:settings") && !focused;
-    let display = if is_placeholder { "Search Google or type a URL" } else { address_text };
-    let dtc = if is_placeholder { c(154, 160, 166, 255) } else { text_primary };
-    let end_x = render_text(compositor, &mut quads, display, ax + 34.0, ay + ah / 2.0 + 6.0, 14.0, dtc, ax + aw - 14.0);
+    let display = if is_placeholder { "Search or type a URL" } else { address_text };
+    let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
+    let end_x = render_text(compositor, &mut quads, display, ax + 34.0, icon_y, 13.0, dtc, ax + aw - 14.0);
 
     if focused {
-        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 5.0, 1.5, ah - 10.0, c(26, 115, 232, 255)));
+        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
     }
 
-    // Right toolbar icons (Chrome-style, compact)
-    let iy = ty + 11.0;
-    let ih = TOOLBAR_H - 22.0;
-    let icy = iy + ih / 2.0 + 5.0;
+    // Right toolbar icons (modern, compact)
+    let icons_start = viewport_w - right_icons_w;
+    let iy = ty + 10.0;
+    let ih = TOOLBAR_H - 20.0;
+    let icy = iy + ih / 2.0 + 4.0;
 
-    // AI button (branded pill)
-    let ai_x = viewport_w - 250.0;
-    quads.push(rq(ai_x, iy, 40.0, ih, ih / 2.0, blue));
-    render_text(compositor, &mut quads, "AI", ai_x + 12.0, icy, 12.0, white, viewport_w);
-    // Profile avatar circle
-    let prof_x = viewport_w - 200.0;
-    quads.push(rq(prof_x, iy, ih, ih, ih / 2.0, c(138, 180, 248, 255)));
+    // Profile avatar (glass circle)
+    let prof_x = icons_start + 8.0;
+    quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(99, 132, 255, 180)));
     render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
+
     // Three-dot menu button
-    let menu_x = viewport_w - 160.0;
-    quads.push(NativeGpuCompositor::solid_quad(menu_x - 4.0, iy, 24.0, ih, c(200, 200, 200, 60)));
-    render_text(compositor, &mut quads, ":", menu_x, icy - 2.0, 20.0, c(90, 90, 90, 255), viewport_w);
+    let menu_x = icons_start + 46.0;
+    render_text(compositor, &mut quads, ":", menu_x + 4.0, icy - 1.0, 18.0, c(80, 85, 100, 255), viewport_w);
 
     quads
 }
