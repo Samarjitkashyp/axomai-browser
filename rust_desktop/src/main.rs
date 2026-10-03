@@ -430,7 +430,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let dm_w = 250.0;
                     let dm_x = gpu_renderer.surface_config.width as f32 - dm_w - 16.0;
                     let dm_y = CHROME_TOP + 4.0;
-                    for i in 0..11 {
+                    for i in 0..12 {
                         let iy = dm_y + 8.0 + i as f32 * 36.0;
                         if mouse_x >= dm_x && mouse_x <= dm_x + dm_w
                             && mouse_y >= iy && mouse_y <= iy + 34.0
@@ -564,7 +564,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let menu_items = [
                             "New Tab", "Home", "Bookmarks", "History",
                             "Downloads", "Extensions", "Passwords",
-                            "Heritage Themes", "Clear RAM & Cache", "Settings", "Exit"
+                            "Heritage Themes", "Clear RAM & Cache", "Settings", "About", "Exit"
                         ];
                         let mut clicked_item = None;
                         for (i, _item) in menu_items.iter().enumerate() {
@@ -669,6 +669,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     load_internal_page = Some("settings".to_string());
                                 }
                                 10 => {
+                                    // About
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
+                                    address_bar_text = String::from("axomai://about");
+                                    load_internal_page = Some("about".to_string());
+                                }
+                                11 => {
                                     // Exit
                                     *control_flow = ControlFlow::Exit;
                                 }
@@ -1562,6 +1570,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             address_bar_text = String::from("about:settings");
                             load_internal_page = Some("settings".to_string());
                             needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://about") {
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            address_bar_text = String::from("axomai://about");
+                            load_internal_page = Some("about".to_string());
+                            needs_chrome_redraw = true;
                         } else if url.starts_with("axomai://exit") {
                             *control_flow = ControlFlow::Exit;
                         } else if url.starts_with("axomai://ext-toggle/") {
@@ -1731,17 +1746,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .unwrap_or_default();
                             pages::downloads_page_html(&entries)
                         }
+                        "about" => String::new(),
                         _ => {
                             internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template())
                         }
+                    };
+
+                    let is_about_page = page == "about";
+                    let about_url = if is_about_page {
+                        let ui_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .parent().unwrap_or(std::path::Path::new("."))
+                            .join("ui").join("index.html");
+                        format!("file:///{}", ui_path.to_string_lossy().replace('\\', "/"))
+                    } else {
+                        String::new()
                     };
 
                     let cw = w_of(&gpu_renderer) / scale_factor;
                     let ch = h_of(&gpu_renderer) / scale_factor;
                     if webview.is_none() {
                         let nav_clone = nav_url_shared.clone();
-                        webview = WebViewBuilder::new()
-                            .with_html(&target_html)
+                        let builder = WebViewBuilder::new();
+                        let builder = if is_about_page {
+                            builder.with_url(&about_url)
+                        } else {
+                            builder.with_html(&target_html)
+                        };
+                        webview = builder
                             .with_devtools(false)
                             .with_background_color((15, 23, 42, 255))
                             .with_bounds(Rect {
@@ -1788,7 +1819,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("[Axomai] WebView created with internal HTML (no temp file)");
                         }
                     } else if let Some(ref wv) = webview {
-                        let _ = wv.load_html(&target_html);
+                        if is_about_page {
+                            let _ = wv.load_url(&about_url);
+                        } else {
+                            let _ = wv.load_html(&target_html);
+                        }
                         if !webview_visible {
                             let _ = wv.set_visible(true);
                             webview_visible = true;

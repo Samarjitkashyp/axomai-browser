@@ -470,6 +470,7 @@ input:checked~.toggle-track .toggle-thumb{{transform:translateX(20px)}}
       <div class="value">GPU (wgpu)</div>
     </div>
   </div>
+  <a href="axomai://about" style="display:inline-block;margin-top:18px;padding:10px 28px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;transition:background 0.2s;">About Us</a>
 </div>
 <script>
 document.querySelectorAll('input[name="engine"]').forEach(function(r){{
