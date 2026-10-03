@@ -1162,6 +1162,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 needs_chrome_redraw = true;
                             }
+                            Key::Character(ref ch) if !key_event.repeat => {
+                                find_text.push_str(ch);
+                                if let Some(ref wv) = webview {
+                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                                }
+                                needs_chrome_redraw = true;
+                            }
                             _ => {}
                         }
                     } else if address_bar_focused {
@@ -1249,6 +1257,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 address_bar_text = tabs[active_tab_idx].url.clone();
                                 needs_chrome_redraw = true;
                             }
+                            Key::Character(ref ch) if !key_event.repeat => {
+                                address_bar_text.push_str(ch);
+                                needs_chrome_redraw = true;
+                            }
                             _ => {}
                         }
                     } else if home_search_focused {
@@ -1333,12 +1345,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 home_search_text.clear();
                                 needs_chrome_redraw = true;
                             }
+                            Key::Character(ref ch) if !key_event.repeat => {
+                                home_search_text.push_str(ch);
+                                needs_chrome_redraw = true;
+                            }
                             _ => {}
                         }
                     } else {
                         if is_home_page {
-                            // Character input handled by ReceivedImeText
-                        } else if !is_home_page {
+                            if let Key::Character(ref ch) = key_event.logical_key {
+                                if !key_event.repeat {
+                                    home_search_focused = true;
+                                    home_search_text.clear();
+                                    home_search_text.push_str(ch);
+                                    needs_chrome_redraw = true;
+                                    #[cfg(target_os = "windows")]
+                                    unsafe {
+                                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                        SetFocus(window.hwnd() as _);
+                                    }
+                                }
+                            }
+                        } else {
                             let key_str = match key_event.logical_key {
                                 Key::Character(ref ch) => ch.to_string(),
                                 Key::Backspace => "BackSpace".to_string(),
@@ -1371,30 +1399,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::ReceivedImeText(ref text),
                 ..
             } => {
-                if address_bar_focused {
-                    address_bar_text.push_str(text);
-                    needs_chrome_redraw = true;
-                } else if find_bar_open {
-                    find_text.push_str(text);
-                    if let Some(ref wv) = webview {
-                        let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                        let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                    }
-                    needs_chrome_redraw = true;
-                } else if home_search_focused {
-                    home_search_text.push_str(text);
-                    needs_chrome_redraw = true;
-                } else if is_home_page {
-                    home_search_focused = true;
-                    home_search_text.clear();
-                    home_search_text.push_str(text);
-                    needs_chrome_redraw = true;
-                    #[cfg(target_os = "windows")]
-                    unsafe {
-                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                        SetFocus(window.hwnd() as _);
-                    }
-                }
+                // All text input handled by Key::Character in KeyboardInput
+                let _ = text;
             }
             Event::WindowEvent {
                 event: WindowEvent::MouseWheel { delta, .. },
