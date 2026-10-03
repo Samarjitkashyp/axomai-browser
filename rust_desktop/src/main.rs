@@ -220,9 +220,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("[Axomai] Toolbar icons loaded ({}px)", icon_size);
 
     let mut address_bar_text = String::from("about:home");
+    let mut address_bar_cursor: usize = 0;
     let mut address_bar_focused = false;
     let mut home_search_focused = false;
     let mut home_search_text = String::new();
+    let mut home_search_cursor: usize = 0;
     let mut _ime_active = false;
     let mut needs_chrome_redraw = true;
     let mut sidebar_active: usize = 0;
@@ -474,11 +476,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let nb = SIDEBAR_W + 10.0;
                     let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
                     let right_icons_w = 120.0 + n_enabled_ext * 30.0;
-                    let ax = SIDEBAR_W + 60.0;
+                    let ax = SIDEBAR_W + 88.0;
                     let aw = w - ax - right_icons_w - 10.0;
 
-                    if mouse_x >= nb && mouse_x <= nb + 56.0 {
-                        // Back / Forward buttons
+                    if mouse_x >= nb && mouse_x <= nb + 84.0 {
+                        // Back / Forward / Home buttons
                         cursor_icon = CursorIcon::Hand;
                     } else if mouse_x >= ax && mouse_x <= ax + aw {
                         // Address input
@@ -828,7 +830,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        let addr_x = SIDEBAR_W + 60.0;
+                        let addr_x = SIDEBAR_W + 88.0;
                         let addr_y = TAB_BAR_H + 7.0;
                         let addr_h = TOOLBAR_H - 14.0;
                         let addr_w = w - addr_x - right_w - 10.0;
@@ -840,6 +842,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             address_bar_focused = true;
                             find_bar_open = false;
                             address_bar_text.clear();
+                            address_bar_cursor = 0;
                             needs_chrome_redraw = true;
                             #[cfg(target_os = "windows")]
                             unsafe {
@@ -874,16 +877,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         needs_chrome_redraw = true;
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 72.0 && mouse_x <= nav_base_x + 104.0 {
-                                if !is_home_page {
-                                    if let Ok(mut eng) = engine.lock() {
-                                        let content_w = w - SIDEBAR_W;
-                                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                        if let Some(url) = eng.current_url.as_ref().map(|u| u.as_string()) {
-                                            let _ = eng.load_url(&url, content_w, content_h);
-                                        }
-                                    }
+                            } else if mouse_x >= nav_base_x + 52.0 && mouse_x <= nav_base_x + 78.0 {
+                                is_home_page = true;
+                                is_settings_page = false;
+                                is_extensions_page = false;
+                                address_bar_text = String::from("about:home");
+                                home_scroll_y = 0.0;
+                                home_search_focused = false;
+                                home_search_text.clear();
+                                home_search_cursor = 0;
+                                sidebar_active = 0;
+                                if let Some(ref wv) = webview {
+                                    let _ = wv.set_visible(false);
+                                    webview_visible = false;
                                 }
+                                load_internal_page = Some("home".to_string());
                             }
                             if address_bar_focused {
                                 address_bar_focused = false;
@@ -1079,6 +1087,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 address_bar_focused = true;
                                 find_bar_open = false;
                                 address_bar_text.clear();
+                                address_bar_cursor = 0;
                                 needs_chrome_redraw = true;
                                 #[cfg(target_os = "windows")]
                                 unsafe {
@@ -1175,7 +1184,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if address_bar_focused {
                         match key_event.logical_key {
                             Key::Backspace => {
-                                address_bar_text.pop();
+                                if address_bar_cursor > 0 {
+                                    let byte_pos = address_bar_text.char_indices()
+                                        .nth(address_bar_cursor - 1).map(|(i, _)| i);
+                                    let byte_end = address_bar_text.char_indices()
+                                        .nth(address_bar_cursor).map(|(i, _)| i)
+                                        .unwrap_or(address_bar_text.len());
+                                    if let Some(start) = byte_pos {
+                                        address_bar_text.replace_range(start..byte_end, "");
+                                        address_bar_cursor -= 1;
+                                    }
+                                }
+                                needs_chrome_redraw = true;
+                            }
+                            Key::ArrowLeft => {
+                                if address_bar_cursor > 0 {
+                                    address_bar_cursor -= 1;
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                            Key::ArrowRight => {
+                                let char_count = address_bar_text.chars().count();
+                                if address_bar_cursor < char_count {
+                                    address_bar_cursor += 1;
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                            Key::Home => {
+                                address_bar_cursor = 0;
+                                needs_chrome_redraw = true;
+                            }
+                            Key::End => {
+                                address_bar_cursor = address_bar_text.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             Key::Enter => {
@@ -1258,7 +1298,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 needs_chrome_redraw = true;
                             }
                             Key::Character(ref ch) if !key_event.repeat => {
-                                address_bar_text.push_str(ch);
+                                let byte_pos = address_bar_text.char_indices()
+                                    .nth(address_bar_cursor).map(|(i, _)| i)
+                                    .unwrap_or(address_bar_text.len());
+                                address_bar_text.insert_str(byte_pos, ch);
+                                address_bar_cursor += ch.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
@@ -1266,8 +1310,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if home_search_focused {
                         match key_event.logical_key {
                             Key::Backspace => {
-                                home_search_text.pop();
+                                if home_search_cursor > 0 {
+                                    let byte_pos = home_search_text.char_indices()
+                                        .nth(home_search_cursor - 1).map(|(i, _)| i);
+                                    let byte_end = home_search_text.char_indices()
+                                        .nth(home_search_cursor).map(|(i, _)| i)
+                                        .unwrap_or(home_search_text.len());
+                                    if let Some(start) = byte_pos {
+                                        home_search_text.replace_range(start..byte_end, "");
+                                        home_search_cursor -= 1;
+                                    }
+                                }
                                 needs_chrome_redraw = true;
+                            }
+                            Key::ArrowLeft => {
+                                if home_search_cursor > 0 {
+                                    home_search_cursor -= 1;
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                            Key::ArrowRight => {
+                                let char_count = home_search_text.chars().count();
+                                if home_search_cursor < char_count {
+                                    home_search_cursor += 1;
+                                    needs_chrome_redraw = true;
+                                }
                             }
                             Key::Enter => {
                                 home_search_focused = false;
@@ -1346,7 +1413,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 needs_chrome_redraw = true;
                             }
                             Key::Character(ref ch) if !key_event.repeat => {
-                                home_search_text.push_str(ch);
+                                let byte_pos = home_search_text.char_indices()
+                                    .nth(home_search_cursor).map(|(i, _)| i)
+                                    .unwrap_or(home_search_text.len());
+                                home_search_text.insert_str(byte_pos, ch);
+                                home_search_cursor += ch.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
@@ -1358,6 +1429,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     home_search_focused = true;
                                     home_search_text.clear();
                                     home_search_text.push_str(ch);
+                                    home_search_cursor = ch.chars().count();
                                     needs_chrome_redraw = true;
                                     #[cfg(target_os = "windows")]
                                     unsafe {
@@ -1777,7 +1849,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tabs[active_tab_idx].title = title.clone();
                     }
                     let mut quads = build_chrome_quads(
-                        &mut compositor, w, h, &address_bar_text, address_bar_focused,
+                        &mut compositor, w, h, &address_bar_text, address_bar_focused, address_bar_cursor,
                         &tabs, active_tab_idx, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
                         menu_open, hover_menu_idx, &toolbar_icons, &extensions,
                     );

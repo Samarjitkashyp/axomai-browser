@@ -58,6 +58,7 @@ pub fn build_chrome_quads(
     viewport_h: f32,
     address_text: &str,
     focused: bool,
+    address_cursor: usize,
     tabs: &[DesktopTab],
     active_tab_idx: usize,
     history_back: bool,
@@ -176,8 +177,9 @@ pub fn build_chrome_quads(
     let fwd_c = if history_fwd { c(60, 65, 75, 255) } else { c(180, 185, 195, 180) };
     quads.push(NativeGpuCompositor::icon_quad(nb, nav_iy, icon_s, &icons[0], back_c));
     quads.push(NativeGpuCompositor::icon_quad(nb + 28.0, nav_iy, icon_s, &icons[1], fwd_c));
+    quads.push(NativeGpuCompositor::icon_quad(nb + 56.0, nav_iy, icon_s, &icons[2], c(60, 65, 75, 255)));
 
-    let ax = SIDEBAR_W + 60.0;
+    let ax = SIDEBAR_W + 88.0;
     let ay = ty + 7.0;
     let ah = TOOLBAR_H - 14.0;
     let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
@@ -196,18 +198,24 @@ pub fn build_chrome_quads(
     }
 
     let icon_y = ay + ah / 2.0 + 5.0;
-    let url_icon_s = 14.0;
-    let url_icon_y = ay + (ah - url_icon_s) / 2.0;
-    quads.push(NativeGpuCompositor::icon_quad(ax + 10.0, url_icon_y, url_icon_s, &icons[2], c(130, 135, 150, 255)));
 
     let is_home = address_text == "about:home" || address_text == "axomai://home" || address_text == "axomai://newtab" || address_text.contains("axomai_home.html") || address_text.is_empty();
     let is_placeholder = is_home && !focused;
     let display = if is_placeholder { "Search with Google or type a URL" } else if is_home && focused && address_text == "about:home" { "" } else { address_text };
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
-    let end_x = render_text(compositor, &mut quads, display, ax + 34.0, icon_y, 13.0, dtc, ax + aw - 14.0);
-
-    if focused {
-        quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
+    if focused && !display.is_empty() {
+        let before_cursor: String = display.chars().take(address_cursor).collect();
+        let cursor_x = render_text(compositor, &mut quads, &before_cursor, ax + 12.0, icon_y, 13.0, dtc, ax + aw - 14.0);
+        let after_cursor: String = display.chars().skip(address_cursor).collect();
+        if !after_cursor.is_empty() {
+            render_text(compositor, &mut quads, &after_cursor, cursor_x, icon_y, 13.0, dtc, ax + aw - 14.0);
+        }
+        quads.push(NativeGpuCompositor::solid_quad(cursor_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
+    } else {
+        let end_x = render_text(compositor, &mut quads, display, ax + 12.0, icon_y, 13.0, dtc, ax + aw - 14.0);
+        if focused {
+            quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
+        }
     }
 
     let enabled_exts: Vec<(usize, &Extension)> = extensions.iter().enumerate().filter(|(_, e)| e.enabled).collect();
