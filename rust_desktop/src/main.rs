@@ -19,7 +19,7 @@ use tao::{
     dpi::{LogicalSize, PhysicalSize},
     event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    keyboard::Key,
+    keyboard::{Key, KeyCode},
     window::{CursorIcon, WindowBuilder},
 };
 #[cfg(target_os = "windows")]
@@ -208,6 +208,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let icon_forward = {
         let img = image::open(icons_dir.join("arrow_forward.png")).expect("icon").to_rgba8();
         compositor.glyph_atlas.blit_icon("forward", img.as_raw(), img.width(), img.height(), icon_size)
+    };
+    let icon_reload = {
+        let img = image::open(icons_dir.join("reload.png")).expect("icon").to_rgba8();
+        compositor.glyph_atlas.blit_icon("reload", img.as_raw(), img.width(), img.height(), icon_size)
     };
     let icon_home = {
         let img = image::open(icons_dir.join("home.png")).expect("icon").to_rgba8();
@@ -476,11 +480,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let nb = SIDEBAR_W + 10.0;
                     let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
                     let right_icons_w = 120.0 + n_enabled_ext * 30.0;
-                    let ax = SIDEBAR_W + 88.0;
+                    let ax = SIDEBAR_W + 116.0;
                     let aw = w - ax - right_icons_w - 10.0;
 
-                    if mouse_x >= nb && mouse_x <= nb + 84.0 {
-                        // Back / Forward / Home buttons
+                    if mouse_x >= nb && mouse_x <= nb + 112.0 {
+                        // Back / Forward / Reload / Home buttons
                         cursor_icon = CursorIcon::Hand;
                     } else if mouse_x >= ax && mouse_x <= ax + aw {
                         // Address input
@@ -830,7 +834,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        let addr_x = SIDEBAR_W + 88.0;
+                        let addr_x = SIDEBAR_W + 116.0;
                         let addr_y = TAB_BAR_H + 7.0;
                         let addr_h = TOOLBAR_H - 14.0;
                         let addr_w = w - addr_x - right_w - 10.0;
@@ -877,7 +881,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         needs_chrome_redraw = true;
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 52.0 && mouse_x <= nav_base_x + 78.0 {
+                            } else if mouse_x >= nav_base_x + 56.0 && mouse_x <= nav_base_x + 78.0 {
+                                // Reload button
+                                if !is_home_page && !is_settings_page && !is_extensions_page {
+                                    if let Some(ref wv) = webview {
+                                        let _ = wv.load_url(&address_bar_text);
+                                    }
+                                }
+                                needs_chrome_redraw = true;
+                            } else if mouse_x >= nav_base_x + 84.0 && mouse_x <= nav_base_x + 106.0 {
                                 is_home_page = true;
                                 is_settings_page = false;
                                 is_extensions_page = false;
@@ -1182,6 +1194,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         }
                     } else if address_bar_focused {
+                        let is_arrow_left = matches!(key_event.logical_key, Key::ArrowLeft) || matches!(key_event.physical_key, KeyCode::ArrowLeft);
+                        let is_arrow_right = matches!(key_event.logical_key, Key::ArrowRight) || matches!(key_event.physical_key, KeyCode::ArrowRight);
+                        let is_home_key = matches!(key_event.logical_key, Key::Home) || matches!(key_event.physical_key, KeyCode::Home);
+                        let is_end_key = matches!(key_event.logical_key, Key::End) || matches!(key_event.physical_key, KeyCode::End);
+                        let is_delete = matches!(key_event.logical_key, Key::Delete) || matches!(key_event.physical_key, KeyCode::Delete);
+
+                        if is_arrow_left {
+                            if address_bar_cursor > 0 {
+                                address_bar_cursor -= 1;
+                                needs_chrome_redraw = true;
+                            }
+                        } else if is_arrow_right {
+                            let char_count = address_bar_text.chars().count();
+                            if address_bar_cursor < char_count {
+                                address_bar_cursor += 1;
+                                needs_chrome_redraw = true;
+                            }
+                        } else if is_home_key {
+                            address_bar_cursor = 0;
+                            needs_chrome_redraw = true;
+                        } else if is_end_key {
+                            address_bar_cursor = address_bar_text.chars().count();
+                            needs_chrome_redraw = true;
+                        } else if is_delete {
+                            let char_count = address_bar_text.chars().count();
+                            if address_bar_cursor < char_count {
+                                let byte_start = address_bar_text.char_indices()
+                                    .nth(address_bar_cursor).map(|(i, _)| i)
+                                    .unwrap_or(address_bar_text.len());
+                                let byte_end = address_bar_text.char_indices()
+                                    .nth(address_bar_cursor + 1).map(|(i, _)| i)
+                                    .unwrap_or(address_bar_text.len());
+                                address_bar_text.replace_range(byte_start..byte_end, "");
+                                needs_chrome_redraw = true;
+                            }
+                        } else {
                         match key_event.logical_key {
                             Key::Backspace => {
                                 if address_bar_cursor > 0 {
@@ -1195,27 +1243,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         address_bar_cursor -= 1;
                                     }
                                 }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::ArrowLeft => {
-                                if address_bar_cursor > 0 {
-                                    address_bar_cursor -= 1;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                            Key::ArrowRight => {
-                                let char_count = address_bar_text.chars().count();
-                                if address_bar_cursor < char_count {
-                                    address_bar_cursor += 1;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                            Key::Home => {
-                                address_bar_cursor = 0;
-                                needs_chrome_redraw = true;
-                            }
-                            Key::End => {
-                                address_bar_cursor = address_bar_text.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             Key::Enter => {
@@ -1307,7 +1334,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             _ => {}
                         }
+                        } // end else (non-arrow keys)
                     } else if home_search_focused {
+                        let is_arrow_left = matches!(key_event.logical_key, Key::ArrowLeft) || matches!(key_event.physical_key, KeyCode::ArrowLeft);
+                        let is_arrow_right = matches!(key_event.logical_key, Key::ArrowRight) || matches!(key_event.physical_key, KeyCode::ArrowRight);
+
+                        if is_arrow_left {
+                            if home_search_cursor > 0 {
+                                home_search_cursor -= 1;
+                                needs_chrome_redraw = true;
+                            }
+                        } else if is_arrow_right {
+                            let char_count = home_search_text.chars().count();
+                            if home_search_cursor < char_count {
+                                home_search_cursor += 1;
+                                needs_chrome_redraw = true;
+                            }
+                        } else {
                         match key_event.logical_key {
                             Key::Backspace => {
                                 if home_search_cursor > 0 {
@@ -1322,19 +1365,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
                                 needs_chrome_redraw = true;
-                            }
-                            Key::ArrowLeft => {
-                                if home_search_cursor > 0 {
-                                    home_search_cursor -= 1;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                            Key::ArrowRight => {
-                                let char_count = home_search_text.chars().count();
-                                if home_search_cursor < char_count {
-                                    home_search_cursor += 1;
-                                    needs_chrome_redraw = true;
-                                }
                             }
                             Key::Enter => {
                                 home_search_focused = false;
@@ -1422,6 +1452,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             _ => {}
                         }
+                        } // end else (non-arrow keys)
                     } else {
                         if is_home_page {
                             if let Key::Character(ref ch) = key_event.logical_key {
@@ -1840,7 +1871,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let history_back = if let Ok(eng) = engine.lock() { eng.history_index > 0 } else { false };
                     let history_fwd = if let Ok(eng) = engine.lock() { eng.history_index + 1 < eng.history.len() } else { false };
 
-                    let toolbar_icons = [icon_back, icon_forward, icon_home, icon_menu];
+                    let toolbar_icons = [icon_back, icon_forward, icon_reload, icon_home, icon_menu];
                     if active_tab_idx < tabs.len() {
                         tabs[active_tab_idx].url = address_bar_text.clone();
                         tabs[active_tab_idx].is_home = is_home_page;
