@@ -1,4 +1,4 @@
-use crate::{Extension, SearchEngine};
+use crate::types::{Extension, SearchEngine};
 use crate::b64_assets::{LOGO_PNG_B64, BG_JPG_B64};
 
 pub fn home_page_html_with_engine(search_url_base: &str) -> String {

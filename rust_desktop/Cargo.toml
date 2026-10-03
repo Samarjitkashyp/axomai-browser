@@ -12,3 +12,6 @@ pollster = "0.3"
 axomai_engine = { path = "../native/rust_engine", features = ["wgpu-backend"] }
 wry = "0.49"
 image = { version = "0.24", default-features = false, features = ["jpeg", "png"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
