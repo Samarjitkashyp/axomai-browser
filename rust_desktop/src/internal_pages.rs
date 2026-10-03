@@ -326,7 +326,7 @@ document.querySelectorAll('.toggle input').forEach(function(cb){{
 </html>"##, ext_cards=ext_cards)
 }
 
-pub fn settings_page_html(selected_engine: SearchEngine) -> String {
+pub fn settings_page_html(selected_engine: SearchEngine, restore_session: bool) -> String {
     let mut engine_options = String::new();
     for engine in SearchEngine::all() {
         let checked = if *engine == selected_engine { "checked" } else { "" };
@@ -408,6 +408,24 @@ input:checked~.radio-mark::after{{transform:scale(1)}}
 }}
 .info-item .label{{color:var(--muted);font-size:12px;font-weight:500;margin-bottom:4px;text-transform:uppercase;letter-spacing:.04em}}
 .info-item .value{{font-size:15px;font-weight:600}}
+.toggle-option{{
+  display:flex;align-items:center;gap:14px;cursor:pointer;
+  padding:12px 16px;border-radius:10px;transition:background .15s;
+}}
+.toggle-option:hover{{background:var(--accent-light)}}
+.toggle-option input{{display:none}}
+.toggle-track{{
+  width:44px;height:24px;border-radius:12px;flex-shrink:0;
+  background:var(--border);position:relative;transition:background .2s;
+}}
+.toggle-thumb{{
+  position:absolute;top:2px;left:2px;width:20px;height:20px;
+  border-radius:50%;background:#fff;transition:transform .2s;
+  box-shadow:0 1px 3px rgba(0,0,0,.15);
+}}
+input:checked~.toggle-track{{background:var(--accent)}}
+input:checked~.toggle-track .toggle-thumb{{transform:translateX(20px)}}
+.toggle-label{{font-size:14px;font-weight:500}}
 </style>
 </head>
 <body>
@@ -421,6 +439,15 @@ input:checked~.radio-mark::after{{transform:scale(1)}}
   <div class="radio-group">
     {engine_options}
   </div>
+</div>
+<div class="section">
+  <h2>Session Restore</h2>
+  <p class="desc">Restore your tabs from the previous session when you open the browser.</p>
+  <label class="toggle-option">
+    <input type="checkbox" id="restore-toggle" {restore_checked}>
+    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+    <span class="toggle-label">Restore previous session tabs</span>
+  </label>
 </div>
 <div class="section">
   <h2>About Axomai Browser</h2>
@@ -450,7 +477,11 @@ document.querySelectorAll('input[name="engine"]').forEach(function(r){{
     window.location.href='axomai://set-engine/'+this.value;
   }});
 }});
+document.getElementById('restore-toggle').addEventListener('change',function(){{
+  window.location.href='axomai://set-restore-session/'+(this.checked?'true':'false');
+}});
 </script>
 </body>
-</html>"##, engine_options=engine_options)
+</html>"##, engine_options=engine_options,
+     restore_checked=if restore_session { "checked" } else { "" })
 }
