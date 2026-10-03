@@ -67,7 +67,7 @@ pub fn build_chrome_quads(
     hover_sidebar: Option<usize>,
     _menu_open: bool,
     _hover_menu: Option<usize>,
-    icons: &[GlyphInfo; 4],
+    icons: &[GlyphInfo; 5],
     extensions: &[Extension],
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
@@ -178,8 +178,9 @@ pub fn build_chrome_quads(
     quads.push(NativeGpuCompositor::icon_quad(nb, nav_iy, icon_s, &icons[0], back_c));
     quads.push(NativeGpuCompositor::icon_quad(nb + 28.0, nav_iy, icon_s, &icons[1], fwd_c));
     quads.push(NativeGpuCompositor::icon_quad(nb + 56.0, nav_iy, icon_s, &icons[2], c(60, 65, 75, 255)));
+    quads.push(NativeGpuCompositor::icon_quad(nb + 84.0, nav_iy, icon_s, &icons[3], c(60, 65, 75, 255)));
 
-    let ax = SIDEBAR_W + 88.0;
+    let ax = SIDEBAR_W + 116.0;
     let ay = ty + 7.0;
     let ah = TOOLBAR_H - 14.0;
     let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
@@ -245,7 +246,7 @@ pub fn build_chrome_quads(
     let menu_x = puzzle_x + ih + 6.0;
     let menu_icon_s = 18.0;
     let menu_icon_y = ty + (TOOLBAR_H - menu_icon_s) / 2.0;
-    quads.push(NativeGpuCompositor::icon_quad(menu_x, menu_icon_y, menu_icon_s, &icons[3], c(80, 85, 100, 255)));
+    quads.push(NativeGpuCompositor::icon_quad(menu_x, menu_icon_y, menu_icon_s, &icons[4], c(80, 85, 100, 255)));
 
     quads
 }
