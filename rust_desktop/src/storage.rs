@@ -29,6 +29,14 @@ pub struct DownloadEntry {
     pub started_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SavedTab {
+    pub position: i32,
+    pub url: String,
+    pub title: String,
+    pub is_active: bool,
+}
+
 pub struct BrowserStorage {
     conn: Connection,
 }
@@ -71,6 +79,13 @@ impl BrowserStorage {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tabs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                position INTEGER NOT NULL,
+                url TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                is_active INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_history_time ON history(visit_time DESC);
             CREATE INDEX IF NOT EXISTS idx_history_url ON history(url);
@@ -221,6 +236,32 @@ impl BrowserStorage {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
+    pub fn save_tabs(&self, tabs: &[SavedTab]) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM tabs", [])?;
+        let mut stmt = self.conn.prepare(
+            "INSERT INTO tabs (position, url, title, is_active) VALUES (?1, ?2, ?3, ?4)"
+        )?;
+        for tab in tabs {
+            stmt.execute(params![tab.position, tab.url, tab.title, tab.is_active as i32])?;
+        }
+        Ok(())
+    }
+
+    pub fn get_tabs(&self) -> Result<Vec<SavedTab>, rusqlite::Error> {
+        let mut stmt = self.conn.prepare(
+            "SELECT position, url, title, is_active FROM tabs ORDER BY position ASC"
+        )?;
+        let entries = stmt.query_map([], |row| {
+            Ok(SavedTab {
+                position: row.get(0)?,
+                url: row.get(1)?,
+                title: row.get(2)?,
+                is_active: row.get::<_, i32>(3)? != 0,
+            })
+        })?.collect::<Result<Vec<_>, _>>()?;
+        Ok(entries)
     }
 }
 
