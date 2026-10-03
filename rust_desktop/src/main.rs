@@ -838,6 +838,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             && mouse_y <= addr_y + addr_h
                         {
                             address_bar_focused = true;
+                            find_bar_open = false;
                             address_bar_text.clear();
                             needs_chrome_redraw = true;
                             #[cfg(target_os = "windows")]
@@ -1073,6 +1074,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("l") => {
                                 address_bar_focused = true;
+                                find_bar_open = false;
                                 address_bar_text.clear();
                                 needs_chrome_redraw = true;
                                 #[cfg(target_os = "windows")]
@@ -1252,6 +1254,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if is_home_page {
                                     address_bar_text = String::from("about:home");
                                 }
+                                needs_chrome_redraw = true;
+                            }
+                            Key::Character(ref ch) => {
+                                address_bar_text.push_str(ch);
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
