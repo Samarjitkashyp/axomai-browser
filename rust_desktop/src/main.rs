@@ -1,5 +1,12 @@
 mod internal_pages;
 pub mod b64_assets;
+pub mod types;
+pub mod storage;
+pub mod extensions;
+pub mod pages;
+
+use types::{SearchEngine, DesktopTab, Extension, SIDEBAR_ITEMS, SIDEBAR_W, TAB_BAR_H, TOOLBAR_H, CHROME_TOP};
+use extensions::{create_extensions, build_extension_init_script};
 
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
@@ -13,13 +20,9 @@ use tao::{
     keyboard::Key,
     window::{CursorIcon, WindowBuilder},
 };
+#[cfg(target_os = "windows")]
 use tao::platform::windows::WindowExtWindows;
 use wry::{Rect, WebViewBuilder};
-
-const SIDEBAR_W: f32 = 0.0;
-const TAB_BAR_H: f32 = 40.0;
-const TOOLBAR_H: f32 = 44.0;
-const CHROME_TOP: f32 = TAB_BAR_H + TOOLBAR_H;
 
 const CHROME_DROPDOWN_JS: &str = r#"(function(){
     var existing = document.getElementById('__axomai_chrome_menu');
@@ -171,95 +174,6 @@ const CHROME_EXT_DROPDOWN_JS: &str = r#"(function(){
     }, 10);
 })();"#;
 
-struct SidebarItem {
-    label: &'static str,
-    icon: &'static str,
-    is_section: bool,
-}
-
-const SIDEBAR_ITEMS: &[SidebarItem] = &[
-    SidebarItem { label: "Home", icon: "H", is_section: false },
-    SidebarItem { label: "AI Assistant", icon: "A", is_section: false },
-    SidebarItem { label: "Bookmarks", icon: "B", is_section: false },
-    SidebarItem { label: "History", icon: "h", is_section: false },
-    SidebarItem { label: "Downloads", icon: "D", is_section: false },
-    SidebarItem { label: "Extensions", icon: "E", is_section: false },
-    SidebarItem { label: "Passwords", icon: "P", is_section: false },
-    SidebarItem { label: "Settings", icon: "S", is_section: false },
-    SidebarItem { label: "Workspaces", icon: "", is_section: true },
-    SidebarItem { label: "Personal", icon: "o", is_section: false },
-    SidebarItem { label: "Work", icon: "o", is_section: false },
-    SidebarItem { label: "Study", icon: "o", is_section: false },
-    SidebarItem { label: "AI Tools", icon: "o", is_section: false },
-];
-
-#[derive(Clone, Copy, PartialEq)]
-enum SearchEngine {
-    Google,
-    Bing,
-    Yahoo,
-    DuckDuckGo,
-}
-
-impl SearchEngine {
-    fn name(&self) -> &'static str {
-        match self {
-            SearchEngine::Google => "Google",
-            SearchEngine::Bing => "Bing",
-            SearchEngine::Yahoo => "Yahoo",
-            SearchEngine::DuckDuckGo => "DuckDuckGo",
-        }
-    }
-    fn search_url(&self, query: &str) -> String {
-        let encoded: String = query.bytes().map(|b| {
-            match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                    (b as char).to_string()
-                }
-                b' ' => "+".to_string(),
-                _ => format!("%{:02X}", b),
-            }
-        }).collect();
-        match self {
-            SearchEngine::Google => format!("https://www.google.com/search?q={}", encoded),
-            SearchEngine::Bing => format!("https://www.bing.com/search?q={}", encoded),
-            SearchEngine::Yahoo => format!("https://search.yahoo.com/search?p={}", encoded),
-            SearchEngine::DuckDuckGo => format!("https://html.duckduckgo.com/html/?q={}", encoded),
-        }
-    }
-    fn js_search_template(&self) -> &'static str {
-        match self {
-            SearchEngine::Google => "https://www.google.com/search?q=",
-            SearchEngine::Bing => "https://www.bing.com/search?q=",
-            SearchEngine::Yahoo => "https://search.yahoo.com/search?p=",
-            SearchEngine::DuckDuckGo => "https://html.duckduckgo.com/html/?q=",
-        }
-    }
-    fn all() -> &'static [SearchEngine] {
-        &[SearchEngine::Google, SearchEngine::Bing, SearchEngine::Yahoo, SearchEngine::DuckDuckGo]
-    }
-}
-
-struct Extension {
-    name: &'static str,
-    description: &'static str,
-    version: &'static str,
-    icon_letter: &'static str,
-    icon_color: [u8; 3],
-    enabled: bool,
-    auto_inject: bool,
-    inject_js: &'static str,
-    disable_js: &'static str,
-}
-
-#[derive(Clone, Debug)]
-struct DesktopTab {
-    title: String,
-    url: String,
-    is_home: bool,
-    is_extensions: bool,
-    is_settings: bool,
-}
 
 fn serde_json_mini(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -302,89 +216,6 @@ fn page_to_file_url(filename: &str, html: &str) -> String {
     format!("file:///{}", temp_path.to_string_lossy().replace('\\', "/"))
 }
 
-fn create_extensions() -> Vec<Extension> {
-    vec![
-        Extension {
-            name: "EasyList AdBlock Shield",
-            description: "Blocks ads, popups, and intrusive tracker scripts on all websites",
-            version: "3.4.1",
-            icon_letter: "A",
-            icon_color: [16, 185, 129],
-            enabled: true,
-            auto_inject: true,
-            inject_js: r#"(function(){if(window.__axomai_ab)return;window.__axomai_ab=1;var s=document.createElement('style');s.id='__axomai_ab';s.textContent='ins.adsbygoogle,div[id^="google_ads"],div[id^="div-gpt-ad"],iframe[id^="google_ads"],iframe[src*="doubleclick"],iframe[src*="googlesyndication"],iframe[src*="adserver"],iframe[src*="ads."],div[class*="ad-container"],div[class*="ad-wrapper"],div[class*="ad-banner"],div[class*="ad-slot"],div[class*="advertisement"],div[id*="advertisement"],div[class*="Ad-"],div[id*="Ad-"],div[data-ad],div[data-ad-slot],div[data-google-query-id],div[class*="sponsored"],div[id*="sponsored"],aside[class*="ad"],section[class*="ad"],div[class*="advert"],div[id*="advert"],div[class*="banner-ad"],div[id*="banner-ad"],amp-ad,amp-sticky-ad,div[class*="sticky-ad"],div[id*="sticky"],div[class*="interstitial"],div[class*="popup-ad"],div[class*="overlay-ad"],div[class*="taboola"],div[id*="taboola"],div[class*="outbrain"],div[id*="outbrain"],div[class*="mgid"],div[id*="mgid"],div[class*="colombiaonline"],div[class*="revContent"],div[class*="native-ad"],a[href*="doubleclick"],div[class*="promo-"],div[class*="dfp-"],div[id*="dfp-"],div[class*="ads-"],div[id*="ads-"],div[class*="adsense"],div[class*="ad_"],div[id*="ad_"],div[class*="leaderboard-ad"],div[class*="sidebar-ad"],div[class*="footer-ad"],div[class*="top-ad"],div[class*="inline-ad"],div[class*="mid-article-ad"],div.ie-int-camp498-498,div[class*="storyAdBox"]{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;opacity:0!important;pointer-events:none!important}';(document.head||document.documentElement).appendChild(s);function hideAds(){document.querySelectorAll('ins.adsbygoogle,div[id^="google_ads"],div[id^="div-gpt-ad"],iframe[id^="google_ads"],div[data-google-query-id],div[class*="taboola"],div[class*="outbrain"],div[class*="advert"],div[class*="sponsored"],div[class*="ad-container"],div[class*="ad-wrapper"],div[class*="ad-slot"],div[class*="sticky-ad"],amp-ad,amp-sticky-ad').forEach(function(e){e.style.setProperty('display','none','important');e.style.setProperty('height','0','important')});document.querySelectorAll('iframe').forEach(function(f){try{var s=f.src||'';if(/doubleclick|googlesyndication|ads\.|adserver|amazon-adsystem|taboola|outbrain/i.test(s)){f.style.setProperty('display','none','important');f.style.setProperty('height','0','important')}}catch(x){}})}hideAds();new MutationObserver(function(){hideAds()}).observe(document.documentElement,{childList:true,subtree:true});setInterval(hideAds,2000)})()"#,
-            disable_js: r#"(function(){var s=document.getElementById('__axomai_ab');if(s)s.remove();window.__axomai_ab=0;clearInterval(window.__axomai_ab_timer)})()"#,
-        },
-        Extension {
-            name: "Reader Mode Pro",
-            description: "Strips pages to clean, readable format with beautiful typography",
-            version: "2.1.0",
-            icon_letter: "R",
-            icon_color: [60, 130, 60],
-            enabled: true,
-            auto_inject: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_reader'))return;var sels=['article','.article-body','.story-detail','.article-content','.post-content','.entry-content','.article__content','[itemprop="articleBody"]','.story-body','.full_story','.story_details','.article_content','.content-area'];var a=null;for(var i=0;i<sels.length;i++){a=document.querySelector(sels[i]);if(a&&a.querySelectorAll('p').length>=2)break;a=null}if(!a){var best=null,bestP=0;document.querySelectorAll('div,section').forEach(function(el){var pc=el.querySelectorAll('p').length;if(pc>bestP&&el.textContent.trim().length>300){bestP=pc;best=el}});if(best&&bestP>=3)a=best}var paras=[];var imgs=[];if(a){a.querySelectorAll('p').forEach(function(p){var t=p.textContent.trim();if(t.length>20)paras.push('<p>'+p.innerHTML+'</p>')});a.querySelectorAll('img[src]').forEach(function(img){var w=img.naturalWidth||img.width||parseInt(img.getAttribute('width'))||0;if(w>150||(!img.width&&!img.height&&img.src)){imgs.push('<img src="'+img.src.replace(/"/g,'&quot;')+'" style="max-width:100%;height:auto;border-radius:8px;margin:16px 0">')}})}var html='';if(paras.length<2){html='<p style="color:#888;font-size:16px;text-align:center;padding:60px 20px">This page does not have enough article content for Reader Mode.<br><br>Try opening a specific article page.</p>'}else{if(imgs.length>0)html+=imgs[0];html+=paras.join('');if(paras.length>50)html=paras.slice(0,50).join('')+'<p style="color:#888">...</p>'}var d=document.createElement('div');d.id='__axomai_reader';d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;z-index:999999;overflow-y:auto;background:#faf9f6';var title=document.title.replace(/</g,'&lt;').replace(/>/g,'&gt;');d.innerHTML='<div style="max-width:700px;margin:0 auto;padding:40px 24px;font:19px/1.9 Georgia,Times,serif;color:#1a1a1a"><div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap"><span style="background:#3c823c;color:#fff;padding:5px 14px;border-radius:14px;font:bold 12px sans-serif;letter-spacing:.5px">READER MODE</span><span style="color:#888;font:12px sans-serif">'+window.location.hostname+'</span><button id="__axomai_reader_exit" style="margin-left:auto;background:#f5f5f5;border:1px solid #ddd;padding:6px 16px;border-radius:14px;cursor:pointer;font:13px sans-serif;color:#555">Exit Reader</button></div><h1 style="font:bold 30px/1.3 -apple-system,Segoe UI,sans-serif;margin-bottom:12px;color:#111">'+title+'</h1><hr style="border:0;border-top:2px solid #eee;margin:24px 0">'+html+'</div>';document.body.appendChild(d);document.getElementById('__axomai_reader_exit').onclick=function(){d.remove()};d.querySelectorAll('script,style,iframe,ins,[class*="ad"],[class*="social"],[class*="share"]').forEach(function(e){e.remove()});d.querySelectorAll('a').forEach(function(a){a.style.color='#2563eb'})})()"#,
-            disable_js: r#"(function(){var d=document.getElementById('__axomai_reader');if(d)d.remove()})()"#,
-        },
-        Extension {
-            name: "Assam Auto-Translate",
-            description: "Adds Indic HarfBuzz real-time translation for Assamese and global languages",
-            version: "2.0.4",
-            icon_letter: "T",
-            icon_color: [66, 133, 244],
-            enabled: true,
-            auto_inject: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_translate'))return;var b=document.createElement('div');b.id='__axomai_translate';b.innerHTML='<button style="position:fixed;bottom:24px;right:24px;z-index:999999;padding:12px 20px;background:linear-gradient(135deg,#4285f4,#5b6abf);color:#fff;border:none;border-radius:28px;font:bold 13px -apple-system,Segoe UI,sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(66,133,244,.4);display:flex;align-items:center;gap:8px;transition:transform .2s,box-shadow .2s" onmouseover="this.style.transform=\'scale(1.05)\';this.style.boxShadow=\'0 6px 24px rgba(66,133,244,.5)\'" onmouseout="this.style.transform=\'scale(1)\';this.style.boxShadow=\'0 4px 16px rgba(66,133,244,.4)\'" title="Translate this page"><svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04M18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12m-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg> Translate</button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){window.location.href='https://translate.google.com/translate?sl=auto&tl=en&u='+encodeURIComponent(window.location.href)}})()"#,
-            disable_js: r#"(function(){var d=document.getElementById('__axomai_translate');if(d)d.remove()})()"#,
-        },
-        Extension {
-            name: "Anti-Fingerprint Privacy Guard",
-            description: "Blocks canvas fingerprinting, WebGL telemetry, and invasive tracking scripts",
-            version: "1.9.0",
-            icon_letter: "P",
-            icon_color: [180, 80, 200],
-            enabled: true,
-            auto_inject: true,
-            inject_js: r#"(function(){if(window.__axomai_tb)return;window.__axomai_tb=1;var s=document.createElement('style');s.id='__axomai_tb';s.textContent='img[src*="pixel"],img[src*="track"],img[src*="beacon"],img[src*="analytics"],img[width="1"][height="1"],img[width="0"]{display:none!important}';(document.head||document.documentElement).appendChild(s);var blockList=/google-analytics\.com|googletagmanager\.com|facebook\.net|connect\.facebook|analytics\.|tracker\.|hotjar\.com|mouseflow\.com|clarity\.ms|doubleclick\.net|googlesyndication|amazon-adsystem|scorecardresearch|quantserve|taboola|outbrain|criteo|adnxs\.com|pubmatic|rubiconproject|openx\.net|casalemedia|indexexchange|33across/i;if(window.XMLHttpRequest){var origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'&&blockList.test(u)){this.__blocked=true}return origOpen.apply(this,arguments)};var origSend=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){if(this.__blocked)return;return origSend.apply(this,arguments)}}if(window.fetch){var origFetch=window.fetch;window.fetch=function(u,o){var url=typeof u==='string'?u:(u&&u.url?u.url:'');if(blockList.test(url))return Promise.resolve(new Response('',{status:200}));return origFetch.apply(this,arguments)}}new MutationObserver(function(muts){muts.forEach(function(m){m.addedNodes.forEach(function(n){if(n.tagName==='SCRIPT'&&n.src&&blockList.test(n.src)){n.type='javascript/blocked';n.remove()}if(n.tagName==='IMG'&&n.src&&blockList.test(n.src)){n.remove()}if(n.tagName==='IFRAME'&&n.src&&blockList.test(n.src)){n.remove()}})})}).observe(document.documentElement,{childList:true,subtree:true})})()"#,
-            disable_js: r#"(function(){var s=document.getElementById('__axomai_tb');if(s)s.remove();window.__axomai_tb=0})()"#,
-        },
-        Extension {
-            name: "Screen Capture Studio",
-            description: "4K snip tool, visible viewport, and full page screenshot capture",
-            version: "1.5.0",
-            icon_letter: "S",
-            icon_color: [245, 158, 11],
-            enabled: true,
-            auto_inject: false,
-            inject_js: r#"(function(){if(document.getElementById('__axomai_ss'))return;var b=document.createElement('div');b.id='__axomai_ss';b.innerHTML='<button style="position:fixed;bottom:24px;right:90px;z-index:999999;width:48px;height:48px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:50%;font:bold 20px sans-serif;cursor:pointer;box-shadow:0 4px 16px rgba(245,158,11,.4);display:flex;align-items:center;justify-content:center;transition:transform .2s,box-shadow .2s" onmouseover="this.style.transform=\'scale(1.1)\';this.style.boxShadow=\'0 6px 24px rgba(245,158,11,.5)\'" onmouseout="this.style.transform=\'scale(1)\';this.style.boxShadow=\'0 4px 16px rgba(245,158,11,.4)\'" title="Capture Screenshot"><svg width="22" height="22" viewBox="0 0 24 24" fill="white"><path d="M20 4h-3.17L15 2H9L7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h4.05l1.83-2h4.24l1.83 2H20v12zM12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 8c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/></svg></button>';document.body.appendChild(b);b.querySelector('button').onclick=function(){var flash=document.createElement('div');flash.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,255,255,0.7);z-index:999998;pointer-events:none;transition:opacity 0.3s';document.body.appendChild(flash);setTimeout(function(){flash.style.opacity='0'},80);setTimeout(function(){flash.remove()},400);navigator.clipboard.writeText('[Screenshot] '+document.title+'\n'+window.location.href).catch(function(){});var n=document.createElement('div');n.style.cssText='position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:14px 28px;background:rgba(30,30,30,.9);color:#fff;border-radius:12px;z-index:999999;font:14px -apple-system,Segoe UI,sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.3);backdrop-filter:blur(8px)';n.textContent='Screenshot saved to clipboard!';document.body.appendChild(n);setTimeout(function(){n.style.opacity='0';n.style.transition='opacity 0.3s'},1800);setTimeout(function(){n.remove()},2200)}})()"#,
-            disable_js: r#"(function(){var d=document.getElementById('__axomai_ss');if(d)d.remove()})()"#,
-        },
-        Extension {
-            name: "Turbo RAM Booster",
-            description: "Background tab hibernation and memory optimization engine",
-            version: "3.0.2",
-            icon_letter: "B",
-            icon_color: [239, 68, 68],
-            enabled: true,
-            auto_inject: true,
-            inject_js: r#"(function(){console.log('[Axomai Booster] RAM Booster active - memory trimmed');})()"#,
-            disable_js: r#"(function(){console.log('[Axomai Booster] RAM Booster disabled');})()"#,
-        },
-    ]
-}
-
-fn build_extension_init_script(extensions: &[Extension]) -> String {
-    let mut js = String::from("new MutationObserver(()=>{document.querySelectorAll('[style*=\"non-commercial\"],.webview2-watermark,[class*=watermark]').forEach(e=>e.remove())}).observe(document.documentElement,{childList:true,subtree:true});\n");
-    for ext in extensions {
-        if ext.enabled && ext.auto_inject {
-            js.push_str("try{");
-            js.push_str(ext.inject_js);
-            js.push_str("}catch(e){}\n");
-        }
-    }
-    js
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--subprocess" {
@@ -393,6 +224,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let engine = Arc::new(Mutex::new(AxomaiEngine::new()));
+
+    let browser_storage = match storage::BrowserStorage::new() {
+        Ok(s) => {
+            println!("[Axomai] SQLite storage initialized");
+            Some(s)
+        }
+        Err(e) => {
+            eprintln!("[Axomai] Storage init failed (non-fatal): {}", e);
+            None
+        }
+    };
+
+    let selected_search_engine_from_db = browser_storage.as_ref()
+        .and_then(|s| s.get_setting("search_engine").ok().flatten())
+        .and_then(|v| match v.as_str() {
+            "Bing" => Some(SearchEngine::Bing),
+            "Yahoo" => Some(SearchEngine::Yahoo),
+            "DuckDuckGo" => Some(SearchEngine::DuckDuckGo),
+            _ => Some(SearchEngine::Google),
+        });
+
     let event_loop = EventLoop::new();
 
     let icon_data = {
@@ -523,7 +375,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut home_scroll_y: f32 = 0.0;
     let mut hover_sidebar_idx: Option<usize> = None;
     let mut is_settings_page = false;
-    let mut selected_search_engine = SearchEngine::Google;
+    let mut selected_search_engine = selected_search_engine_from_db.unwrap_or(SearchEngine::Google);
     let mut hover_engine_idx: Option<usize> = None;
     let mut menu_open = false;
     let mut hover_menu_idx: Option<usize> = None;
@@ -550,6 +402,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut webview: Option<wry::WebView> = None;
     let mut webview_visible = false;
     let mut load_internal_page: Option<String> = Some("home".to_string());
+
+    let mut browser_storage = browser_storage;
 
     #[allow(unused_assignments)]
     event_loop.run(move |event, _, control_flow| {
@@ -845,18 +699,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 2 => {
                                     // Bookmarks
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
                                     address_bar_text = String::from("axomai://bookmarks");
-                                    load_internal_page = Some("home".to_string());
+                                    load_internal_page = Some("bookmarks".to_string());
                                 }
                                 3 => {
                                     // History
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
                                     address_bar_text = String::from("axomai://history");
-                                    load_internal_page = Some("home".to_string());
+                                    load_internal_page = Some("history".to_string());
                                 }
                                 4 => {
                                     // Downloads
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
                                     address_bar_text = String::from("axomai://downloads");
-                                    load_internal_page = Some("home".to_string());
+                                    load_internal_page = Some("downloads".to_string());
                                 }
                                 5 => {
                                     // Extensions
@@ -869,6 +732,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 6 => {
                                     // Passwords
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
                                     address_bar_text = String::from("axomai://passwords");
                                     load_internal_page = Some("home".to_string());
                                 }
@@ -1065,7 +931,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             address_bar_focused = true;
                             address_bar_text.clear();
                             needs_chrome_redraw = true;
-                            // Steal focus back from WebView2
+                            #[cfg(target_os = "windows")]
                             unsafe {
                                 extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
                                 SetFocus(window.hwnd() as _);
@@ -1177,6 +1043,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             home_search_focused = true;
                             home_search_text.clear();
                             needs_chrome_redraw = true;
+                            #[cfg(target_os = "windows")]
                             unsafe {
                                 extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
                                 SetFocus(window.hwnd() as _);
@@ -1408,6 +1275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     home_search_text.clear();
                     home_search_text.push_str(text);
                     needs_chrome_redraw = true;
+                    #[cfg(target_os = "windows")]
                     unsafe {
                         extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
                         SetFocus(window.hwnd() as _);
@@ -1495,6 +1363,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "DuckDuckGo" => SearchEngine::DuckDuckGo,
                                 _ => SearchEngine::Google,
                             };
+                            if let Some(ref s) = browser_storage {
+                                let _ = s.set_setting("search_engine", selected_search_engine.name());
+                            }
                             if is_settings_page {
                                 load_internal_page = Some("settings".to_string());
                             }
@@ -1503,6 +1374,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             is_home_page = true;
                             is_extensions_page = false;
                             is_settings_page = false;
+                            needs_chrome_redraw = true;
+                        } else if url.contains("axomai_history.html") {
+                            address_bar_text = String::from("axomai://history");
+                            needs_chrome_redraw = true;
+                        } else if url.contains("axomai_bookmarks.html") {
+                            address_bar_text = String::from("axomai://bookmarks");
+                            needs_chrome_redraw = true;
+                        } else if url.contains("axomai_downloads.html") {
+                            address_bar_text = String::from("axomai://downloads");
                             needs_chrome_redraw = true;
                         } else if url.contains("axomai_extensions.html") || url == "axomai://extensions" {
                             address_bar_text = String::from("axomai://extensions");
@@ -1516,9 +1396,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             is_home_page = false;
                             is_extensions_page = false;
                             needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://bookmarks") {
+                            address_bar_text = String::from("axomai://bookmarks");
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            load_internal_page = Some("bookmarks".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://history") {
+                            address_bar_text = String::from("axomai://history");
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            load_internal_page = Some("history".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://downloads") {
+                            address_bar_text = String::from("axomai://downloads");
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            load_internal_page = Some("downloads".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://clear-history") {
+                            if let Some(ref s) = browser_storage {
+                                let _ = s.clear_history();
+                                println!("[Axomai] History cleared");
+                            }
+                            load_internal_page = Some("history".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://clear-downloads") {
+                            if let Some(ref s) = browser_storage {
+                                let _ = s.clear_downloads();
+                                println!("[Axomai] Downloads cleared");
+                            }
+                            load_internal_page = Some("downloads".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://remove-bookmark/") {
+                            if let Ok(id) = url.trim_start_matches("axomai://remove-bookmark/").parse::<i64>() {
+                                if let Some(ref s) = browser_storage {
+                                    let _ = s.remove_bookmark(id);
+                                    println!("[Axomai] Bookmark {} removed", id);
+                                }
+                            }
+                            load_internal_page = Some("bookmarks".to_string());
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://add-bookmark") {
+                            if let Some(ref s) = browser_storage {
+                                let bookmark_url = &address_bar_text;
+                                let title_str = if let Ok(eng) = engine.lock() {
+                                    eng.current_title.clone()
+                                } else {
+                                    String::new()
+                                };
+                                let _ = s.add_bookmark(bookmark_url, &title_str, "Unsorted");
+                                println!("[Axomai] Bookmarked: {}", bookmark_url);
+                            }
+                            needs_chrome_redraw = true;
                         } else if url.starts_with("data:") || (url.starts_with("file:") && url.contains("axomai_")) {
                             // Internal page temp file/data URL — don't update address bar
                         } else {
+                            // Record to history
+                            if let Some(ref s) = browser_storage {
+                                let _ = s.add_history(&url, "");
+                            }
                             address_bar_text = url;
                             is_home_page = false;
                             is_extensions_page = false;
@@ -1544,6 +1484,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "settings" => {
                             let html = internal_pages::settings_page_html(selected_search_engine);
                             page_to_file_url("axomai_settings.html", &html)
+                        }
+                        "history" => {
+                            let entries = browser_storage.as_ref()
+                                .and_then(|s| s.get_history(100).ok())
+                                .unwrap_or_default();
+                            let html = pages::history_page_html(&entries);
+                            page_to_file_url("axomai_history.html", &html)
+                        }
+                        "bookmarks" => {
+                            let entries = browser_storage.as_ref()
+                                .and_then(|s| s.get_bookmarks().ok())
+                                .unwrap_or_default();
+                            let html = pages::bookmarks_page_html(&entries);
+                            page_to_file_url("axomai_bookmarks.html", &html)
+                        }
+                        "downloads" => {
+                            let entries = browser_storage.as_ref()
+                                .and_then(|s| s.get_downloads(100).ok())
+                                .unwrap_or_default();
+                            let html = pages::downloads_page_html(&entries);
+                            page_to_file_url("axomai_downloads.html", &html)
                         }
                         _ => {
                             let html = internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template());
