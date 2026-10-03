@@ -18,37 +18,6 @@ html,body{
 }
 .new-tab-content{position:relative;min-height:100vh;display:flex;flex-direction:column}
 
-/* Colorful top tab bar */
-.home-tab-bar{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 16px;
-  background:linear-gradient(135deg,#e6f4ea 0%,#ecfdf5 50%,#e0f2fe 100%);
-  border-bottom:1px solid rgba(16,185,129,0.15);
-}
-.home-tab{
-  display:flex;align-items:center;gap:6px;
-  padding:7px 16px;border-radius:12px 12px 0 0;
-  font-size:13px;font-weight:600;cursor:pointer;
-  border:1px solid transparent;border-bottom:none;
-  transition:all 0.2s;color:#64748b;background:transparent;
-}
-.home-tab:hover{background:rgba(255,255,255,0.6);color:#059669}
-.home-tab.active{
-  background:rgba(255,255,255,0.9);color:#059669;
-  border-color:rgba(16,185,129,0.2);
-  box-shadow:0 -2px 10px rgba(16,185,129,0.15);
-}
-.home-tab-icon{width:16px;height:16px;border-radius:3px}
-.home-tab-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.tab-new-btn{
-  width:28px;height:28px;border-radius:8px;border:none;
-  background:rgba(16,185,129,0.08);color:#059669;
-  display:flex;align-items:center;justify-content:center;
-  cursor:pointer;font-size:16px;font-weight:700;
-  transition:all 0.2s;margin-left:auto;
-}
-.tab-new-btn:hover{background:rgba(16,185,129,0.2);transform:scale(1.1)}
-
 .scenic-backdrop{
   position:relative;
   min-height:580px;
@@ -289,27 +258,6 @@ html,body{
 </head>
 <body>
 <div class="new-tab-content">
-  <!-- Colorful Tab Bar -->
-  <div class="home-tab-bar">
-    <div class="home-tab active">
-      <img src="assets/images/favicon.png" class="home-tab-icon" alt="" />
-      <span>New Tab</span>
-    </div>
-    <div class="home-tab" data-url="https://tourism.assam.gov.in">
-      <span class="home-tab-dot" style="background:#10b981"></span>
-      <span>Assam Tourism</span>
-    </div>
-    <div class="home-tab" data-url="https://youtube.com">
-      <span class="home-tab-dot" style="background:#ef4444"></span>
-      <span>YouTube</span>
-    </div>
-    <div class="home-tab" data-url="https://github.com">
-      <span class="home-tab-dot" style="background:#24292f"></span>
-      <span>GitHub</span>
-    </div>
-    <button class="tab-new-btn" title="New Tab">+</button>
-  </div>
-
   <div class="scenic-backdrop" style="background-image: url('assets/images/tea_garden_bg.jpg');">
     <div class="scenic-overlay"></div>
 

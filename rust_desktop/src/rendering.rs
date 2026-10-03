@@ -167,8 +167,8 @@ pub fn build_chrome_quads(
     let toolbar_w = viewport_w - SIDEBAR_W;
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(255, 255, 255, 220)));
     quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(230, 244, 234, 40)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(16, 185, 129, 50)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(5, 150, 105, 40)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 2.0, toolbar_w * 0.5, 2.0, c(16, 185, 129, 120)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 2.0, toolbar_w * 0.5, 2.0, c(5, 150, 105, 90)));
 
     let icon_s = 18.0;
     let nav_iy = ty + (TOOLBAR_H - icon_s) / 2.0;
@@ -184,7 +184,8 @@ pub fn build_chrome_quads(
     let ay = ty + 7.0;
     let ah = TOOLBAR_H - 14.0;
     let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
-    let right_icons_w = 120.0 + n_enabled_ext * 30.0;
+    let extra_icons = 5.0;
+    let right_icons_w = 120.0 + n_enabled_ext * 30.0 + extra_icons * 30.0;
     let aw = viewport_w - ax - right_icons_w - 10.0;
     let bar_radius = ah / 2.0;
 
@@ -204,11 +205,13 @@ pub fn build_chrome_quads(
     let secure_x = ax + 8.0;
     quads.push(rq(secure_x, ay + 4.0, secure_badge_w, ah - 8.0, (ah - 8.0) / 2.0, c(5, 150, 105, 30)));
     render_text(compositor, &mut quads, "Secure", secure_x + 6.0, icon_y, 11.0, c(5, 150, 105, 255), secure_x + secure_badge_w);
-    let addr_text_start = ax + secure_badge_w + 14.0;
+    let globe_x = secure_x + secure_badge_w + 6.0;
+    render_text(compositor, &mut quads, "@", globe_x, icon_y, 13.0, c(80, 85, 100, 200), globe_x + 16.0);
+    let addr_text_start = globe_x + 18.0;
 
     let is_home = address_text == "about:home" || address_text == "axomai://home" || address_text == "axomai://newtab" || address_text.contains("axomai_home.html") || address_text.is_empty();
     let is_placeholder = is_home && !focused;
-    let display = if is_placeholder { "Search with Google or type a URL" } else if is_home && focused && address_text == "about:home" { "" } else { address_text };
+    let display = if is_placeholder { "Search with Axomai or enter address..." } else if is_home && focused && address_text == "about:home" { "" } else { address_text };
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
     if focused && !display.is_empty() {
         let before_cursor: String = display.chars().take(address_cursor).collect();
@@ -227,17 +230,26 @@ pub fn build_chrome_quads(
 
     let enabled_exts: Vec<(usize, &Extension)> = extensions.iter().enumerate().filter(|(_, e)| e.enabled).collect();
     let ext_icons_w = enabled_exts.len() as f32 * 30.0;
-    let right_total = 110.0 + ext_icons_w;
+    let right_total = 110.0 + ext_icons_w + extra_icons as f32 * 30.0;
     let icons_start = viewport_w - right_total;
     let iy = ty + 10.0;
     let ih = TOOLBAR_H - 20.0;
     let icy = iy + ih / 2.0 + 4.0;
+    let icon_color = c(80, 85, 100, 255);
 
-    let prof_x = icons_start + 8.0;
-    quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(5, 150, 105, 200)));
-    render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
+    let mut rx = icons_start + 4.0;
 
-    let mut ext_x = prof_x + ih + 8.0;
+    render_text(compositor, &mut quads, "*", rx + 4.0, icy, 14.0, icon_color, rx + ih);
+    rx += 28.0;
+
+    render_text(compositor, &mut quads, "|", rx + 6.0, icy, 12.0, icon_color, rx + ih);
+    rx += 28.0;
+
+    quads.push(rq(rx, iy + 1.0, ih, ih, ih / 2.0, c(16, 185, 129, 220)));
+    render_text(compositor, &mut quads, "18", rx + 3.0, icy, 10.0, white, rx + ih);
+    rx += 30.0;
+
+    let mut ext_x = rx;
     for (_idx, ext) in &enabled_exts {
         let ec = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 220);
         quads.push(rq(ext_x, iy + 1.0, ih, ih, ih / 2.0, ec));
@@ -245,14 +257,27 @@ pub fn build_chrome_quads(
         ext_x += 30.0;
     }
 
-    let puzzle_x = ext_x + 2.0;
-    quads.push(rq(puzzle_x, iy + 1.0, ih, ih, 6.0, c(255, 255, 255, 40)));
-    render_text(compositor, &mut quads, "E", puzzle_x + 6.0, icy, 11.5, c(60, 65, 80, 255), puzzle_x + ih);
+    quads.push(rq(ext_x, iy + 1.0, ih, ih, 6.0, c(255, 255, 255, 40)));
+    render_text(compositor, &mut quads, "E", ext_x + 6.0, icy, 11.5, icon_color, ext_x + ih);
+    ext_x += 30.0;
 
-    let menu_x = puzzle_x + ih + 6.0;
+    render_text(compositor, &mut quads, "v", ext_x + 5.0, icy, 12.0, icon_color, ext_x + ih);
+    ext_x += 28.0;
+
+    render_text(compositor, &mut quads, "o", ext_x + 5.0, icy, 12.0, icon_color, ext_x + ih);
+    ext_x += 28.0;
+
+    quads.push(rq(ext_x, iy + 1.0, 28.0, ih, ih / 2.0, c(16, 185, 129, 230)));
+    render_text(compositor, &mut quads, "AI", ext_x + 5.0, icy, 11.0, white, ext_x + 28.0);
+    ext_x += 32.0;
+
+    quads.push(rq(ext_x, iy + 1.0, ih, ih, ih / 2.0, c(5, 150, 105, 200)));
+    render_text(compositor, &mut quads, "S", ext_x + 6.0, icy, 11.0, white, ext_x + ih);
+    ext_x += 30.0;
+
     let menu_icon_s = 18.0;
     let menu_icon_y = ty + (TOOLBAR_H - menu_icon_s) / 2.0;
-    quads.push(NativeGpuCompositor::icon_quad(menu_x, menu_icon_y, menu_icon_s, &icons[4], c(80, 85, 100, 255)));
+    quads.push(NativeGpuCompositor::icon_quad(ext_x, menu_icon_y, menu_icon_s, &icons[4], icon_color));
 
     quads
 }
