@@ -1611,11 +1611,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if is_settings_page {
                                 load_internal_page = Some("settings".to_string());
                             }
+                        } else if url.starts_with("axomai://search/") {
+                            let query = url.trim_start_matches("axomai://search/");
+                            let search_url = format!("{}{}", selected_search_engine.js_search_template(), query);
+                            address_bar_text = search_url.clone();
+                            if let Some(ref wv) = webview {
+                                let _ = wv.load_url(&search_url);
+                            }
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            needs_chrome_redraw = true;
                         } else if url.contains("axomai_home.html") || url == "about:home" || url == "axomai://home" || url == "axomai://newtab" {
                             address_bar_text = String::from("about:home");
                             is_home_page = true;
                             is_extensions_page = false;
                             is_settings_page = false;
+                            load_internal_page = Some("home".to_string());
                             needs_chrome_redraw = true;
                         } else if url.contains("axomai_history.html") {
                             address_bar_text = String::from("axomai://history");
@@ -1716,9 +1728,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if let Some(page) = load_internal_page.take() {
                     let target_html = match page.as_str() {
-                        "home" => {
-                            internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template())
-                        }
+                        "home" => String::new(),
                         "extensions" => {
                             internal_pages::extensions_page_html(&extensions)
                         }
@@ -1752,12 +1762,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
 
-                    let is_about_page = page == "about";
-                    let about_url = if is_about_page {
-                        let ui_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    let is_file_page = page == "about" || page == "home";
+                    let file_url = if is_file_page {
+                        let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                             .parent().unwrap_or(std::path::Path::new("."))
-                            .join("ui").join("index.html");
-                        format!("file:///{}", ui_path.to_string_lossy().replace('\\', "/"))
+                            .join("ui");
+                        let file_name = if page == "about" { "index.html" } else { "home.html" };
+                        format!("file:///{}", ui_dir.join(file_name).to_string_lossy().replace('\\', "/"))
                     } else {
                         String::new()
                     };
@@ -1767,8 +1778,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if webview.is_none() {
                         let nav_clone = nav_url_shared.clone();
                         let builder = WebViewBuilder::new();
-                        let builder = if is_about_page {
-                            builder.with_url(&about_url)
+                        let builder = if is_file_page {
+                            builder.with_url(&file_url)
                         } else {
                             builder.with_html(&target_html)
                         };
@@ -1819,8 +1830,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("[Axomai] WebView created with internal HTML (no temp file)");
                         }
                     } else if let Some(ref wv) = webview {
-                        if is_about_page {
-                            let _ = wv.load_url(&about_url);
+                        if is_file_page {
+                            let _ = wv.load_url(&file_url);
                         } else {
                             let _ = wv.load_html(&target_html);
                         }
