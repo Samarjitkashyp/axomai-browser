@@ -885,7 +885,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 }
                             }
-                            address_bar_focused = false;
+                            if address_bar_focused {
+                                address_bar_focused = false;
+                                address_bar_text = tabs[active_tab_idx].url.clone();
+                            }
                             needs_chrome_redraw = true;
                         }
                     } else if is_extensions_page {
@@ -1159,14 +1162,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 needs_chrome_redraw = true;
                             }
-                            Key::Character(ref ch) => {
-                                find_text.push_str(ch);
-                                if let Some(ref wv) = webview {
-                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                                }
-                                needs_chrome_redraw = true;
-                            }
                             _ => {}
                         }
                     } else if address_bar_focused {
@@ -1251,13 +1246,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Key::Escape => {
                                 address_bar_focused = false;
-                                if is_home_page {
-                                    address_bar_text = String::from("about:home");
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) => {
-                                address_bar_text.push_str(ch);
+                                address_bar_text = tabs[active_tab_idx].url.clone();
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
@@ -1384,6 +1373,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 if address_bar_focused {
                     address_bar_text.push_str(text);
+                    needs_chrome_redraw = true;
+                } else if find_bar_open {
+                    find_text.push_str(text);
+                    if let Some(ref wv) = webview {
+                        let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                        let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                    }
                     needs_chrome_redraw = true;
                 } else if home_search_focused {
                     home_search_text.push_str(text);
@@ -1814,9 +1810,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if is_loading {
-                        loading_progress = (loading_progress + 0.02).min(0.9);
-                        let bar_w = (w - SIDEBAR_W) * loading_progress;
-                        quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(26, 115, 232, 200)));
+                        loading_progress = (loading_progress + 0.02).min(1.0);
+                        if loading_progress >= 1.0 {
+                            is_loading = false;
+                            loading_progress = 0.0;
+                        } else {
+                            let bar_w = (w - SIDEBAR_W) * loading_progress;
+                            quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(26, 115, 232, 200)));
+                        }
                     }
 
                     if compositor.glyph_atlas.dirty {
