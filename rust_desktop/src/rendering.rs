@@ -272,6 +272,7 @@ pub fn build_dropdown_quads(
         ("T", "Heritage Themes"),
         ("C", "Clear RAM & Cache"),
         ("S", "Settings"),
+        ("A", "About"),
         ("X", "Exit Axomai"),
     ];
     let dm_h = 10.0 + menu_items.len() as f32 * 36.0 + 8.0;
