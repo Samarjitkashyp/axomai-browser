@@ -73,7 +73,7 @@ pub fn build_chrome_quads(
     let mut quads = Vec::new();
 
     let white = c(255, 255, 255, 255);
-    let tab_bar_bg = c(222, 225, 230, 255);
+    let tab_bar_bg = c(230, 244, 234, 255);
     let text_primary = c(32, 33, 36, 255);
     let text_secondary = c(95, 99, 104, 255);
     let text_disabled = c(155, 160, 168, 255);
@@ -151,8 +151,8 @@ pub fn build_chrome_quads(
             render_text(compositor, &mut quads, t_title, tab_x + 32.0, 27.0, 12.0, text_primary, tab_x + tab_w - 28.0);
             render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 12.0, text_secondary, tab_x + tab_w);
         } else {
-            quads.push(rq(tab_x, 10.0, tab_w, tab_h, 6.0, c(235, 238, 242, 180)));
-            quads.push(rq(tab_x + 10.0, 16.0, 14.0, 14.0, 7.0, c(180, 190, 200, 255)));
+            quads.push(rq(tab_x, 10.0, tab_w, tab_h, 6.0, c(220, 240, 228, 180)));
+            quads.push(rq(tab_x + 10.0, 16.0, 14.0, 14.0, 7.0, c(16, 185, 129, 160)));
             render_text(compositor, &mut quads, "A", tab_x + 13.0, 27.0, 9.0, white, tab_x + 26.0);
             render_text(compositor, &mut quads, t_title, tab_x + 30.0, 27.0, 11.5, text_secondary, tab_x + tab_w - 26.0);
             render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 11.5, text_disabled, tab_x + tab_w);
@@ -160,15 +160,15 @@ pub fn build_chrome_quads(
     }
 
     let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 6.0;
-    quads.push(rq(plus_x, 12.0, 24.0, 24.0, 12.0, c(235, 238, 245, 220)));
+    quads.push(rq(plus_x, 12.0, 24.0, 24.0, 12.0, c(220, 240, 228, 220)));
     render_text(compositor, &mut quads, "+", plus_x + 7.0, 28.0, 15.0, text_secondary, plus_x + 24.0);
 
     let ty = TAB_BAR_H;
     let toolbar_w = viewport_w - SIDEBAR_W;
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(240, 243, 249, 245)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(255, 255, 255, 60)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(99, 132, 255, 50)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(168, 120, 255, 40)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(255, 255, 255, 220)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(230, 244, 234, 40)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(16, 185, 129, 50)));
+    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 1.5, toolbar_w * 0.5, 1.5, c(5, 150, 105, 40)));
 
     let icon_s = 18.0;
     let nav_iy = ty + (TOOLBAR_H - icon_s) / 2.0;
@@ -189,16 +189,22 @@ pub fn build_chrome_quads(
     let bar_radius = ah / 2.0;
 
     if focused {
-        quads.push(rq(ax - 1.0, ay + 2.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(99, 132, 255, 25)));
-        quads.push(rq(ax - 1.5, ay - 1.5, aw + 3.0, ah + 3.0, bar_radius + 2.0, c(99, 132, 255, 120)));
+        quads.push(rq(ax - 1.0, ay + 2.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(16, 185, 129, 25)));
+        quads.push(rq(ax - 1.5, ay - 1.5, aw + 3.0, ah + 3.0, bar_radius + 2.0, c(16, 185, 129, 120)));
         quads.push(rq(ax, ay, aw, ah, bar_radius, c(255, 255, 255, 252)));
     } else {
         quads.push(rq(ax, ay + 1.0, aw, ah, bar_radius, c(0, 0, 0, 6)));
-        quads.push(rq(ax, ay, aw, ah, bar_radius, c(235, 238, 245, 220)));
+        quads.push(rq(ax, ay, aw, ah, bar_radius, c(230, 244, 234, 220)));
         quads.push(NativeGpuCompositor::solid_quad(ax + 8.0, ay + 1.0, aw - 16.0, 1.0, c(255, 255, 255, 100)));
     }
 
     let icon_y = ay + ah / 2.0 + 5.0;
+
+    let secure_badge_w = 58.0;
+    let secure_x = ax + 8.0;
+    quads.push(rq(secure_x, ay + 4.0, secure_badge_w, ah - 8.0, (ah - 8.0) / 2.0, c(5, 150, 105, 30)));
+    render_text(compositor, &mut quads, "Secure", secure_x + 6.0, icon_y, 11.0, c(5, 150, 105, 255), secure_x + secure_badge_w);
+    let addr_text_start = ax + secure_badge_w + 14.0;
 
     let is_home = address_text == "about:home" || address_text == "axomai://home" || address_text == "axomai://newtab" || address_text.contains("axomai_home.html") || address_text.is_empty();
     let is_placeholder = is_home && !focused;
@@ -206,16 +212,16 @@ pub fn build_chrome_quads(
     let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
     if focused && !display.is_empty() {
         let before_cursor: String = display.chars().take(address_cursor).collect();
-        let cursor_x = render_text(compositor, &mut quads, &before_cursor, ax + 12.0, icon_y, 13.0, dtc, ax + aw - 14.0);
+        let cursor_x = render_text(compositor, &mut quads, &before_cursor, addr_text_start, icon_y, 13.0, dtc, ax + aw - 14.0);
         let after_cursor: String = display.chars().skip(address_cursor).collect();
         if !after_cursor.is_empty() {
             render_text(compositor, &mut quads, &after_cursor, cursor_x, icon_y, 13.0, dtc, ax + aw - 14.0);
         }
-        quads.push(NativeGpuCompositor::solid_quad(cursor_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
+        quads.push(NativeGpuCompositor::solid_quad(cursor_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(16, 185, 129, 200)));
     } else {
-        let end_x = render_text(compositor, &mut quads, display, ax + 12.0, icon_y, 13.0, dtc, ax + aw - 14.0);
+        let end_x = render_text(compositor, &mut quads, display, addr_text_start, icon_y, 13.0, dtc, ax + aw - 14.0);
         if focused {
-            quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(99, 132, 255, 200)));
+            quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(16, 185, 129, 200)));
         }
     }
 
@@ -228,7 +234,7 @@ pub fn build_chrome_quads(
     let icy = iy + ih / 2.0 + 4.0;
 
     let prof_x = icons_start + 8.0;
-    quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(99, 132, 255, 180)));
+    quads.push(rq(prof_x, iy + 1.0, ih, ih, ih / 2.0, c(5, 150, 105, 200)));
     render_text(compositor, &mut quads, "S", prof_x + 6.0, icy, 11.0, white, viewport_w);
 
     let mut ext_x = prof_x + ih + 8.0;
