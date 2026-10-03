@@ -65,12 +65,6 @@ fn url_encode_mini(s: &str) -> String {
     out
 }
 
-fn page_to_file_url(filename: &str, html: &str) -> String {
-    let temp_path = std::env::temp_dir().join(filename);
-    let _ = std::fs::write(&temp_path, html);
-    format!("file:///{}", temp_path.to_string_lossy().replace('\\', "/"))
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--subprocess" {
@@ -1261,13 +1255,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     return;
                                 };
                                 if webview.is_none() {
-                                    let cw = w_of(&gpu_renderer);
-                                    let ch = h_of(&gpu_renderer);
+                                    let cw = w_of(&gpu_renderer) / scale_factor;
+                                    let ch = h_of(&gpu_renderer) / scale_factor;
                                     let nav_clone = nav_url_shared.clone();
                                     let init_js = build_extension_init_script(&extensions);
                                     webview = WebViewBuilder::new()
                                         .with_url(&url)
                                         .with_devtools(false)
+                                        .with_background_color((255, 255, 255, 255))
                                         .with_initialization_script(&init_js)
                                         .with_bounds(Rect {
                                             position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
@@ -1381,13 +1376,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         selected_search_engine.search_url(&home_search_text)
                                     };
                                     if webview.is_none() {
-                                        let cw = w_of(&gpu_renderer);
-                                        let ch = h_of(&gpu_renderer);
+                                        let cw = w_of(&gpu_renderer) / scale_factor;
+                                        let ch = h_of(&gpu_renderer) / scale_factor;
                                         let nav_clone = nav_url_shared.clone();
                                         let init_js = build_extension_init_script(&extensions);
                                         webview = WebViewBuilder::new()
                                             .with_url(&url)
                                             .with_devtools(false)
+                                            .with_background_color((255, 255, 255, 255))
                                             .with_initialization_script(&init_js)
                                             .with_bounds(Rect {
                                                 position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
@@ -1704,56 +1700,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 if let Some(page) = load_internal_page.take() {
-                    let target_url = match page.as_str() {
+                    let target_html = match page.as_str() {
                         "home" => {
-                            let html = internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template());
-                            page_to_file_url("axomai_home.html", &html)
+                            internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template())
                         }
                         "extensions" => {
-                            let html = internal_pages::extensions_page_html(&extensions);
-                            page_to_file_url("axomai_extensions.html", &html)
+                            internal_pages::extensions_page_html(&extensions)
                         }
                         "settings" => {
                             let restore = browser_storage.as_ref()
                                 .and_then(|s| s.get_setting("restore_session").ok().flatten())
                                 .map(|v| v == "true").unwrap_or(false);
-                            let html = internal_pages::settings_page_html(selected_search_engine, restore);
-                            page_to_file_url("axomai_settings.html", &html)
+                            internal_pages::settings_page_html(selected_search_engine, restore)
                         }
                         "history" => {
                             let entries = browser_storage.as_ref()
                                 .and_then(|s| s.get_history(100).ok())
                                 .unwrap_or_default();
-                            let html = pages::history_page_html(&entries);
-                            page_to_file_url("axomai_history.html", &html)
+                            pages::history_page_html(&entries)
                         }
                         "bookmarks" => {
                             let entries = browser_storage.as_ref()
                                 .and_then(|s| s.get_bookmarks().ok())
                                 .unwrap_or_default();
-                            let html = pages::bookmarks_page_html(&entries);
-                            page_to_file_url("axomai_bookmarks.html", &html)
+                            pages::bookmarks_page_html(&entries)
                         }
                         "downloads" => {
                             let entries = browser_storage.as_ref()
                                 .and_then(|s| s.get_downloads(100).ok())
                                 .unwrap_or_default();
-                            let html = pages::downloads_page_html(&entries);
-                            page_to_file_url("axomai_downloads.html", &html)
+                            pages::downloads_page_html(&entries)
                         }
                         _ => {
-                            let html = internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template());
-                            page_to_file_url("axomai_home.html", &html)
+                            internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template())
                         }
                     };
 
-                    let cw = w_of(&gpu_renderer);
-                    let ch = h_of(&gpu_renderer);
+                    let cw = w_of(&gpu_renderer) / scale_factor;
+                    let ch = h_of(&gpu_renderer) / scale_factor;
                     if webview.is_none() {
                         let nav_clone = nav_url_shared.clone();
                         webview = WebViewBuilder::new()
-                            .with_url(&target_url)
+                            .with_html(&target_html)
                             .with_devtools(false)
+                            .with_background_color((15, 23, 42, 255))
                             .with_bounds(Rect {
                                 position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
                                 size: wry::dpi::LogicalSize::new(
@@ -1794,8 +1784,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .build_as_child(&window)
                             .ok();
                         webview_visible = webview.is_some();
+                        if webview.is_some() {
+                            println!("[Axomai] WebView created with internal HTML (no temp file)");
+                        }
                     } else if let Some(ref wv) = webview {
-                        let _ = wv.load_url(&target_url);
+                        let _ = wv.load_html(&target_html);
                         if !webview_visible {
                             let _ = wv.set_visible(true);
                             webview_visible = true;
