@@ -13,6 +13,7 @@ use extensions::{create_extensions, build_extension_init_script};
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
 use axomai_engine::WgpuRenderer;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tao::{
     dpi::{LogicalSize, PhysicalSize},
@@ -288,6 +289,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut browser_storage = browser_storage;
     let mut modifiers = tao::keyboard::ModifiersState::empty();
+
+    let download_dir = {
+        let d = dirs_download();
+        let _ = std::fs::create_dir_all(&d);
+        d
+    };
+    let download_signal: Arc<Mutex<Vec<(String, String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let mut is_loading = false;
+    let mut loading_progress: f32 = 0.0;
+
+    let mut find_bar_open = false;
+    let mut find_text = String::new();
 
     #[allow(unused_assignments)]
     event_loop.run(move |event, _, control_flow| {
@@ -1107,6 +1121,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 needs_chrome_redraw = true;
                             }
+                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("f") => {
+                                find_bar_open = !find_bar_open;
+                                if !find_bar_open {
+                                    find_text.clear();
+                                    if let Some(ref wv) = webview {
+                                        let _ = wv.evaluate_script("window.getSelection().removeAllRanges();");
+                                    }
+                                }
+                                needs_chrome_redraw = true;
+                            }
+                            _ => {}
+                        }
+                    } else if find_bar_open {
+                        match key_event.logical_key {
+                            Key::Backspace => {
+                                find_text.pop();
+                                if let Some(ref wv) = webview {
+                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                                }
+                                needs_chrome_redraw = true;
+                            }
+                            Key::Enter => {
+                                if let Some(ref wv) = webview {
+                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                                }
+                            }
+                            Key::Escape => {
+                                find_bar_open = false;
+                                find_text.clear();
+                                if let Some(ref wv) = webview {
+                                    let _ = wv.evaluate_script("window.getSelection().removeAllRanges();");
+                                }
+                                needs_chrome_redraw = true;
+                            }
+                            Key::Character(ref ch) => {
+                                find_text.push_str(ch);
+                                if let Some(ref wv) = webview {
+                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                                }
+                                needs_chrome_redraw = true;
+                            }
                             _ => {}
                         }
                     } else if address_bar_focused {
@@ -1151,6 +1209,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 *nav = Some(nav_url);
                                             }
                                             true
+                                        })
+                                        .with_download_started_handler({
+                                            let dl_dir = download_dir.clone();
+                                            move |url, path| {
+                                                let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
+                                                let fname = if fname.is_empty() { "download" } else { fname };
+                                                *path = dl_dir.join(fname);
+                                                true
+                                            }
+                                        })
+                                        .with_download_completed_handler({
+                                            let dl_sig = download_signal.clone();
+                                            move |url, path, success| {
+                                                let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
+                                                if let Ok(mut sig) = dl_sig.lock() {
+                                                    sig.push((url, fname, success));
+                                                }
+                                            }
                                         })
                                         .build_as_child(&window)
                                         .ok();
@@ -1221,6 +1297,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                     *nav = Some(nav_url);
                                                 }
                                                 true
+                                            })
+                                            .with_download_started_handler({
+                                                let dl_dir = download_dir.clone();
+                                                move |url, path| {
+                                                    let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
+                                                    let fname = if fname.is_empty() { "download" } else { fname };
+                                                    *path = dl_dir.join(fname);
+                                                    true
+                                                }
+                                            })
+                                            .with_download_completed_handler({
+                                                let dl_sig = download_signal.clone();
+                                                move |url, path, success| {
+                                                    let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
+                                                    if let Ok(mut sig) = dl_sig.lock() {
+                                                        sig.push((url, fname, success));
+                                                    }
+                                                }
                                             })
                                             .build_as_child(&window)
                                             .ok();
@@ -1481,7 +1575,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else if url.starts_with("data:") || (url.starts_with("file:") && url.contains("axomai_")) {
                             // Internal page temp file/data URL — don't update address bar
                         } else {
-                            // Record to history
                             if let Some(ref s) = browser_storage {
                                 let _ = s.add_history(&url, "");
                             }
@@ -1489,6 +1582,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             is_home_page = false;
                             is_extensions_page = false;
                             is_settings_page = false;
+                            is_loading = true;
+                            loading_progress = 0.0;
                             needs_chrome_redraw = true;
                             let has_auto_ext = extensions.iter().any(|e| e.enabled && e.auto_inject);
                             if has_auto_ext {
@@ -1567,6 +1662,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 true
                             })
+                            .with_download_started_handler({
+                                let dl_dir = download_dir.clone();
+                                move |url, path| {
+                                    let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
+                                    let fname = if fname.is_empty() { "download" } else { fname };
+                                    *path = dl_dir.join(fname);
+                                    true
+                                }
+                            })
+                            .with_download_completed_handler({
+                                let dl_sig = download_signal.clone();
+                                move |url, path, success| {
+                                    let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
+                                    if let Ok(mut sig) = dl_sig.lock() {
+                                        sig.push((url, fname, success));
+                                    }
+                                }
+                            })
                             .build_as_child(&window)
                             .ok();
                         webview_visible = webview.is_some();
@@ -1589,6 +1702,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                    }
+                }
+
+                if let Ok(mut sigs) = download_signal.lock() {
+                    for (url, fname, success) in sigs.drain(..) {
+                        if let Some(ref s) = browser_storage {
+                            let filepath = download_dir.join(&fname).to_string_lossy().to_string();
+                            let status = if success { "completed" } else { "failed" };
+                            let _ = s.add_download(&url, &fname, &filepath);
+                            if let Ok(downloads) = s.get_downloads(1) {
+                                if let Some(dl) = downloads.first() {
+                                    let _ = s.update_download_status(dl.id, status, 0);
+                                }
+                            }
+                        }
+                        println!("[Axomai] Download {}: {} ({})", if success { "completed" } else { "failed" }, fname, url);
                     }
                 }
 
@@ -1618,7 +1747,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     } else if is_settings_page {
                         "Settings".to_string()
                     } else if let Ok(eng) = engine.lock() {
-                        eng.current_title.clone()
+                        let t = eng.current_title.clone();
+                        if !t.is_empty() && is_loading {
+                            is_loading = false;
+                            loading_progress = 0.0;
+                        }
+                        t
                     } else {
                         String::new()
                     };
@@ -1659,6 +1793,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         quads.extend(build_dropdown_quads(&mut compositor, w, hover_menu_idx));
                     }
 
+                    if find_bar_open {
+                        let fb_w = 320.0f32.min(w - SIDEBAR_W - 20.0);
+                        let fb_x = w - fb_w - 16.0;
+                        let fb_y = CHROME_TOP + 4.0;
+                        let fb_h = 36.0;
+                        quads.push(NativeGpuCompositor::solid_quad(fb_x + 2.0, fb_y + 2.0, fb_w, fb_h, rendering::c(0, 0, 0, 30)));
+                        quads.push(NativeGpuCompositor::solid_quad(fb_x, fb_y, fb_w, fb_h, rendering::c(255, 255, 255, 250)));
+                        quads.push(NativeGpuCompositor::solid_quad(fb_x, fb_y + fb_h - 2.0, fb_w, 2.0, rendering::c(26, 115, 232, 255)));
+                        let display = if find_text.is_empty() { "Find in page..." } else { &find_text };
+                        let tc = if find_text.is_empty() { rendering::c(150, 155, 168, 255) } else { rendering::c(32, 33, 36, 255) };
+                        rendering::render_text(&mut compositor, &mut quads, display, fb_x + 12.0, fb_y + 24.0, 13.0, tc, fb_x + fb_w - 30.0);
+                        rendering::render_text(&mut compositor, &mut quads, "x", fb_x + fb_w - 20.0, fb_y + 24.0, 13.0, rendering::c(95, 99, 104, 255), fb_x + fb_w);
+                    }
+
+                    if is_loading {
+                        loading_progress = (loading_progress + 0.02).min(0.9);
+                        let bar_w = (w - SIDEBAR_W) * loading_progress;
+                        quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(26, 115, 232, 200)));
+                    }
+
                     if compositor.glyph_atlas.dirty {
                         gpu_renderer.upload_glyph_atlas(&compositor.glyph_atlas);
                         compositor.glyph_atlas.dirty = false;
@@ -1688,5 +1842,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         }
     });
+}
+
+fn dirs_download() -> PathBuf {
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        PathBuf::from(home).join("Downloads")
+    } else {
+        PathBuf::from(".")
+    }
 }
 
