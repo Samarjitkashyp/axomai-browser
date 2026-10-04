@@ -86,6 +86,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = st.delete_setting(key);
         }
     }
+    // Downloads that were still running when the last window closed can never finish (unless another window is up).
+    if !launch::is_running(&storage::data_dir()) {
+        if let Some(st) = storage.as_ref() {
+            let _ = st.fail_stale_downloads();
+        }
+    }
     let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
     let settings = settings::Settings::load(storage.as_ref());
     let search_engine = match setting("search_engine").as_deref() {
@@ -98,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
     let proxy = event_loop.create_proxy();
     let icon = {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons").join("axomai_logo.png");
+        let path = sys::asset_path("icons/axomai_logo.png");
         image::open(&path)
             .ok()
             .and_then(|img| {
@@ -158,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let download_dir = if settings.download_dir.is_empty() { dirs_download() } else { PathBuf::from(&settings.download_dir) };
     let _ = std::fs::create_dir_all(&download_dir);
-    let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
+    let ui_dir = sys::ui_dir();
     let hub = web::WebShared::new(download_dir, &ui_dir);
     let mut extensions = create_extensions();
     let mut core = actions::Core::new(storage.as_ref(), &mut extensions);

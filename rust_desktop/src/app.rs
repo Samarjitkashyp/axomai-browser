@@ -159,7 +159,12 @@ impl App {
                 }
                 WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(state, button),
                 WindowEvent::ModifiersChanged(m) => self.mods = m,
-                WindowEvent::KeyboardInput { event, .. } => self.on_key(event),
+                // Key presses the system replays when the window gains focus (a key that is merely down) are not typing.
+                WindowEvent::KeyboardInput { event, is_synthetic, .. } => {
+                    if !is_synthetic {
+                        self.on_key(event)
+                    }
+                }
                 WindowEvent::Focused(true) => self.redraw = true,
                 _ => {}
             },
@@ -360,6 +365,7 @@ impl App {
         if title.is_empty() {
             return;
         }
+        self.tabs[idx].prev_nav = None;
         // Our generated pages announce themselves by title; that keeps tab and address right after Back/Forward.
         if self.tabs[idx].shared.trusted.load(std::sync::atomic::Ordering::SeqCst) {
             if let Some((addr, kind)) = crate::app_commands::internal_page_for_title(&title) {

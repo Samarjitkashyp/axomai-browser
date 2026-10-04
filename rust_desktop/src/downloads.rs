@@ -63,6 +63,15 @@ impl App {
     pub fn on_download_event(&mut self, tab_idx: usize, ev: DlEvent) {
         match ev {
             DlEvent::Started { id, url, path, total } => {
+                // The typed address turned out to be a file, not a page: the tab keeps showing what it showed before.
+                if let Some((kind, old_url, old_title)) = self.tabs[tab_idx].prev_nav.take() {
+                    let t = &mut self.tabs[tab_idx];
+                    t.kind = kind;
+                    t.url = old_url;
+                    t.title = old_title;
+                    t.loading = false;
+                    self.redraw = true;
+                }
                 let name = file_name(&path);
                 let private = self.private_window || self.tabs[tab_idx].private;
                 let db_id = if private { None } else { self.storage.as_ref().and_then(|s| s.add_download(&url, &name, &path.to_string_lossy()).ok()) };

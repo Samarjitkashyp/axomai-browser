@@ -66,7 +66,7 @@ fn tab_arg(cmd: &str, prefix: &str) -> Option<u64> {
 
 impl App {
     pub fn ui_file(&self, name: &str) -> String {
-        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
+        let ui = crate::sys::ui_dir();
         format!("file:///{}", ui.join(name).to_string_lossy().replace('\\', "/"))
     }
 
@@ -183,8 +183,12 @@ impl App {
         if self.webview.is_none() {
             let (w, h) = self.window_size();
             let (w, h) = (w * self.scale.max(0.5), h * self.scale.max(0.5));
+            // A page that is loaded straight at creation can start before the document-start scripts (ad blocking,
+            // Global Privacy Control, password manager) are registered. So the view starts blank and the address is
+            // loaded once the scripts are in place.
+            const BLANK: &str = "<!doctype html><meta charset=\"utf-8\"><title></title>";
             let initial = match &content {
-                Content::Url(u) => Initial::Url(u),
+                Content::Url(_) => Initial::Html(BLANK),
                 Content::Html(h) => Initial::Html(h),
             };
             self.webview = web::build_webview(&self.window, (w, h), self.chrome_top() * self.scale.max(0.5), initial, &shared, bg);
@@ -194,6 +198,9 @@ impl App {
                 let doc = self.tabs[idx].doc.clone();
                 self.core.apply_extensions(self.webview.as_ref(), &doc, &shared, &self.extensions);
                 self.tabs[idx].ext_gen = self.core.ext_generation;
+                if let (Content::Url(u), Some(wv)) = (&content, &self.webview) {
+                    let _ = wv.load_url(u);
+                }
                 if self.tabs[idx].muted {
                     if let Some(wv) = &self.webview {
                         web::com::set_muted(wv, true);
@@ -224,6 +231,7 @@ impl App {
     pub fn navigate_active(&mut self, url: &str) {
         let idx = self.active;
         let t = &mut self.tabs[idx];
+        t.prev_nav = Some((t.kind, t.url.clone(), t.title.clone()));
         t.kind = TabKind::Web;
         t.url = url.to_string();
         t.title = crate::blocklist::host_of(url);
