@@ -6,14 +6,15 @@
 
 use crate::actions;
 use crate::app::App;
-use crate::internal_pages;
+use crate::settings_page::{self, SettingsView};
+use crate::ui_shell::PageCtx;
 use crate::overlays;
 use crate::pages;
 use crate::tabs::TabKind;
 use crate::toolbar;
 use crate::types::{SearchEngine, CHROME_TOP};
 use crate::viewsource;
-use crate::web::{self, Initial};
+use crate::web::{self, Initial, WebShared};
 
 /// Percent-decoding for command arguments produced by `encodeURIComponent` in the popups.
 pub fn url_decode(s: &str) -> String {
@@ -44,14 +45,17 @@ pub fn url_decode(s: &str) -> String {
 
 /// Map the `<title>` of one of our generated pages to (address, kind).
 pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
-    match t {
-        "Extensions - Axomai Browser" => Some(("axomai://extensions", TabKind::Extensions)),
-        "Settings - Axomai Browser" => Some(("about:settings", TabKind::Settings)),
-        "History - Axomai Browser" => Some(("axomai://history", TabKind::Page("history"))),
-        "Bookmarks - Axomai Browser" => Some(("axomai://bookmarks", TabKind::Page("bookmarks"))),
-        "Downloads - Axomai Browser" => Some(("axomai://downloads", TabKind::Page("downloads"))),
-        _ => None,
-    }
+    let name = t.strip_suffix(" - Axomai Browser")?;
+    Some(match name {
+        "Extensions" => ("axomai://extensions", TabKind::Extensions),
+        "Settings" => ("about:settings", TabKind::Settings),
+        "History" => ("axomai://history", TabKind::Page("history")),
+        "Bookmarks" => ("axomai://bookmarks", TabKind::Page("bookmarks")),
+        "Downloads" => ("axomai://downloads", TabKind::Page("downloads")),
+        "Passwords" => ("axomai://passwords", TabKind::Page("passwords")),
+        "Permissions" => ("axomai://permissions", TabKind::Page("permissions")),
+        _ => return None,
+    })
 }
 
 /// `Some(id)` when `s` is `"<prefix><number>"`.
@@ -72,6 +76,53 @@ impl App {
 
     // ------------------------------------------------------------------ page loading
 
+    pub fn home_page_url(&self) -> String {
+        self.ui_file("home.html")
+    }
+
+    fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
+        PageCtx { theme: self.core.theme, token: &shared.token, lang: &self.settings.language }
+    }
+
+    /// HTML of one of Axomai's generated pages.
+    pub fn internal_html(&self, kind: TabKind, shared: &WebShared) -> String {
+        let ctx = self.page_ctx(shared);
+        match kind {
+            TabKind::Extensions => pages::extensions_page(&ctx, &self.extensions),
+            TabKind::Settings => {
+                let download_dir = if self.settings.download_dir.is_empty() {
+                    shared.download_dir().to_string_lossy().to_string()
+                } else {
+                    self.settings.download_dir.clone()
+                };
+                settings_page::settings_page(
+                    &ctx,
+                    &SettingsView {
+                        settings: &self.settings,
+                        engine: self.search_engine,
+                        extensions: &self.extensions,
+                        theme_id: self.core.theme.id,
+                        download_dir,
+                        version: env!("CARGO_PKG_VERSION"),
+                    },
+                )
+            }
+            TabKind::Page("history") => {
+                let entries = self.storage.as_ref().and_then(|s| s.get_history(300).ok()).unwrap_or_default();
+                pages::history_page(&ctx, &entries)
+            }
+            TabKind::Page("bookmarks") => {
+                let entries = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default();
+                pages::bookmarks_page(&ctx, &entries)
+            }
+            TabKind::Page("downloads") => {
+                let entries = self.storage.as_ref().and_then(|s| s.get_downloads(200).ok()).unwrap_or_default();
+                pages::downloads_page(&ctx, &entries)
+            }
+            _ => crate::ui_shell::page(&ctx, "", "Axomai", "<p class=\"sub\">This page is not available yet.</p>", ""),
+        }
+    }
+
     /// (Re)load whatever the active tab is supposed to show, creating its web view if it has none yet.
     pub fn load_active_page(&mut self) {
         if self.webview.is_none() && !self.safe {
@@ -84,29 +135,14 @@ impl App {
         let idx = self.active;
         let kind = self.tabs[idx].kind;
         let shared = self.tabs[idx].shared.clone();
-        let restore = self.setting("restore_session").map(|v| v == "true").unwrap_or(false);
         enum Content {
             Url(String),
             Html(String),
         }
         let content = match kind {
-            TabKind::Home => Content::Url(self.ui_file("home.html")),
+            TabKind::Home => Content::Url(self.home_page_url()),
             TabKind::About => Content::Url(self.ui_file("index.html")),
-            TabKind::Extensions => Content::Html(internal_pages::extensions_page_html(&self.extensions)),
-            TabKind::Settings => Content::Html(internal_pages::settings_page_html(self.search_engine, restore)),
-            TabKind::Page("history") => {
-                let entries = self.storage.as_ref().and_then(|s| s.get_history(100).ok()).unwrap_or_default();
-                Content::Html(pages::history_page_html(&entries))
-            }
-            TabKind::Page("bookmarks") => {
-                let entries = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default();
-                Content::Html(pages::bookmarks_page_html(&entries))
-            }
-            TabKind::Page("downloads") => {
-                let entries = self.storage.as_ref().and_then(|s| s.get_downloads(100).ok()).unwrap_or_default();
-                Content::Html(pages::downloads_page_html(&entries))
-            }
-            TabKind::Page(_) => Content::Html("<html><body style=\"font-family:sans-serif;padding:32px\">This page is not available yet.</body></html>".into()),
+            TabKind::Extensions | TabKind::Settings | TabKind::Page(_) => Content::Html(self.internal_html(kind, &shared)),
             TabKind::Source => {
                 let target = self.tabs[idx].url.strip_prefix("view-source:").unwrap_or("").to_string();
                 match &self.tabs[idx].source_html {
@@ -152,10 +188,6 @@ impl App {
             }
         }
         self.redraw = true;
-    }
-
-    fn setting(&self, key: &str) -> Option<String> {
-        self.storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten())
     }
 
     /// Navigate the active tab to an ordinary web address.
@@ -231,6 +263,8 @@ impl App {
                 let _ = wv.load_html(payload);
             }
             self.redraw = true;
+        } else if kind == "download-dir" {
+            self.apply_setting("download_dir", payload);
         } else if kind == "capture-full" {
             self.core.capture_full_finish(self.webview.as_ref(), &shared, payload);
         } else if let Some(k) = kind.strip_prefix("ai-") {
@@ -383,6 +417,8 @@ impl App {
                 self.open_internal("downloads");
             }
             "add-bookmark" => self.toggle_bookmark_now(),
+            "settings-reset" => self.reset_settings(),
+            "pick-download-dir" => self.pick_download_dir(),
             _ => self.command_with_argument(cmd),
         }
     }
@@ -414,6 +450,7 @@ impl App {
             self.core.capture_region(arg, self.webview.as_ref(), &shared);
         } else if let Some(arg) = cmd.strip_prefix("theme/") {
             self.core.set_theme(arg, self.storage.as_ref());
+            self.refresh_internal_page();
             self.redraw = true;
         } else if let Some(arg) = cmd.strip_prefix("profile-name/") {
             self.core.set_profile_name(&url_decode(arg), self.storage.as_ref());
@@ -434,13 +471,17 @@ impl App {
             if self.tabs[self.active].kind == TabKind::Settings {
                 self.load_active_page();
             }
-        } else if let Some(val) = cmd.strip_prefix("set-restore-session/") {
+        } else if let Some(rest) = cmd.strip_prefix("set/") {
+            let (key, val) = rest.split_once('/').unwrap_or((rest, ""));
+            self.apply_setting(key, &url_decode(val));
+        } else if let Some(rest) = cmd.strip_prefix("clear-data-range/") {
+            let (range, flags) = rest.split_once('/').unwrap_or((rest, ""));
+            self.clear_data_range(range, flags);
+        } else if let Some(id) = cmd.strip_prefix("history-delete/").and_then(|v| v.parse::<i64>().ok()) {
             if let Some(s) = &self.storage {
-                let _ = s.set_setting("restore_session", val);
+                let _ = s.delete_history(id);
             }
-            if self.tabs[self.active].kind == TabKind::Settings {
-                self.load_active_page();
-            }
+            self.load_active_page();
         } else if let Some(q) = cmd.strip_prefix("search/") {
             let url = format!("{}{}", self.search_engine.js_search_template(), q);
             self.navigate_active(&url);
@@ -456,6 +497,137 @@ impl App {
         self.fullscreen = !self.fullscreen;
         self.window.set_fullscreen(if self.fullscreen { Some(tao::window::Fullscreen::Borderless(None)) } else { None });
         self.redraw = true;
+    }
+}
+
+impl App {
+    /// Re-render the active tab if it is one of Axomai's own pages (after a theme / language / data change).
+    pub fn refresh_internal_page(&mut self) {
+        if matches!(self.tabs[self.active].kind, TabKind::Extensions | TabKind::Settings | TabKind::Page(_)) {
+            self.load_active_page();
+        }
+    }
+
+    fn notify_settings_page(&self, ok: bool) {
+        if matches!(self.tabs[self.active].kind, TabKind::Settings) {
+            if let Some(wv) = &self.webview {
+                let _ = wv.evaluate_script(&format!("window.__saved&&__saved({})", ok));
+            }
+        }
+    }
+
+    /// One `set/<key>/<value>` message from the Settings page.
+    pub fn apply_setting(&mut self, key: &str, value: &str) {
+        let ok = if key == "search_engine" {
+            self.search_engine = match value {
+                "Bing" => SearchEngine::Bing,
+                "Yahoo" => SearchEngine::Yahoo,
+                "DuckDuckGo" => SearchEngine::DuckDuckGo,
+                "Google" => SearchEngine::Google,
+                _ => {
+                    self.notify_settings_page(false);
+                    return;
+                }
+            };
+            if let Some(s) = &self.storage {
+                let _ = s.set_setting("search_engine", self.search_engine.name());
+            }
+            true
+        } else {
+            self.settings.set(self.storage.as_ref(), key, value)
+        };
+        if ok {
+            match key {
+                "download_dir" => {
+                    let dir = if self.settings.download_dir.is_empty() {
+                        default_download_dir()
+                    } else {
+                        std::path::PathBuf::from(&self.settings.download_dir)
+                    };
+                    let _ = std::fs::create_dir_all(&dir);
+                    self.hub.set_download_dir(dir);
+                    self.refresh_internal_page();
+                }
+                "language" => self.refresh_internal_page(),
+                _ => {}
+            }
+            self.redraw = true;
+        }
+        self.notify_settings_page(ok);
+    }
+
+    pub fn reset_settings(&mut self) {
+        if let Some(s) = &self.storage {
+            for key in [
+                "startup", "restore_session", "home_url", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
+                "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
+            ] {
+                let _ = s.delete_setting(key);
+            }
+        }
+        self.settings = crate::settings::Settings::default();
+        self.search_engine = SearchEngine::Google;
+        self.core.set_theme("tea-garden", None);
+        // Switch every extension back on through the normal path so the web views follow.
+        let off: Vec<usize> = self.extensions.iter().enumerate().filter(|(_, e)| !e.enabled).map(|(i, _)| i).collect();
+        for i in off {
+            self.command(&format!("ext-toggle/{}", i));
+        }
+        self.hub.set_download_dir(default_download_dir());
+        self.refresh_internal_page();
+        self.redraw = true;
+    }
+
+    /// Ask for a folder on a helper thread (the native dialog runs its own message loop, which must not run inside
+    /// the event handler); the answer comes back as a `download-dir` event.
+    pub fn pick_download_dir(&mut self) {
+        let shared = self.shared();
+        let start = shared.download_dir();
+        std::thread::spawn(move || {
+            if let Some(p) = rfd::FileDialog::new().set_title("Choose where downloads are saved").set_directory(start).pick_folder() {
+                shared.push_event(web::WebEvent::PageData("download-dir".into(), String::new(), p.to_string_lossy().to_string()));
+            }
+        });
+    }
+
+    /// "Clear browsing data" from the Settings page. `flags`: h = history, d = download list, k = cookies, c = cache.
+    pub fn clear_data_range(&mut self, range: &str, flags: &str) {
+        let seconds: Option<i64> = match range {
+            "hour" => Some(3600),
+            "day" => Some(86_400),
+            "week" => Some(7 * 86_400),
+            "month" => Some(28 * 86_400),
+            "all" => None,
+            _ => return,
+        };
+        if flags.contains('h') {
+            if let Some(s) = &self.storage {
+                let _ = s.clear_history_since(seconds);
+            }
+        }
+        if flags.contains('d') {
+            if let Some(s) = &self.storage {
+                let _ = s.clear_downloads_since(seconds);
+            }
+        }
+        let (cookies, cache) = (flags.contains('k'), flags.contains('c'));
+        if cookies || cache {
+            if let Some(wv) = &self.webview {
+                web::com::clear_browsing_data(wv, cookies, cache, seconds.map(|s| s as u64));
+            }
+        }
+        let shared = self.shared();
+        if let Some(wv) = &self.webview {
+            self.core.toast(wv, "Browsing data cleared", None, &shared);
+        }
+        self.refresh_internal_page();
+    }
+}
+
+pub fn default_download_dir() -> std::path::PathBuf {
+    match std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        Some(home) => std::path::PathBuf::from(home).join("Downloads"),
+        None => std::path::PathBuf::from("."),
     }
 }
 

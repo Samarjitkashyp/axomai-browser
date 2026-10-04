@@ -79,7 +79,8 @@ pub struct WebShared {
     pub nav: Arc<Mutex<Vec<String>>>,
     pub events: Arc<Mutex<Vec<(u64, WebEvent)>>>,
     pub downloads: Arc<Mutex<Vec<(String, String, bool)>>>,
-    pub download_dir: PathBuf,
+    /// Where downloads are saved; the Settings page can change it while the browser runs.
+    pub download_dir: Arc<Mutex<PathBuf>>,
     /// True while this tab's top-level document is one of our own pages (data:, about:, file under `ui_prefix`).
     pub trusted: Arc<AtomicBool>,
     pub token: Arc<String>,
@@ -100,7 +101,7 @@ impl WebShared {
             nav: Arc::new(Mutex::new(Vec::new())),
             events: Arc::new(Mutex::new(Vec::new())),
             downloads: Arc::new(Mutex::new(Vec::new())),
-            download_dir,
+            download_dir: Arc::new(Mutex::new(download_dir)),
             trusted: Arc::new(AtomicBool::new(true)),
             token: Arc::new(format!("{:032x}", mixed)),
             ui_prefix: Arc::new(file_url_prefix(ui_dir)),
@@ -118,6 +119,16 @@ impl WebShared {
             tab_id,
             private,
             ..self.clone()
+        }
+    }
+
+    pub fn download_dir(&self) -> PathBuf {
+        self.download_dir.lock().map(|d| d.clone()).unwrap_or_default()
+    }
+
+    pub fn set_download_dir(&self, dir: PathBuf) {
+        if let Ok(mut d) = self.download_dir.lock() {
+            *d = dir;
         }
     }
 
@@ -241,7 +252,7 @@ pub fn build_webview(
         .with_download_started_handler(move |url, path| {
             let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
             let fname = if fname.is_empty() { "download" } else { fname };
-            *path = dl_dir.join(fname);
+            *path = dl_dir.lock().map(|d| d.join(fname)).unwrap_or_else(|_| PathBuf::from(fname));
             // The navigation became a download, so no page will ever report that it finished loading.
             dl_started.push_event(WebEvent::LoadFinished(url));
             true
@@ -278,7 +289,7 @@ pub mod com {
     use webview2_com::{
         take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler,
         AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, FaviconChangedEventHandler,
-        GetFaviconCompletedHandler, FocusChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
+        GetFaviconCompletedHandler, FocusChangedEventHandler, ClearBrowsingDataCompletedHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
         WebResourceRequestedEventHandler,
     };
     use windows::core::{w, Interface, HSTRING, PWSTR};
@@ -510,6 +521,36 @@ pub mod com {
         }
     }
 
+    /// Clear cookies / site data and / or the HTTP cache. `since_secs` limits it to the last N seconds.
+    pub fn clear_browsing_data(wv: &WebView, cookies: bool, cache: bool, since_secs: Option<u64>) {
+        let Some(core) = core(wv) else { return };
+        let mut kinds = 0i32;
+        if cookies {
+            kinds |= COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES.0 | COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_DOM_STORAGE.0;
+        }
+        if cache {
+            kinds |= COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0;
+        }
+        if kinds == 0 {
+            return;
+        }
+        unsafe {
+            let Ok(profile) = core.cast::<ICoreWebView2_13>().and_then(|c| c.Profile()) else { return };
+            let Ok(profile2) = profile.cast::<ICoreWebView2Profile2>() else { return };
+            let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_hr| Ok(())));
+            let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS(kinds);
+            match since_secs {
+                None => {
+                    let _ = profile2.ClearBrowsingData(kinds, &handler);
+                }
+                Some(s) => {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+                    let _ = profile2.ClearBrowsingDataInTimeRange(kinds, now - s as f64, now + 60.0, &handler);
+                }
+            }
+        }
+    }
+
     pub fn set_muted(wv: &WebView, muted: bool) {
         if let Some(core) = core(wv) {
             unsafe {
@@ -730,6 +771,11 @@ pub mod com {
     }
     pub fn reload_hard(wv: &WebView) {
         let _ = wv.evaluate_script("location.reload(true)");
+    }
+    pub fn clear_browsing_data(wv: &WebView, cookies: bool, cache: bool, _since: Option<u64>) {
+        if cookies || cache {
+            let _ = wv.clear_all_browsing_data();
+        }
     }
     pub fn set_memory_low(_wv: &WebView, _low: bool) {}
     pub fn capture_png(_wv: &WebView, _params: &str, _out: PathBuf, shared: &WebShared) {

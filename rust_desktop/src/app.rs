@@ -5,6 +5,7 @@
 use crate::actions::Core;
 use crate::favicons::{self, Favicons};
 use crate::rendering::{h_of, w_of};
+use crate::settings::Settings;
 use crate::storage::BrowserStorage;
 use crate::tabs::{ClosedTab, Tab, TabKind};
 use crate::toolbar::{self, TabItem, ToolbarIcons};
@@ -36,6 +37,7 @@ pub struct App {
     pub extensions: Vec<Extension>,
     pub storage: Option<BrowserStorage>,
     pub search_engine: SearchEngine,
+    pub settings: Settings,
 
     pub tabs: Vec<Tab>,
     pub active: usize,
@@ -329,7 +331,7 @@ impl App {
         for (url, fname, success) in items {
             if !self.private_window {
                 if let Some(s) = &self.storage {
-                    let filepath = self.hub.download_dir.join(&fname).to_string_lossy().to_string();
+                    let filepath = self.hub.download_dir().join(&fname).to_string_lossy().to_string();
                     let _ = s.add_download(&url, &fname, &filepath);
                     if let Ok(downloads) = s.get_downloads(1) {
                         if let Some(dl) = downloads.first() {
@@ -351,13 +353,14 @@ impl App {
 
     /// Hidden tabs that have been idle for a while release their memory but keep their state.
     fn sleep_idle_tabs(&mut self) {
+        let Some(limit) = self.settings.sleep_after() else { return };
         let now = Instant::now();
         for (i, t) in self.tabs.iter_mut().enumerate() {
             if i == self.active || t.suspended || t.audio {
                 continue;
             }
             if let Some(v) = &t.view {
-                if now.duration_since(t.last_active) >= crate::tabs::sleep_after() {
+                if now.duration_since(t.last_active) >= limit {
                     web::com::suspend(v);
                     t.suspended = true;
                     self.redraw = true;

@@ -66,6 +66,29 @@ impl Theme {
         format!("rgb({},{},{})", c[0], c[1], c[2])
     }
 
+    /// CSS custom properties for Axomai's own full pages (settings, history, ...): the popup variables plus the
+    /// page and card backgrounds.
+    pub fn page_vars(&self) -> String {
+        let (page_bg, surface, surface2) = if self.dark {
+            ("#0b1220".to_string(), "#111c33", "#16233f")
+        } else {
+            // The theme's title-bar tint lightened towards white gives each theme its own very pale page colour.
+            (Self::lighten(self.titlebar, 0.55), "#ffffff", "rgba(0,0,0,0.035)")
+        };
+        format!(
+            "{}--page-bg:{};--surface:{};--surface2:{};--danger:#dc2626;",
+            self.css_vars(),
+            page_bg,
+            surface,
+            surface2
+        )
+    }
+
+    fn lighten(c: [u8; 3], amount: f32) -> String {
+        let mix = |v: u8| (v as f32 + (255.0 - v as f32) * amount).round().clamp(0.0, 255.0) as u8;
+        format!("rgb({},{},{})", mix(c[0]), mix(c[1]), mix(c[2]))
+    }
+
     /// CSS custom properties used by every injected popup.
     pub fn css_vars(&self) -> String {
         let (bg, border, shadow) = if self.dark {

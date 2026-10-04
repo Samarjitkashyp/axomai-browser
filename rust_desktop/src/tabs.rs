@@ -2,15 +2,8 @@
 //! back/forward history. Only the active tab's view is shown; hidden ones are suspended after a while.
 
 use crate::web::{com::DocScript, WebShared};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use wry::WebView;
-
-/// A hidden tab is suspended (its memory released, its state kept) after this long.
-/// `AXOMAI_SLEEP_SECS` overrides the five minutes (used by tests).
-pub fn sleep_after() -> Duration {
-    let secs = std::env::var("AXOMAI_SLEEP_SECS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(5 * 60);
-    Duration::from_secs(secs)
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabKind {
@@ -35,6 +28,7 @@ impl TabKind {
             "axomai://bookmarks" => TabKind::Page("bookmarks"),
             "axomai://downloads" => TabKind::Page("downloads"),
             "axomai://passwords" => TabKind::Page("passwords"),
+            "axomai://permissions" => TabKind::Page("permissions"),
             "axomai://about" => TabKind::About,
             a if a.starts_with("view-source:") => TabKind::Source,
             _ => TabKind::Web,
@@ -62,6 +56,7 @@ impl TabKind {
             TabKind::Page("bookmarks") => "Bookmarks",
             TabKind::Page("downloads") => "Downloads",
             TabKind::Page("passwords") => "Passwords",
+            TabKind::Page("permissions") => "Permissions",
             TabKind::Page(_) => "Axomai",
             TabKind::About => "About Axomai",
             TabKind::Source => "Source",

@@ -186,6 +186,29 @@ impl BrowserStorage {
         Ok(())
     }
 
+    pub fn delete_history(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM history WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Delete history from the last `seconds` seconds (`None` = everything).
+    pub fn clear_history_since(&self, seconds: Option<i64>) -> Result<(), rusqlite::Error> {
+        match seconds {
+            None => self.conn.execute("DELETE FROM history", [])?,
+            Some(s) => self.conn.execute("DELETE FROM history WHERE visit_time >= datetime('now', ?1)", params![format!("-{} seconds", s.max(0))])?,
+        };
+        Ok(())
+    }
+
+    /// Delete download-list entries from the last `seconds` seconds (`None` = everything).
+    pub fn clear_downloads_since(&self, seconds: Option<i64>) -> Result<(), rusqlite::Error> {
+        match seconds {
+            None => self.conn.execute("DELETE FROM downloads", [])?,
+            Some(s) => self.conn.execute("DELETE FROM downloads WHERE started_at >= datetime('now', ?1)", params![format!("-{} seconds", s.max(0))])?,
+        };
+        Ok(())
+    }
+
     pub fn remove_bookmark_by_url(&self, url: &str) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM bookmarks WHERE url = ?1", params![url])?;
         Ok(())
@@ -250,6 +273,11 @@ impl BrowserStorage {
         Ok(())
     }
 
+    pub fn delete_setting(&self, key: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
         let result = self.conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
@@ -300,4 +328,50 @@ fn dirs_db() -> String {
         return p.to_string_lossy().to_string();
     }
     ".axomai-browser".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_storage() -> BrowserStorage {
+        let conn = Connection::open_in_memory().unwrap();
+        let st = BrowserStorage { conn };
+        st.init_tables().unwrap();
+        st
+    }
+
+    #[test]
+    fn history_delete_and_range_clear() {
+        let st = temp_storage();
+        let a = st.add_history("https://a.test", "A").unwrap();
+        st.add_history("https://b.test", "B").unwrap();
+        st.conn.execute("UPDATE history SET visit_time = datetime('now','-3 days') WHERE url='https://a.test'", []).unwrap();
+        st.clear_history_since(Some(3600)).unwrap(); // last hour: removes only B
+        let left = st.get_history(10).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, a);
+        st.delete_history(a).unwrap();
+        assert!(st.get_history(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn clear_everything() {
+        let st = temp_storage();
+        st.add_history("https://a.test", "A").unwrap();
+        st.add_download("https://a.test/f", "f", "C:/f").unwrap();
+        st.clear_history_since(None).unwrap();
+        st.clear_downloads_since(None).unwrap();
+        assert_eq!(st.count("history"), 0);
+        assert_eq!(st.count("downloads"), 0);
+    }
+
+    #[test]
+    fn bookmarks_round_trip() {
+        let st = temp_storage();
+        st.add_bookmark("https://a.test", "A", "Unsorted").unwrap();
+        assert!(st.is_bookmarked("https://a.test").unwrap());
+        st.remove_bookmark_by_url("https://a.test").unwrap();
+        assert!(!st.is_bookmarked("https://a.test").unwrap());
+    }
 }

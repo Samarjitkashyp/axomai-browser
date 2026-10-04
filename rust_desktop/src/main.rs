@@ -1,4 +1,3 @@
-mod internal_pages;
 pub mod actions;
 pub mod ai;
 pub mod app;
@@ -9,16 +8,20 @@ pub mod blocklist;
 pub mod ext_scripts;
 pub mod extensions;
 pub mod favicons;
+pub mod i18n;
 pub mod omnibox;
 pub mod overlays;
 pub mod pages;
 pub mod rendering;
+pub mod settings;
+pub mod settings_page;
 pub mod storage;
 pub mod sys;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
 pub mod types;
+pub mod ui_shell;
 pub mod viewsource;
 pub mod web;
 
@@ -49,6 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
+    let settings = settings::Settings::load(storage.as_ref());
     let search_engine = match setting("search_engine").as_deref() {
         Some("Bing") => SearchEngine::Bing,
         Some("Yahoo") => SearchEngine::Yahoo,
@@ -117,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The chrome's image texture is the favicon atlas; it must exist before the first frame.
     gpu.upload_bg_image(favicons::ATLAS, favicons::ATLAS, favicons.pixels());
 
-    let download_dir = dirs_download();
+    let download_dir = if settings.download_dir.is_empty() { dirs_download() } else { PathBuf::from(&settings.download_dir) };
     let _ = std::fs::create_dir_all(&download_dir);
     let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
     let hub = web::WebShared::new(download_dir, &ui_dir);
@@ -130,8 +134,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(saved) = setting("blocked_total").and_then(|v| v.parse::<u64>().ok()) {
         hub.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
     }
-    let restore = !private_window && setting("restore_session").as_deref() == Some("true");
-    let saved_tabs = if restore { storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default() } else { Vec::new() };
+    // What the first window opens, according to "On startup".
+    let saved_tabs: Vec<storage::SavedTab> = match settings.startup {
+        settings::Startup::Restore if !private_window => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
+        settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true }],
+        _ => Vec::new(),
+    };
     let scale = window.scale_factor() as f32;
 
     let mut app = App {
@@ -145,6 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         extensions,
         storage,
         search_engine,
+        settings,
         tabs: Vec::new(),
         active: 0,
         webview: None,

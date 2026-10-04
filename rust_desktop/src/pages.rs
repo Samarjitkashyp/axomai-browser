@@ -1,228 +1,201 @@
-use crate::storage::{HistoryEntry, Bookmark, DownloadEntry};
+//! History, bookmarks, downloads and extensions pages, built on the shared themed frame.
 
-pub fn history_page_html(entries: &[HistoryEntry]) -> String {
+use crate::extensions as ex;
+use crate::storage::{Bookmark, DownloadEntry, HistoryEntry};
+use crate::types::Extension;
+use crate::ui_shell::{self, PageCtx};
+use crate::viewsource::escape;
+
+pub fn format_bytes(b: i64) -> String {
+    if b <= 0 {
+        return "\u{2014}".into();
+    }
+    let b = b as f64;
+    if b < 1024.0 {
+        format!("{} B", b as i64)
+    } else if b < 1024.0 * 1024.0 {
+        format!("{:.1} KB", b / 1024.0)
+    } else if b < 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.1} MB", b / 1024.0 / 1024.0)
+    } else {
+        format!("{:.2} GB", b / 1024.0 / 1024.0 / 1024.0)
+    }
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(n).collect();
+        t.push('\u{2026}');
+        t
+    }
+}
+
+/// Only plain web addresses are made clickable; anything else is shown as text.
+fn link_attr(url: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        format!(" onclick=\"location.href={}\"", serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into()).replace('"', "&quot;"))
+    } else {
+        String::new()
+    }
+}
+
+const FILTER_JS: &str = r#"
+var q=document.getElementById('q');
+if(q)q.addEventListener('input',function(){var v=q.value.toLowerCase();document.querySelectorAll('.item').forEach(function(e){e.style.display=e.textContent.toLowerCase().indexOf(v)>=0?'':'none'})});
+"#;
+
+pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
     let mut rows = String::new();
-    if entries.is_empty() {
-        rows.push_str(r#"<div class="empty">No browsing history yet.</div>"#);
-    } else {
-        for entry in entries {
-            let title_display = if entry.title.is_empty() { &entry.url } else { &entry.title };
-            let safe_title = html_escape(title_display);
-            let safe_url = html_escape(&entry.url);
-            rows.push_str(&format!(
-                r##"<div class="item" onclick="window.location.href='{url}'">
-  <div class="item-icon">🕒</div>
-  <div class="item-content">
-    <div class="item-title">{title}</div>
-    <div class="item-url">{url_display}</div>
-  </div>
-  <div class="item-time">{time}</div>
-</div>"##,
-                url = safe_url,
-                title = safe_title,
-                url_display = truncate_url(&safe_url, 60),
-                time = &entry.visit_time,
-            ));
-        }
+    for e in entries {
+        let title = if e.title.is_empty() { &e.url } else { &e.title };
+        rows.push_str(&format!(
+            "<div class=\"item\"{click}><div class=\"ic\">\u{1F552}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
+             <button class=\"x\" title=\"Remove from history\" onclick=\"event.stopPropagation();go('history-delete/{id}')\">\u{2715}</button></div>",
+            click = link_attr(&e.url),
+            title = escape(&truncate(title, 90)),
+            url = escape(&truncate(&e.url, 100)),
+            time = escape(&e.visit_time),
+            id = e.id
+        ));
     }
-
-    page_shell("History", "🕒", "Your browsing history", &rows, Some(r#"
-<div class="actions">
-  <button onclick="if(confirm('Clear all history?'))window.location.href='axomai://clear-history'" class="btn-danger">Clear History</button>
-</div>"#))
+    if rows.is_empty() {
+        rows.push_str("<div class=\"empty\">No browsing history yet.</div>");
+    }
+    let body = format!(
+        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search history\" style=\"flex:1\"><button class=\"btn danger\" onclick=\"if(confirm('Clear all browsing history?'))go('clear-history')\">Clear all</button></div><div class=\"card\">{rows}</div>",
+        head = ui_shell::heading("History", "Pages you have visited"),
+        rows = rows
+    );
+    ui_shell::page(ctx, "history", "History", &body, FILTER_JS)
 }
 
-pub fn bookmarks_page_html(bookmarks: &[Bookmark]) -> String {
+pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
     let mut rows = String::new();
-    if bookmarks.is_empty() {
-        rows.push_str(r#"<div class="empty">No bookmarks saved yet.<br>Press Ctrl+D on any page to add a bookmark.</div>"#);
-    } else {
-        for bm in bookmarks {
-            let safe_title = html_escape(if bm.title.is_empty() { &bm.url } else { &bm.title });
-            let safe_url = html_escape(&bm.url);
-            rows.push_str(&format!(
-                r##"<div class="item" onclick="window.location.href='{url}'">
-  <div class="item-icon">⭐</div>
-  <div class="item-content">
-    <div class="item-title">{title}</div>
-    <div class="item-url">{url_display}</div>
-  </div>
-  <div class="item-folder">{folder}</div>
-  <button class="btn-remove" onclick="event.stopPropagation();window.location.href='axomai://remove-bookmark/{id}'" title="Remove">✕</button>
-</div>"##,
-                url = safe_url,
-                title = safe_title,
-                url_display = truncate_url(&safe_url, 60),
-                folder = html_escape(&bm.folder),
-                id = bm.id,
-            ));
-        }
+    for b in bookmarks {
+        let title = if b.title.is_empty() { &b.url } else { &b.title };
+        rows.push_str(&format!(
+            "<div class=\"item\"{click}><div class=\"ic\">\u{2B50}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{folder}</div>\
+             <button class=\"x\" title=\"Remove bookmark\" onclick=\"event.stopPropagation();go('remove-bookmark/{id}')\">\u{2715}</button></div>",
+            click = link_attr(&b.url),
+            title = escape(&truncate(title, 90)),
+            url = escape(&truncate(&b.url, 100)),
+            folder = escape(&b.folder),
+            id = b.id
+        ));
     }
-
-    page_shell("Bookmarks", "⭐", "Your saved bookmarks", &rows, None)
+    if rows.is_empty() {
+        rows.push_str("<div class=\"empty\">No bookmarks yet. Press the star in the address bar to add one.</div>");
+    }
+    let body = format!(
+        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search bookmarks\" style=\"flex:1\"></div><div class=\"card\">{rows}</div>",
+        head = ui_shell::heading("Bookmarks", "Pages you saved"),
+        rows = rows
+    );
+    ui_shell::page(ctx, "bookmarks", "Bookmarks", &body, FILTER_JS)
 }
 
-pub fn downloads_page_html(downloads: &[DownloadEntry]) -> String {
+pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry]) -> String {
     let mut rows = String::new();
-    if downloads.is_empty() {
-        rows.push_str(r#"<div class="empty">No downloads yet.</div>"#);
-    } else {
-        for dl in downloads {
-            let status_class = match dl.status.as_str() {
-                "completed" => "status-done",
-                "downloading" => "status-active",
-                _ => "status-error",
-            };
-            let size_display = format_bytes(dl.size_bytes);
-            rows.push_str(&format!(
-                r##"<div class="item">
-  <div class="item-icon">⬇️</div>
-  <div class="item-content">
-    <div class="item-title">{filename}</div>
-    <div class="item-url">{url_display}</div>
-  </div>
-  <div class="item-size">{size}</div>
-  <span class="status-badge {status_class}">{status}</span>
-</div>"##,
-                filename = html_escape(&dl.filename),
-                url_display = truncate_url(&html_escape(&dl.url), 50),
-                size = size_display,
-                status_class = status_class,
-                status = html_escape(&dl.status),
-            ));
-        }
+    for d in downloads {
+        let (class, label) = match d.status.as_str() {
+            "completed" => ("ok", "Completed"),
+            "downloading" => ("", "Downloading"),
+            _ => ("bad", "Failed"),
+        };
+        rows.push_str(&format!(
+            "<div class=\"item\" style=\"cursor:default\"><div class=\"ic\">\u{2B07}\u{FE0F}</div><div class=\"t\"><b>{name}</b><span>{url}</span></div>\
+             <div class=\"m\">{size}</div><span class=\"pill {class}\">{label}</span></div>",
+            name = escape(&d.filename),
+            url = escape(&truncate(&d.url, 90)),
+            size = format_bytes(d.size_bytes),
+            class = class,
+            label = label
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str("<div class=\"empty\">No downloads yet.</div>");
+    }
+    let body = format!(
+        "{head}<div class=\"bar\"><span style=\"flex:1\"></span><button class=\"btn danger\" onclick=\"if(confirm('Clear the download list? Files stay on disk.'))go('clear-downloads')\">Clear list</button></div><div class=\"card\">{rows}</div>",
+        head = ui_shell::heading("Downloads", "Files you downloaded"),
+        rows = rows
+    );
+    ui_shell::page(ctx, "downloads", "Downloads", &body, "")
+}
+
+pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
+    let mut rows = String::new();
+    for (i, e) in extensions.iter().enumerate() {
+        rows.push_str(&format!(
+            "<div class=\"row\"><div class=\"ic\" style=\"width:38px;height:38px;border-radius:10px;background:rgb({r},{g},{b});color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800\">{letter}</div>\
+             <div class=\"l\"><b>{name} <span class=\"pill\">v{version}</span></b><span>{desc}</span></div>\
+             <button class=\"btn ghost\" {disabled} onclick=\"go('ext-run/{i}')\">{action}</button>\
+             <label class=\"switch\"><input type=\"checkbox\" {checked} onchange=\"go('ext-toggle/{i}')\"><span class=\"s\"></span></label></div>",
+            r = e.icon_color[0],
+            g = e.icon_color[1],
+            b = e.icon_color[2],
+            letter = escape(e.icon_letter),
+            name = escape(e.name),
+            version = escape(e.version),
+            desc = escape(e.description),
+            disabled = if e.enabled { "" } else { "disabled" },
+            action = escape(ex::ACTION_LABEL.get(i).copied().unwrap_or("Open")),
+            checked = if e.enabled { "checked" } else { "" },
+            i = i
+        ));
+    }
+    let body = format!(
+        "{head}<div class=\"card\">{rows}</div>",
+        head = ui_shell::heading("Extensions", "Built-in tools. Switch them on or off here or from the puzzle icon in the toolbar."),
+        rows = rows
+    );
+    ui_shell::page(ctx, "extensions", "Extensions", &body, "")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx() -> PageCtx<'static> {
+        PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" }
     }
 
-    page_shell("Downloads", "⬇️", "Your download history", &rows, Some(r#"
-<div class="actions">
-  <button onclick="if(confirm('Clear all downloads?'))window.location.href='axomai://clear-downloads'" class="btn-danger">Clear Downloads</button>
-</div>"#))
-}
-
-fn page_shell(title: &str, icon: &str, subtitle: &str, content: &str, extra: Option<&str>) -> String {
-    format!(r##"<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} - Axomai Browser</title>
-<style>
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-:root{{
-  --bg:#f8f9fc;--fg:#1a1d2e;--muted:#6b7085;
-  --surface:#ffffff;--border:#e4e7f0;
-  --accent:#4f46e5;--accent-light:#eef2ff;
-  --green:#22c55e;--green-light:#dcfce7;
-  --red:#ef4444;--red-light:#fef2f2;
-  --radius:14px;--shadow:0 2px 12px rgba(0,0,0,.06);
-}}
-@media(prefers-color-scheme:dark){{
-  :root{{
-    --bg:#0c0d14;--fg:#e4e6f0;--muted:#7a7f96;
-    --surface:#16171f;--border:#252736;
-    --accent:#818cf8;--accent-light:rgba(129,140,248,.12);
-    --green:#4ade80;--green-light:rgba(74,222,128,.12);
-    --red:#f87171;--red-light:rgba(248,113,113,.12);
-    --shadow:0 2px 12px rgba(0,0,0,.3);
-    color-scheme:dark;
-  }}
-}}
-body{{
-  background:var(--bg);color:var(--fg);
-  font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
-  padding:32px 28px;-webkit-user-select:none;user-select:none;
-}}
-.page-header{{margin-bottom:28px;display:flex;align-items:center;gap:14px}}
-.page-header .icon{{font-size:28px}}
-.page-header div h1{{font-size:24px;font-weight:700;letter-spacing:-.02em;margin-bottom:2px}}
-.page-header div p{{color:var(--muted);font-size:14px}}
-.item{{
-  display:flex;align-items:center;gap:14px;
-  padding:14px 18px;margin-bottom:2px;
-  border-radius:10px;cursor:pointer;
-  transition:background .15s;
-}}
-.item:hover{{background:var(--accent-light)}}
-.item-icon{{font-size:20px;flex-shrink:0;width:32px;text-align:center}}
-.item-content{{flex:1;min-width:0}}
-.item-title{{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.item-url{{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.item-time,.item-folder,.item-size{{color:var(--muted);font-size:12px;flex-shrink:0}}
-.btn-remove{{
-  background:none;border:none;color:var(--muted);cursor:pointer;
-  font-size:14px;padding:4px 8px;border-radius:6px;
-  transition:background .15s,color .15s;
-}}
-.btn-remove:hover{{background:var(--red-light);color:var(--red)}}
-.empty{{
-  text-align:center;padding:60px 20px;color:var(--muted);
-  font-size:15px;line-height:1.8;
-}}
-.actions{{margin-top:24px;display:flex;gap:12px}}
-.btn-danger{{
-  background:var(--red-light);color:var(--red);
-  border:1px solid transparent;padding:10px 20px;
-  border-radius:10px;font-size:13px;font-weight:600;
-  cursor:pointer;transition:all .2s;
-}}
-.btn-danger:hover{{background:var(--red);color:#fff}}
-.status-badge{{
-  font-size:11px;font-weight:600;padding:4px 10px;
-  border-radius:100px;flex-shrink:0;
-}}
-.status-done{{background:var(--green-light);color:var(--green)}}
-.status-active{{background:var(--accent-light);color:var(--accent)}}
-.status-error{{background:var(--red-light);color:var(--red)}}
-</style>
-</head>
-<body>
-<div class="page-header">
-  <span class="icon">{icon}</span>
-  <div>
-    <h1>{title}</h1>
-    <p>{subtitle}</p>
-  </div>
-</div>
-{content}
-{extra}
-</body>
-</html>"##,
-        title = title,
-        icon = icon,
-        subtitle = subtitle,
-        content = content,
-        extra = extra.unwrap_or(""),
-    )
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-     .replace('<', "&lt;")
-     .replace('>', "&gt;")
-     .replace('"', "&quot;")
-     .replace('\'', "&#39;")
-}
-
-fn truncate_url(url: &str, max_len: usize) -> String {
-    if url.len() <= max_len {
-        url.to_string()
-    } else {
-        format!("{}...", &url[..max_len])
+    #[test]
+    fn history_rows_are_escaped_and_clickable_only_for_web_urls() {
+        let entries = vec![
+            HistoryEntry { id: 7, url: "https://example.com/?a=1&b=<x>".into(), title: "<script>alert(1)</script>".into(), visit_time: "2026-10-04 10:00:00".into() },
+            HistoryEntry { id: 8, url: "javascript:alert(1)".into(), title: String::new(), visit_time: String::new() },
+        ];
+        let html = history_page(&ctx(), &entries);
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(html.contains("go('history-delete/7')"));
+        assert_eq!(html.matches("location.href=&quot;").count(), 1, "only the https row is clickable");
+        assert!(html.contains("<title>History - Axomai Browser</title>"));
     }
-}
 
-fn format_bytes(bytes: i64) -> String {
-    if bytes <= 0 { return "—".to_string(); }
-    let units = ["B", "KB", "MB", "GB"];
-    let mut size = bytes as f64;
-    let mut unit_idx = 0;
-    while size >= 1024.0 && unit_idx < units.len() - 1 {
-        size /= 1024.0;
-        unit_idx += 1;
+    #[test]
+    fn empty_pages_say_so() {
+        assert!(bookmarks_page(&ctx(), &[]).contains("No bookmarks yet"));
+        assert!(downloads_page(&ctx(), &[]).contains("No downloads yet"));
     }
-    if unit_idx == 0 {
-        format!("{} B", bytes)
-    } else {
-        format!("{:.1} {}", size, units[unit_idx])
+
+    #[test]
+    fn byte_formatting() {
+        assert_eq!(format_bytes(0), "\u{2014}");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    #[test]
+    fn extension_rows_reflect_state() {
+        let mut exts = crate::extensions::create_extensions();
+        exts[1].enabled = false;
+        let html = extensions_page(&ctx(), &exts);
+        assert!(html.contains("go('ext-toggle/1')"));
+        assert!(html.matches("checked").count() >= 5);
+        assert!(html.contains("disabled"));
     }
 }
