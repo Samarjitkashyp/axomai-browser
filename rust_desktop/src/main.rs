@@ -12,6 +12,7 @@ pub mod sessions;
 pub mod shotedit;
 pub mod sitesettings;
 pub mod tts;
+pub mod voice;
 pub mod shortcuts;
 pub mod siterules;
 pub mod app_tabs;
@@ -258,6 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         icon_pending: Default::default(),
         muted_sites: Default::default(),
         tts: None,
+        voice: None,
         site_origin: String::new(),
         tts_rate: 1.0,
         news_cache: Default::default(),

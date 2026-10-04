@@ -282,6 +282,7 @@ impl App {
     /// Persist the tab list (used when the window closes) and the lifetime shield total.
     pub fn save_session(&mut self) {
         self.tts_stop();
+        self.voice_stop();
         if self.private_window {
             return;
         }

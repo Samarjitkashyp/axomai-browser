@@ -326,6 +326,8 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "voice" {
+            self.on_voice_event(question, payload);
         } else if kind == "tts-text" {
             self.tts_text(payload);
         } else if kind == "backup-file" {
@@ -452,6 +454,7 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "voice-toggle" => self.voice_toggle(),
             "shot-edit" => self.open_screenshot_editor(),
             "site-settings" => self.open_site_settings(),
             "site-clear-data" => self.site_clear_data(),
@@ -694,6 +697,9 @@ impl App {
             self.site_zoom_set(p);
         } else if let Some((id, action)) = cmd.strip_prefix("site-perm/").and_then(|r| r.split_once('/')).and_then(|(i, a)| i.parse::<i64>().ok().map(|i| (i, a))) {
             self.site_perm_command(id, action);
+        } else if let Some(p) = cmd.strip_prefix("voice-say/") {
+            let p = url_decode(p);
+            self.voice_say(&p);
         } else if let Some(key) = cmd.strip_prefix("emu/") {
             self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {

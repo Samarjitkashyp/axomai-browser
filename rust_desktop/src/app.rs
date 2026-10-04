@@ -79,6 +79,8 @@ pub struct App {
     /// The Windows voice process that is reading a page aloud.
     pub tts: Option<std::process::Child>,
     pub tts_rate: f32,
+    /// The Windows speech recogniser process while voice commands are on.
+    pub voice: Option<std::process::Child>,
     /// The site the Site settings page is about.
     pub site_origin: String,
     /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.

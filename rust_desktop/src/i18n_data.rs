@@ -161,6 +161,7 @@ pub const EN_MORE: Table = &[
     ("sitesettings.clear", "Cookies and site data"),
     ("sitesettings.clear.desc", "Signs you out of this site and removes what it stored on this computer."),
     ("sitesettings.clear.button", "Clear"),
+    ("menu.voice", "Voice commands (on / off)"),
 ];
 
 pub const HI: Table = &[
@@ -387,6 +388,7 @@ pub const HI: Table = &[
     ("sitesettings.clear", "कुकी और साइट डेटा"),
     ("sitesettings.clear.desc", "आपको इस साइट से साइन आउट करता है और इसने इस कंप्यूटर पर जो रखा है उसे हटाता है।"),
     ("sitesettings.clear.button", "साफ़ करें"),
+    ("menu.voice", "वॉइस कमांड (चालू / बंद)"),
 ];
 
 pub const BN: Table = &[
@@ -613,6 +615,7 @@ pub const BN: Table = &[
     ("sitesettings.clear", "কুকি ও সাইট ডেটা"),
     ("sitesettings.clear.desc", "আপনাকে এই সাইট থেকে সাইন আউট করে এবং এটি এই কম্পিউটারে যা রেখেছে তা সরায়।"),
     ("sitesettings.clear.button", "মুছুন"),
+    ("menu.voice", "ভয়েস কমান্ড (চালু / বন্ধ)"),
 ];
 
 pub const AS: Table = &[
@@ -839,4 +842,5 @@ pub const AS: Table = &[
     ("sitesettings.clear", "কুকী আৰু ছাইট তথ্য"),
     ("sitesettings.clear.desc", "আপোনাক এই ছাইটৰ পৰা চাইন আউট কৰে আৰু ই এই কম্পিউটাৰত যি ৰাখিছে তাক আঁতৰায়।"),
     ("sitesettings.clear.button", "মচক"),
+    ("menu.voice", "ভইচ কমাণ্ড (চালু / বন্ধ)"),
 ];
