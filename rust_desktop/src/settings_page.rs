@@ -188,6 +188,13 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         &format!("<input type=\"text\" id=\"scKw\" placeholder=\"@docs\" style=\"width:90px\"> <input type=\"text\" id=\"scTpl\" placeholder=\"https://example.com/?q=%s\" style=\"width:230px\"> <button class=\"btn ghost keepscroll\" onclick=\"go('shortcut-add/'+enc(document.getElementById('scKw').value)+'/'+enc(document.getElementById('scTpl').value))\">{}</button>", escape(t("shortcuts.save"))),
     ));
 
+    // ---- your data
+    let data = format!(
+        "{}{}",
+        row(t("data.backup"), t("data.backup.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('backup-export')\">{}</button>", escape(t("data.backup.button")))),
+        row(t("data.restore"), t("data.restore.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('backup-import')\">{}</button>", escape(t("data.restore.button")))),
+    );
+
     // ---- downloads & performance
     let downloads = format!(
         "{}{}",
@@ -224,7 +231,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let body = format!(
-        "{head}{a}{b}{c}{w}{sr}{sh}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
+        "{head}{a}{b}{c}{w}{sr}{sh}{dt}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
         a = section(t("settings.appearance"), &appearance),
         b = section(t("settings.startup"), &format!("{}{}", startup, search)),
@@ -232,6 +239,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         w = section(t("settings.web_pages"), &web_pages),
         sr = section(t("settings.siterules"), &site_rules),
         sh = section(t("settings.shortcuts"), &sc),
+        dt = section(t("settings.data"), &data),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),

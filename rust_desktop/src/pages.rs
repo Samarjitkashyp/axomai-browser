@@ -322,8 +322,11 @@ pub fn passwords_page(ctx: &PageCtx, logins: &[(i64, String, String, String)], n
         never_html.push_str("</div>");
     }
     let body = format!(
-        "{head}<div class=\"card\">{rows}</div>{never}",
+        "{head}<div class=\"bar\" style=\"display:flex;gap:8px\"><span style=\"flex:1\"></span><button class=\"btn ghost\" onclick=\"go('pw-import')\">{imp}</button><button class=\"btn ghost\" onclick=\"if(confirm('{warn}'))go('pw-export')\">{exp}</button></div><div class=\"card\">{rows}</div>{never}",
         head = ui_shell::heading(tr(ctx.lang, "passwords.title"), tr(ctx.lang, "passwords.sub")),
+        imp = escape(tr(ctx.lang, "pw.import")),
+        exp = escape(tr(ctx.lang, "pw.export")),
+        warn = escape(&tr(ctx.lang, "pw.export.warn").replace('\'', "\u{2019}")),
         rows = rows,
         never = never_html
     );

@@ -124,6 +124,16 @@ pub const EN_MORE: Table = &[
     ("sessions.tabs", "tabs"),
     ("menu.sessions", "Sessions"),
     ("menu.session-prompt", "Save tabs as a session…"),
+    ("pw.import", "Import from CSV"),
+    ("pw.export", "Export to CSV"),
+    ("pw.export.warn", "The exported file holds your passwords as plain text that anyone can read. Export anyway and delete the file when you are done?"),
+    ("settings.data", "Your data"),
+    ("data.backup", "Back up your data"),
+    ("data.backup.desc", "Saves bookmarks, history, settings, reading list, notes, site rules and sessions to one file in your Downloads folder. Passwords are not included."),
+    ("data.backup.button", "Back up"),
+    ("data.restore", "Restore from a backup"),
+    ("data.restore.desc", "Adds the contents of an Axomai backup file to what you have now. Nothing is deleted."),
+    ("data.restore.button", "Choose file…"),
 ];
 
 pub const HI: Table = &[
@@ -313,6 +323,16 @@ pub const HI: Table = &[
     ("sessions.tabs", "टैब"),
     ("menu.sessions", "सत्र"),
     ("menu.session-prompt", "टैब को सत्र के रूप में सहेजें…"),
+    ("pw.import", "CSV से आयात करें"),
+    ("pw.export", "CSV में निर्यात करें"),
+    ("pw.export.warn", "निर्यात की गई फ़ाइल में आपके पासवर्ड सादे टेक्स्ट में होंगे जिसे कोई भी पढ़ सकता है। फिर भी निर्यात करें और काम पूरा होने पर फ़ाइल हटा दें?"),
+    ("settings.data", "आपका डेटा"),
+    ("data.backup", "अपने डेटा का बैकअप लें"),
+    ("data.backup.desc", "बुकमार्क, इतिहास, सेटिंग्स, पठन सूची, नोट्स, साइट नियम और सत्र एक फ़ाइल में डाउनलोड फ़ोल्डर में सहेजता है। पासवर्ड शामिल नहीं हैं।"),
+    ("data.backup.button", "बैकअप लें"),
+    ("data.restore", "बैकअप से पुनर्स्थापित करें"),
+    ("data.restore.desc", "Axomai बैकअप फ़ाइल की सामग्री को आपके मौजूदा डेटा में जोड़ता है। कुछ नहीं हटता।"),
+    ("data.restore.button", "फ़ाइल चुनें…"),
 ];
 
 pub const BN: Table = &[
@@ -502,6 +522,16 @@ pub const BN: Table = &[
     ("sessions.tabs", "ট্যাব"),
     ("menu.sessions", "সেশন"),
     ("menu.session-prompt", "ট্যাব সেশন হিসেবে সংরক্ষণ করুন…"),
+    ("pw.import", "CSV থেকে আমদানি"),
+    ("pw.export", "CSV-তে রপ্তানি"),
+    ("pw.export.warn", "রপ্তানি করা ফাইলে আপনার পাসওয়ার্ড সাধারণ টেক্সটে থাকবে যা যে কেউ পড়তে পারে। তবুও রপ্তানি করবেন এবং কাজ শেষে ফাইলটি মুছে ফেলবেন?"),
+    ("settings.data", "আপনার ডেটা"),
+    ("data.backup", "আপনার ডেটার ব্যাকআপ নিন"),
+    ("data.backup.desc", "বুকমার্ক, ইতিহাস, সেটিংস, পড়ার তালিকা, নোট, সাইট নিয়ম ও সেশন ডাউনলোড ফোল্ডারে একটি ফাইলে সংরক্ষণ করে। পাসওয়ার্ড অন্তর্ভুক্ত নয়।"),
+    ("data.backup.button", "ব্যাকআপ"),
+    ("data.restore", "ব্যাকআপ থেকে পুনরুদ্ধার"),
+    ("data.restore.desc", "Axomai ব্যাকআপ ফাইলের বিষয়বস্তু আপনার বর্তমান ডেটার সাথে যোগ করে। কিছু মোছা হয় না।"),
+    ("data.restore.button", "ফাইল বাছুন…"),
 ];
 
 pub const AS: Table = &[
@@ -691,4 +721,14 @@ pub const AS: Table = &[
     ("sessions.tabs", "টেব"),
     ("menu.sessions", "ছেচন"),
     ("menu.session-prompt", "টেব ছেচন হিচাপে সংৰক্ষণ কৰক…"),
+    ("pw.import", "CSV ৰ পৰা আমদানি"),
+    ("pw.export", "CSV লৈ ৰপ্তানি"),
+    ("pw.export.warn", "ৰপ্তানি কৰা ফাইলত আপোনাৰ পাছৱৰ্ড সাধাৰণ টেক্সটত থাকিব যি যিকোনোৱে পঢ়িব পাৰে। তথাপিও ৰপ্তানি কৰিব আৰু কাম শেষ হ'লে ফাইলটো মচিব?"),
+    ("settings.data", "আপোনাৰ তথ্য"),
+    ("data.backup", "আপোনাৰ তথ্যৰ বেকআপ লওক"),
+    ("data.backup.desc", "বুকমাৰ্ক, ইতিহাস, ছেটিংছ, পঢ়াৰ তালিকা, টোকা, ছাইট নিয়ম আৰু ছেচন ডাউনলোড ফোল্ডাৰত এটা ফাইলত সংৰক্ষণ কৰে। পাছৱৰ্ড অন্তৰ্ভুক্ত নহয়।"),
+    ("data.backup.button", "বেকআপ"),
+    ("data.restore", "বেকআপৰ পৰা পুনৰুদ্ধাৰ"),
+    ("data.restore.desc", "Axomai বেকআপ ফাইলৰ বিষয়বস্তু আপোনাৰ বৰ্তমান তথ্যৰ সৈতে যোগ কৰে। একো মচা নহয়।"),
+    ("data.restore.button", "ফাইল বাছক…"),
 ];

@@ -484,6 +484,28 @@ impl BrowserStorage {
         Ok(())
     }
 
+    /// Every saved setting as `(key, value)`.
+    pub fn all_settings(&self) -> Vec<(String, String)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT key, value FROM settings ORDER BY key") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// A history row with its original visit time (used when restoring a backup). A bad time becomes "now".
+    pub fn import_history(&self, url: &str, title: &str, time: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO history (url, title, visit_time) VALUES (?1, ?2, COALESCE(datetime(?3, 'utc'), datetime('now')))",
+            params![url, title, time],
+        )?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn in_memory() -> Self {
+        let st = BrowserStorage { conn: Connection::open_in_memory().unwrap() };
+        st.init_tables().unwrap();
+        st
+    }
+
     pub fn note_add(&self, page: &str, text: &str) -> Result<i64, rusqlite::Error> {
         self.conn.execute("INSERT INTO notes (page, text) VALUES (?1, ?2)", params![page, text])?;
         Ok(self.conn.last_insert_rowid())

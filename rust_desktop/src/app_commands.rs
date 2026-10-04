@@ -323,6 +323,10 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "backup-file" {
+            self.backup_import(payload);
+        } else if kind == "passwords-file" {
+            self.passwords_import(payload);
         } else if kind == "bookmark-file" {
             self.import_bookmark_file(payload);
         } else if kind == "download-target" {
@@ -443,6 +447,10 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "backup-export" => self.backup_export(),
+            "backup-import" => self.pick_backup_file(),
+            "pw-export" => self.passwords_export(),
+            "pw-import" => self.pick_passwords_file(),
             "session-prompt" => self.open_session_prompt(),
             "site-mute" => self.site_mute_current(),
             "site-block-current" => self.site_block_current(),

@@ -6,6 +6,7 @@ pub mod app_input;
 pub mod app_notes;
 pub mod app_suggest;
 pub mod site_tweaks;
+pub mod portability;
 pub mod sessions;
 pub mod shortcuts;
 pub mod siterules;
