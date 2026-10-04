@@ -5,6 +5,7 @@ pub mod app_commands;
 pub mod app_input;
 pub mod app_notes;
 pub mod app_suggest;
+pub mod site_tweaks;
 pub mod app_tabs;
 pub mod blocklist;
 pub mod passwords;
@@ -260,6 +261,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
+    app.core.tweaks = app.settings.tweaks();
     app.apply_privacy_settings();
     app.restore_or_start(saved_tabs);
     app.refresh_bar();

@@ -723,6 +723,10 @@ impl App {
                     self.core.set_gpc(self.settings.gpc);
                     self.sync_extensions_for_active();
                 }
+                "dark_sites" | "cookie_banners" | "youtube_ads" | "print_clean" => {
+                    self.core.set_tweaks(self.settings.tweaks());
+                    self.sync_extensions_for_active();
+                }
                 "password_manager" => {
                     self.core.set_passwords(self.settings.password_manager);
                     self.sync_extensions_for_active();
@@ -742,7 +746,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }
@@ -750,6 +754,7 @@ impl App {
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
         self.core.set_gpc(true);
+        self.core.set_tweaks(self.settings.tweaks());
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);

@@ -87,6 +87,15 @@ pub const EN_MORE: Table = &[
     ("menu.readinglist", "Reading list"),
     ("menu.note-new", "Add note to this page"),
     ("menu.notes", "Notes"),
+    ("settings.web_pages", "Web pages"),
+    ("settings.dark_sites", "Dark mode for websites"),
+    ("settings.dark_sites.desc", "Turns light websites dark. Pages that are already dark are left alone."),
+    ("settings.cookie_banners", "Hide cookie banners"),
+    ("settings.cookie_banners.desc", "Hides cookie-consent pop-ups and unlocks scrolling."),
+    ("settings.youtube_ads", "Skip YouTube ads"),
+    ("settings.youtube_ads.desc", "Skips or hides video ads on YouTube and switches next-video autoplay off."),
+    ("settings.print_clean", "Clean printouts"),
+    ("settings.print_clean.desc", "Removes menus, ads and comments when you print a page."),
 ];
 
 pub const HI: Table = &[
@@ -239,6 +248,15 @@ pub const HI: Table = &[
     ("menu.readinglist", "पठन सूची"),
     ("menu.note-new", "इस पेज पर नोट जोड़ें"),
     ("menu.notes", "नोट्स"),
+    ("settings.web_pages", "वेब पेज"),
+    ("settings.dark_sites", "वेबसाइट के लिए डार्क मोड"),
+    ("settings.dark_sites.desc", "हल्की वेबसाइटों को गहरा बनाता है। जो पेज पहले से गहरे हैं उन्हें नहीं छेड़ता।"),
+    ("settings.cookie_banners", "कुकी बैनर छिपाएँ"),
+    ("settings.cookie_banners.desc", "कुकी-सहमति पॉप-अप छिपाता है और स्क्रोल खोल देता है।"),
+    ("settings.youtube_ads", "YouTube विज्ञापन छोड़ें"),
+    ("settings.youtube_ads.desc", "YouTube पर वीडियो विज्ञापन छोड़ता या छिपाता है और अगले वीडियो का ऑटोप्ले बंद करता है।"),
+    ("settings.print_clean", "साफ़ प्रिंटआउट"),
+    ("settings.print_clean.desc", "पेज प्रिंट करते समय मेनू, विज्ञापन और टिप्पणियाँ हटाता है।"),
 ];
 
 pub const BN: Table = &[
@@ -391,6 +409,15 @@ pub const BN: Table = &[
     ("menu.readinglist", "পড়ার তালিকা"),
     ("menu.note-new", "এই পৃষ্ঠায় নোট যোগ করুন"),
     ("menu.notes", "নোট"),
+    ("settings.web_pages", "ওয়েব পৃষ্ঠা"),
+    ("settings.dark_sites", "ওয়েবসাইটের জন্য ডার্ক মোড"),
+    ("settings.dark_sites.desc", "হালকা ওয়েবসাইটকে গাঢ় করে। যে পৃষ্ঠা আগে থেকেই গাঢ় তাতে হাত দেয় না।"),
+    ("settings.cookie_banners", "কুকি ব্যানার লুকান"),
+    ("settings.cookie_banners.desc", "কুকি-সম্মতি পপ-আপ লুকায় এবং স্ক্রল খুলে দেয়।"),
+    ("settings.youtube_ads", "YouTube বিজ্ঞাপন এড়িয়ে যান"),
+    ("settings.youtube_ads.desc", "YouTube-এ ভিডিও বিজ্ঞাপন এড়ায় বা লুকায় এবং পরের ভিডিওর অটোপ্লে বন্ধ করে।"),
+    ("settings.print_clean", "পরিষ্কার প্রিন্ট"),
+    ("settings.print_clean.desc", "পৃষ্ঠা প্রিন্টের সময় মেনু, বিজ্ঞাপন ও মন্তব্য সরিয়ে দেয়।"),
 ];
 
 pub const AS: Table = &[
@@ -543,4 +570,13 @@ pub const AS: Table = &[
     ("menu.readinglist", "পঢ়াৰ তালিকা"),
     ("menu.note-new", "এই পৃষ্ঠাত টোকা যোগ কৰক"),
     ("menu.notes", "টোকা"),
+    ("settings.web_pages", "ৱেব পৃষ্ঠা"),
+    ("settings.dark_sites", "ৱেবছাইটৰ বাবে ডাৰ্ক মোড"),
+    ("settings.dark_sites.desc", "পাতল ৱেবছাইটক গাঢ় কৰে। আগৰে পৰা গাঢ় পৃষ্ঠাত হাত নিদিয়ে।"),
+    ("settings.cookie_banners", "কুকী বেনাৰ লুকুৱাওক"),
+    ("settings.cookie_banners.desc", "কুকী-সন্মতি পপ-আপ লুকুৱায় আৰু স্ক্ৰল খুলি দিয়ে।"),
+    ("settings.youtube_ads", "YouTube বিজ্ঞাপন এৰি যাওক"),
+    ("settings.youtube_ads.desc", "YouTube ত ভিডিঅ' বিজ্ঞাপন এৰে বা লুকুৱায় আৰু পৰৱৰ্তী ভিডিঅ'ৰ অটোপ্লে বন্ধ কৰে।"),
+    ("settings.print_clean", "পৰিষ্কাৰ প্ৰিন্ট"),
+    ("settings.print_clean.desc", "পৃষ্ঠা প্ৰিন্ট কৰোঁতে মেনু, বিজ্ঞাপন আৰু মন্তব্য আঁতৰায়।"),
 ];

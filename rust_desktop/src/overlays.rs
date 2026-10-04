@@ -144,7 +144,8 @@ finish(card);
     js
 }
 
-/// Find-in-page bar, living inside the page so the web view cannot cover it. Uses `window.find`.
+/// Find-in-page bar, living inside the page so the web view cannot cover it. Every match is highlighted (the current
+/// one in orange) and counted, using the CSS Custom Highlight API.
 pub fn find_popup(theme: &Theme) -> String {
     let mut js = String::from("(function(){");
     js.push_str(&shell(theme, "__ax_pop_find"));
@@ -152,19 +153,32 @@ pub fn find_popup(theme: &Theme) -> String {
         r#"
 var card=document.createElement('div');card.className='bar';
 var inp=document.createElement('input');inp.placeholder='Find in page';inp.spellcheck=false;
-function clearSel(){try{window.getSelection().removeAllRanges()}catch(e){}}
-function run(back){var q=inp.value;if(!q){clearSel();info.textContent='';return}
-  var ok=window.find(q,false,back,true,false,false,false);info.textContent=ok?'':'No matches';info.style.color=ok?'':'#dc2626'}
-function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
 var info=document.createElement('span');info.className='info';
-inp.addEventListener('input',function(){clearSel();run(false)});
+var ranges=[],cur=0,pst=document.getElementById('__ax_find_css');
+if(!pst){pst=document.createElement('style');pst.id='__ax_find_css';pst.textContent='::highlight(ax-find){background:#fde047;color:#000}::highlight(ax-find-cur){background:#f97316;color:#000}';(document.head||document.documentElement).appendChild(pst)}
+function clearAll(){try{CSS.highlights.delete('ax-find');CSS.highlights.delete('ax-find-cur')}catch(e){}ranges=[]}
+function collect(q){ranges=[];if(!q||!document.body)return;var ql=q.toLowerCase();
+  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){var p=n.parentElement;if(!p)return 2;var t=p.tagName;if(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT'||t==='TEXTAREA')return 2;return n.nodeValue.trim()===''?2:1}});
+  var n;while((n=w.nextNode())){var s=n.nodeValue.toLowerCase(),i=0;
+    while((i=s.indexOf(ql,i))>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+ql.length);i+=ql.length;if(r.getClientRects().length)ranges.push(r);if(ranges.length>=3000)return}}}
+function paint(scroll){
+  try{CSS.highlights.set('ax-find',new Highlight(...ranges));
+    if(ranges.length){var h=new Highlight(ranges[cur]);h.priority=1;CSS.highlights.set('ax-find-cur',h)}else{CSS.highlights.delete('ax-find-cur')}}catch(e){}
+  if(!ranges.length){info.textContent=inp.value?'No matches':'';info.style.color=inp.value?'#dc2626':'';return}
+  info.textContent=(cur+1)+' / '+ranges.length;info.style.color='';
+  if(scroll){var el=ranges[cur].startContainer.parentElement;if(el)el.scrollIntoView({block:'center',inline:'nearest'})}}
+function run(){clearAll();collect(inp.value);cur=0;paint(true)}
+function step(d){if(!ranges.length){run();return}cur=(cur+d+ranges.length)%ranges.length;paint(true)}
+function close(){clearAll();if(pst)pst.remove();host.remove()}
+function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
+inp.addEventListener('input',run);
 inp.addEventListener('keydown',function(e){e.stopPropagation();
-  if(e.key==='Enter'){e.preventDefault();run(e.shiftKey)}
-  else if(e.key==='Escape'){e.preventDefault();clearSel();host.remove()}},true);
+  if(e.key==='Enter'){e.preventDefault();step(e.shiftKey?-1:1)}
+  else if(e.key==='Escape'){e.preventDefault();close()}},true);
 card.appendChild(inp);card.appendChild(info);
-btn('↑','Previous (Shift+Enter)',function(){run(true)});
-btn('↓','Next (Enter)',function(){run(false)});
-btn('✕','Close (Esc)',function(){clearSel();host.remove()});
+btn('↑','Previous (Shift+Enter)',function(){step(-1)});
+btn('↓','Next (Enter)',function(){step(1)});
+btn('✕','Close (Esc)',close);
 css('.bar{position:fixed;top:8px;right:24px;display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px 8px;font-size:13px;color:var(--text)}'+
 'input{width:210px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:transparent;color:var(--heading);font:inherit;outline:none}input:focus{border-color:var(--primary)}'+
 '.info{font-size:11px;min-width:58px;color:var(--muted)}button{border:0;background:var(--hover);color:var(--heading);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px}button:hover{background:var(--primary-light)}');

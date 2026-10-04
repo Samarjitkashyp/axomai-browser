@@ -86,6 +86,14 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Dark mode for websites.
+    pub dark_sites: bool,
+    /// Hide cookie-consent banners.
+    pub cookie_banners: bool,
+    /// Skip YouTube ads and switch autoplay off.
+    pub youtube_ads: bool,
+    /// Strip menus, ads and comments from printouts.
+    pub print_clean: bool,
     /// Key of the city whose weather the home page shows.
     pub weather_city: String,
     /// UI language code ("en", "as", "hi", ...).
@@ -105,6 +113,10 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            dark_sites: false,
+            cookie_banners: true,
+            youtube_ads: true,
+            print_clean: true,
             weather_city: "jorhat".into(),
             language: "en".into(),
         }
@@ -163,6 +175,11 @@ impl Settings {
         if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
             s.password_manager = v;
         }
+        for (k, slot) in [("dark_sites", &mut s.dark_sites), ("cookie_banners", &mut s.cookie_banners), ("youtube_ads", &mut s.youtube_ads), ("print_clean", &mut s.print_clean)] {
+            if let Some(v) = get(k).and_then(|v| truthy(&v)) {
+                *slot = v;
+            }
+        }
         if let Some(v) = get("gpc").and_then(|v| truthy(&v)) {
             s.gpc = v;
         }
@@ -173,6 +190,10 @@ impl Settings {
     }
 
     /// Change one setting from its string form. Returns false (and changes nothing) for unknown keys or bad values.
+    pub fn tweaks(&self) -> crate::site_tweaks::Tweaks {
+        crate::site_tweaks::Tweaks { dark: self.dark_sites, cookies: self.cookie_banners, youtube: self.youtube_ads, print: self.print_clean }
+    }
+
     pub fn set(&mut self, storage: Option<&BrowserStorage>, key: &str, value: &str) -> bool {
         let ok = match key {
             "startup" => Startup::parse(value).map(|v| self.startup = v).is_some(),
@@ -199,6 +220,10 @@ impl Settings {
             "bookmark_bar" => truthy(value).map(|v| self.bookmark_bar = v).is_some(),
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
+            "dark_sites" => truthy(value).map(|v| self.dark_sites = v).is_some(),
+            "cookie_banners" => truthy(value).map(|v| self.cookie_banners = v).is_some(),
+            "youtube_ads" => truthy(value).map(|v| self.youtube_ads = v).is_some(),
+            "print_clean" => truthy(value).map(|v| self.print_clean = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
             "weather_city" => CITIES.iter().any(|(k, _)| *k == value).then(|| self.weather_city = value.to_string()).is_some(),
             "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),

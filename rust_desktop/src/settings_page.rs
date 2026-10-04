@@ -139,6 +139,15 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         clear,
     );
 
+    // ---- web pages
+    let web_pages = format!(
+        "{}{}{}{}",
+        row(t("settings.dark_sites"), t("settings.dark_sites.desc"), &switch("data-set=\"dark_sites\"", s.dark_sites)),
+        row(t("settings.cookie_banners"), t("settings.cookie_banners.desc"), &switch("data-set=\"cookie_banners\"", s.cookie_banners)),
+        row(t("settings.youtube_ads"), t("settings.youtube_ads.desc"), &switch("data-set=\"youtube_ads\"", s.youtube_ads)),
+        row(t("settings.print_clean"), t("settings.print_clean.desc"), &switch("data-set=\"print_clean\"", s.print_clean)),
+    );
+
     // ---- downloads & performance
     let downloads = format!(
         "{}{}",
@@ -175,11 +184,12 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let body = format!(
-        "{head}{a}{b}{c}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
+        "{head}{a}{b}{c}{w}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
         a = section(t("settings.appearance"), &appearance),
         b = section(t("settings.startup"), &format!("{}{}", startup, search)),
         c = section(t("settings.privacy"), &privacy),
+        w = section(t("settings.web_pages"), &web_pages),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),
