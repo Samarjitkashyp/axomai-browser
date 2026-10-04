@@ -79,6 +79,8 @@ pub struct App {
     /// The Windows voice process that is reading a page aloud.
     pub tts: Option<std::process::Child>,
     pub tts_rate: f32,
+    /// The site the Site settings page is about.
+    pub site_origin: String,
     /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
     pub news_cache: std::collections::HashMap<String, (Instant, String)>,
     pub news_pending: std::collections::HashSet<String>,

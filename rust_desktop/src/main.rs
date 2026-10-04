@@ -9,6 +9,7 @@ pub mod site_tweaks;
 pub mod pagetools;
 pub mod portability;
 pub mod sessions;
+pub mod sitesettings;
 pub mod tts;
 pub mod shortcuts;
 pub mod siterules;
@@ -256,6 +257,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         icon_pending: Default::default(),
         muted_sites: Default::default(),
         tts: None,
+        site_origin: String::new(),
         tts_rate: 1.0,
         news_cache: Default::default(),
         news_pending: Default::default(),

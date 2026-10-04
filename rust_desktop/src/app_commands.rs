@@ -58,6 +58,7 @@ pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
         "Reading list" => ("axomai://readinglist", TabKind::Page("readinglist")),
         "Notes" => ("axomai://notes", TabKind::Page("notes")),
         "Sessions" => ("axomai://sessions", TabKind::Page("sessions")),
+        "Site settings" => ("axomai://sitesettings", TabKind::Page("sitesettings")),
         _ => return None,
     })
 }
@@ -149,6 +150,7 @@ impl App {
                 let icons = self.icon_map(&urls);
                 pages::reading_list_page(&ctx, &items, &icons)
             }
+            TabKind::Page("sitesettings") => crate::sitesettings::site_settings_page(&ctx, &self.site_view()),
             TabKind::Page("sessions") => pages::sessions_page(&ctx, &self.storage.as_ref().map(|s| s.sessions()).unwrap_or_default()),
             TabKind::Page("notes") => pages::notes_page(&ctx, &self.storage.as_ref().map(|s| s.notes_all()).unwrap_or_default()),
             TabKind::Page("passwords") => {
@@ -276,6 +278,7 @@ impl App {
             "readinglist" => TabKind::Page("readinglist"),
             "notes" => TabKind::Page("notes"),
             "sessions" => TabKind::Page("sessions"),
+            "sitesettings" => TabKind::Page("sitesettings"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -449,6 +452,8 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "site-settings" => self.open_site_settings(),
+            "site-clear-data" => self.site_clear_data(),
             "tts-toggle" => self.tts_toggle(1.0),
             "tts-stop" => self.tts_stop(),
             "pip" => self.toggle_pip(),
@@ -530,7 +535,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" | "sessions" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" | "sessions" | "sitesettings" => {
                 self.open_internal(cmd)
             }
 
@@ -684,6 +689,10 @@ impl App {
             self.session_delete(id);
         } else if let Some(r) = cmd.strip_prefix("tts-toggle/") {
             self.tts_toggle(r.parse().unwrap_or(1.0));
+        } else if let Some(p) = cmd.strip_prefix("site-zoom/").and_then(|v| v.parse::<u32>().ok()) {
+            self.site_zoom_set(p);
+        } else if let Some((id, action)) = cmd.strip_prefix("site-perm/").and_then(|r| r.split_once('/')).and_then(|(i, a)| i.parse::<i64>().ok().map(|i| (i, a))) {
+            self.site_perm_command(id, action);
         } else if let Some(key) = cmd.strip_prefix("emu/") {
             self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
