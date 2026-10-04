@@ -4,11 +4,21 @@ pub mod types;
 pub mod storage;
 pub mod extensions;
 pub mod pages;
-pub mod chrome_js;
 pub mod rendering;
+pub mod toolbar;
+pub mod blocklist;
+pub mod web;
+pub mod sys;
+pub mod theme;
+pub mod ai;
+pub mod ext_scripts;
+pub mod overlays;
+pub mod actions;
+pub mod omnibox;
+pub mod viewsource;
 
-use types::{SearchEngine, DesktopTab, SIDEBAR_ITEMS, SIDEBAR_W, TAB_BAR_H, TOOLBAR_H, CHROME_TOP};
-use extensions::{create_extensions, build_extension_init_script};
+use types::{SearchEngine, DesktopTab, SIDEBAR_ITEMS, SIDEBAR_W, TAB_BAR_H, CHROME_TOP};
+use extensions::create_extensions;
 
 use axomai_engine::AxomaiEngine;
 use axomai_engine::NativeGpuCompositor;
@@ -24,45 +34,68 @@ use tao::{
 };
 #[cfg(target_os = "windows")]
 use tao::platform::windows::WindowExtWindows;
-use wry::{Rect, WebViewBuilder};
+use wry::Rect;
 
-use chrome_js::{CHROME_DROPDOWN_JS, CHROME_EXT_DROPDOWN_JS};
 use rendering::{w_of, h_of, build_chrome_quads, build_dropdown_quads};
 
 
-fn serde_json_mini(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+/// Load a tab's saved address: web URLs go to the web view, our own `axomai://` / `about:` pages go through the
+/// command queue (a plain navigation to them would be cancelled by the web view).
+fn tab_load(wv: &wry::WebView, shared: &web::WebShared, url: &str) {
+    match omnibox::resolve(url, |q| q.to_string()) {
+        Some(omnibox::Target::Internal(cmd)) => {
+            if let Ok(mut q) = shared.nav.lock() {
+                q.push(format!("axomai://{}", cmd));
             }
-            c => out.push(c),
+        }
+        Some(omnibox::Target::ViewSource(u)) => {
+            if let Ok(mut q) = shared.nav.lock() {
+                q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
+            }
+        }
+        _ => {
+            let _ = wv.load_url(url);
         }
     }
-    out.push('"');
-    out
 }
 
-fn url_encode_mini(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
-    for b in s.bytes() {
+/// Percent-decoding for command arguments produced by `encodeURIComponent` in the popups.
+fn url_decode(s: &str) -> String {
+    fn hex(b: u8) -> Option<u8> {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => {
-                out.push_str(&format!("%{:02X}", b));
-            }
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            b'A'..=b'F' => Some(b - b'A' + 10),
+            _ => None,
         }
     }
-    out
+    let b = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() + 0 + 1 && i + 2 <= b.len().saturating_sub(1) {
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// Map the `<title>` of one of our generated pages to (address, kind, tab label).
+fn internal_page_for_title(t: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match t {
+        "Extensions - Axomai Browser" => Some(("axomai://extensions", "extensions", "Extensions")),
+        "Settings - Axomai Browser" => Some(("about:settings", "settings", "Settings")),
+        "History - Axomai Browser" => Some(("axomai://history", "history", "History")),
+        "Bookmarks - Axomai Browser" => Some(("axomai://bookmarks", "bookmarks", "Bookmarks")),
+        "Downloads - Axomai Browser" => Some(("axomai://downloads", "downloads", "Downloads")),
+        _ => None,
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -192,34 +225,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mouse_y: f32 = 0.0;
     let mut compositor = NativeGpuCompositor::new(size.width, size.height);
 
-    // Load toolbar icons into glyph atlas
-    let icon_size: u32 = 20;
-    let icons_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons");
-    let icon_back = {
-        let img = image::open(icons_dir.join("arrow_back.png")).expect("icon").to_rgba8();
-        compositor.glyph_atlas.blit_icon("back", img.as_raw(), img.width(), img.height(), icon_size)
-    };
-    let icon_forward = {
-        let img = image::open(icons_dir.join("arrow_forward.png")).expect("icon").to_rgba8();
-        compositor.glyph_atlas.blit_icon("forward", img.as_raw(), img.width(), img.height(), icon_size)
-    };
-    let icon_reload = {
-        let img = image::open(icons_dir.join("reload.png")).expect("icon").to_rgba8();
-        compositor.glyph_atlas.blit_icon("reload", img.as_raw(), img.width(), img.height(), icon_size)
-    };
-    let icon_home = {
-        let img = image::open(icons_dir.join("home.png")).expect("icon").to_rgba8();
-        compositor.glyph_atlas.blit_icon("home", img.as_raw(), img.width(), img.height(), icon_size)
-    };
-    let icon_menu = {
-        let img = image::open(icons_dir.join("menu_dots.png")).expect("icon").to_rgba8();
-        compositor.glyph_atlas.blit_icon("menu", img.as_raw(), img.width(), img.height(), icon_size)
-    };
-    println!("[Axomai] Toolbar icons loaded ({}px)", icon_size);
+    // Toolbar icons: rasterised from the same SVG paths as ui/index.html
+    let toolbar_icons = toolbar::load_icons(&mut compositor);
 
     let mut address_bar_text = String::from("about:home");
     let mut address_bar_cursor: usize = 0;
     let mut address_bar_focused = false;
+    // Like other browsers, focusing the address bar selects the whole address; typing replaces it.
+    let mut address_all_selected = false;
+    let mut title_tab: usize = 0;
     let mut home_search_focused = false;
     let mut home_search_text = String::new();
     let mut home_search_cursor: usize = 0;
@@ -237,7 +251,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut is_extensions_page = false;
     let mut extensions = create_extensions();
     let mut hover_ext_idx: Option<usize> = None;
-    let mut ext_inject_time: Option<std::time::Instant> = None;
 
     let (mut tabs, mut active_tab_idx) = {
         let mut restored = false;
@@ -281,13 +294,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let scale_factor = window.scale_factor() as f32;
 
-    let nav_url_shared: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
     let mut webview: Option<wry::WebView> = None;
     let mut webview_visible = false;
     let mut load_internal_page: Option<String> = Some("home".to_string());
 
-    let mut browser_storage = browser_storage;
     let mut modifiers = tao::keyboard::ModifiersState::empty();
 
     let download_dir = {
@@ -295,9 +306,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::create_dir_all(&d);
         d
     };
-    let download_signal: Arc<Mutex<Vec<(String, String, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+    let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
+    let shared = web::WebShared::new(download_dir.clone(), &ui_dir);
+    let mut core = actions::Core::new(browser_storage.as_ref(), &mut extensions);
+    if let Some(saved) = browser_storage.as_ref().and_then(|s| s.get_setting("blocked_total").ok().flatten()).and_then(|v| v.parse::<u64>().ok()) {
+        shared.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
+    }
 
     let mut is_loading = false;
+    let mut current_title = String::from("Axomai Browser");
+    let mut loading_since = std::time::Instant::now();
+    let mut last_shield_count: u32 = 0;
     let mut loading_progress: f32 = 0.0;
 
     let mut find_bar_open = false;
@@ -315,6 +334,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 if let Some(ref s) = browser_storage {
+                    let _ = s.set_setting("blocked_total", &shared.shield.total_blocked.load(std::sync::atomic::Ordering::Relaxed).to_string());
                     let saved: Vec<storage::SavedTab> = tabs.iter().enumerate().map(|(i, t)| {
                         storage::SavedTab {
                             position: i as i32,
@@ -336,10 +356,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     needs_chrome_redraw = true;
                     if let Some(ref wv) = webview {
                         let _ = wv.set_bounds(Rect {
-                            position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                            size: wry::dpi::LogicalSize::new(
-                                (new_size.width as f32 / scale_factor - SIDEBAR_W) as u32,
-                                (new_size.height as f32 / scale_factor - CHROME_TOP) as u32,
+                            position: wry::dpi::PhysicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
+                            size: wry::dpi::PhysicalSize::new(
+                                (new_size.width as f32 - SIDEBAR_W) as u32,
+                                (new_size.height as f32 - CHROME_TOP) as u32,
                             ).into(),
                         });
                     }
@@ -459,34 +479,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 } else if mouse_y <= TAB_BAR_H {
                     // Over tab bar
-                    let available_w = w - SIDEBAR_W - 80.0;
-                    let tab_count = tabs.len().max(1);
-                    let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
-                    let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 4.0;
-                    let tab_bar_end = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0);
-                    if mouse_x >= SIDEBAR_W + 8.0 && mouse_x <= tab_bar_end {
+                    let strip = toolbar::tab_strip(w, tabs.len());
+                    if mouse_x >= toolbar::TAB_START_X && mouse_x <= strip.end_x(tabs.len()) {
                         cursor_icon = CursorIcon::Hand;
-                    } else if mouse_x >= plus_x - 4.0 && mouse_x <= plus_x + 36.0 {
+                    } else if strip.plus.contains(mouse_x, mouse_y) {
                         cursor_icon = CursorIcon::Hand;
                     }
                 } else if mouse_y <= CHROME_TOP {
                     // Over toolbar
-                    let nb = SIDEBAR_W + 10.0;
-                    let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
-                    let right_icons_w = 120.0 + n_enabled_ext * 30.0;
-                    let ax = SIDEBAR_W + 116.0;
-                    let aw = w - ax - right_icons_w - 10.0;
-
-                    if mouse_x >= nb && mouse_x <= nb + 112.0 {
-                        // Back / Forward / Reload / Home buttons
-                        cursor_icon = CursorIcon::Hand;
-                    } else if mouse_x >= ax && mouse_x <= ax + aw {
-                        // Address input
-                        cursor_icon = CursorIcon::Text;
-                    } else if mouse_x > ax + aw {
-                        // Extensions / Menu icon
-                        cursor_icon = CursorIcon::Hand;
-                    }
+                    cursor_icon = match toolbar::toolbar_layout(w).hit(mouse_x, mouse_y) {
+                        Some(toolbar::ToolbarHit::Omnibox) => CursorIcon::Text,
+                        Some(_) => CursorIcon::Hand,
+                        None => CursorIcon::Default,
+                    };
                 } else if menu_open && hover_menu_idx.is_some() {
                     cursor_icon = CursorIcon::Hand;
                 } else if is_settings_page && hover_engine_idx.is_some() {
@@ -685,26 +690,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         needs_chrome_redraw = true;
                     } else if mouse_y < CHROME_TOP {
-                        let available_w = w - SIDEBAR_W - 80.0;
-                        let tab_count = tabs.len().max(1);
-                        let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
+                        let strip = toolbar::tab_strip(w, tabs.len());
                         let mut tab_action = None; // (index, is_close)
 
                         if mouse_y <= TAB_BAR_H {
                             for (i, _) in tabs.iter().enumerate() {
-                                let tab_x = SIDEBAR_W + 8.0 + i as f32 * (tab_w + 4.0);
-                                let close_x = tab_x + tab_w - 24.0;
-                                if mouse_x >= close_x && mouse_x <= tab_x + tab_w + 2.0 {
+                                if strip.close_rect(i).contains(mouse_x, mouse_y) {
                                     tab_action = Some((i, true));
                                     break;
-                                } else if mouse_x >= tab_x && mouse_x < close_x {
+                                } else if strip.tab_rect(i).contains(mouse_x, mouse_y) {
                                     tab_action = Some((i, false));
                                     break;
                                 }
                             }
 
-                            let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 4.0;
-                            if mouse_x >= plus_x - 4.0 && mouse_x <= plus_x + 36.0 {
+                            if strip.plus.contains(mouse_x, mouse_y) {
                                 // + New Tab
                                 tabs.push(DesktopTab {
                                     title: String::from("New Tab"),
@@ -753,7 +753,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     } else if cur.is_settings {
                                         load_internal_page = Some("settings".to_string());
                                     } else if let Some(ref wv) = webview {
-                                        let _ = wv.load_url(&cur.url);
+                                        tab_load(wv, &shared, &cur.url);
                                         let _ = wv.set_visible(true);
                                         webview_visible = true;
                                     }
@@ -773,7 +773,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     } else if cur.is_settings {
                                         load_internal_page = Some("settings".to_string());
                                     } else if let Some(ref wv) = webview {
-                                        let _ = wv.load_url(&cur.url);
+                                        tab_load(wv, &shared, &cur.url);
                                         let _ = wv.set_visible(true);
                                         webview_visible = true;
                                     }
@@ -781,117 +781,120 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        // Toolbar right controls (Profile + Extensions + 3-Dot Menu)
-                        let n_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
-                        let right_w = 110.0 + n_ext * 30.0;
-                        let icons_start_x = w - right_w;
-                        let prof_end_x = icons_start_x + 8.0 + (TOOLBAR_H - 20.0) + 8.0;
-
-                        let menu_btn_x = w - 46.0;
-                        let puzzle_btn_x = w - 82.0;
-
-                        // Extensions Puzzle Button click (top-right of toolbar)
-                        if mouse_x >= puzzle_btn_x && mouse_x < menu_btn_x
-                            && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
-                        {
-                            if let Some(ref wv) = webview {
-                                let _ = wv.evaluate_script(CHROME_EXT_DROPDOWN_JS);
-                            } else {
-                                is_extensions_page = true;
+                        // Toolbar controls (hit-tested against toolbar::toolbar_layout, same geometry as the renderer)
+                        let tb = toolbar::toolbar_layout(w);
+                        let hit = tb.hit(mouse_x, mouse_y);
+                        // Clicking anything in the toolbar or tab strip dismisses an open popup, as in other browsers.
+                        // Buttons that open a popup are excluded so that clicking the same button again toggles it closed.
+                        if !matches!(
+                            hit,
+                            Some(toolbar::ToolbarHit::Extensions) | Some(toolbar::ToolbarHit::Menu) | Some(toolbar::ToolbarHit::Theme)
+                                | Some(toolbar::ToolbarHit::Shield) | Some(toolbar::ToolbarHit::Ai) | Some(toolbar::ToolbarHit::Profile)
+                                | Some(toolbar::ToolbarHit::Qr) | Some(toolbar::ToolbarHit::Secure)
+                        ) {
+                            core.close_popups(webview.as_ref());
+                        }
+                        let anchor = |r: toolbar::Rect| actions::anchor_right(w, r.right(), scale_factor);
+                        match hit {
+                            Some(toolbar::ToolbarHit::Extensions) => {
+                                if webview.is_some() {
+                                    core.open_extensions(webview.as_ref(), &shared, &extensions, anchor(tb.extensions));
+                                } else {
+                                    is_extensions_page = true;
+                                    is_home_page = false;
+                                    is_settings_page = false;
+                                    sidebar_active = 5;
+                                    address_bar_text = String::from("axomai://extensions");
+                                    load_internal_page = Some("extensions".to_string());
+                                }
+                            }
+                            Some(toolbar::ToolbarHit::Menu) => {
+                                if webview.is_some() {
+                                    core.open_menu(webview.as_ref(), &shared, anchor(tb.menu));
+                                } else {
+                                    menu_open = !menu_open;
+                                }
+                            }
+                            Some(toolbar::ToolbarHit::Downloads) => {
                                 is_home_page = false;
+                                is_extensions_page = false;
                                 is_settings_page = false;
-                                sidebar_active = 5;
-                                address_bar_text = String::from("axomai://extensions");
-                                load_internal_page = Some("extensions".to_string());
+                                address_bar_text = String::from("axomai://downloads");
+                                load_internal_page = Some("downloads".to_string());
                             }
-                            needs_chrome_redraw = true;
-                        }
-
-                        // 3-dot menu button area (top-right of toolbar)
-                        if mouse_x >= menu_btn_x && mouse_x <= w
-                            && mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP
-                        {
-                            if let Some(ref wv) = webview {
-                                let _ = wv.evaluate_script(CHROME_DROPDOWN_JS);
-                            } else {
-                                menu_open = !menu_open;
+                            Some(toolbar::ToolbarHit::Theme) => core.open_theme_menu(webview.as_ref(), &shared, anchor(tb.theme)),
+                            Some(toolbar::ToolbarHit::Secure) => {
+                                let addr = address_bar_text.clone();
+                                core.open_site_info(webview.as_ref(), &shared, actions::anchor_right(w, tb.secure_badge.x + 330.0, scale_factor), &addr);
                             }
-                            needs_chrome_redraw = true;
-                        }
-                        // Click on extension icon in toolbar to toggle it off
-                        if mouse_y >= TAB_BAR_H && mouse_y <= CHROME_TOP {
-                            let mut ex = prof_end_x;
-                            let ih = TOOLBAR_H - 20.0;
-                            for i in 0..extensions.len() {
-                                if extensions[i].enabled {
-                                    if mouse_x >= ex && mouse_x <= ex + ih {
-                                        extensions[i].enabled = false;
-                                        if let Some(ref wv) = webview {
-                                            let _ = wv.evaluate_script(extensions[i].disable_js);
-                                        }
-                                        needs_chrome_redraw = true;
-                                        break;
-                                    }
-                                    ex += 30.0;
-                                }
+                            Some(toolbar::ToolbarHit::Shield) => core.open_shield(webview.as_ref(), &shared, &extensions, anchor(tb.shield)),
+                            Some(toolbar::ToolbarHit::Ai) => core.open_ai(webview.as_ref(), &shared, anchor(tb.ai), &current_title),
+                            Some(toolbar::ToolbarHit::Profile) => core.open_profile(webview.as_ref(), &shared, browser_storage.as_ref(), anchor(tb.profile)),
+                            Some(toolbar::ToolbarHit::Qr) => {
+                                let url = address_bar_text.clone();
+                                core.open_qr(webview.as_ref(), &shared, anchor(tb.qr), &url);
                             }
-                        }
-                        let addr_x = SIDEBAR_W + 116.0;
-                        let addr_y = TAB_BAR_H + 7.0;
-                        let addr_h = TOOLBAR_H - 14.0;
-                        let addr_w = w - addr_x - right_w - 10.0;
-                        if mouse_x >= addr_x
-                            && mouse_x <= addr_x + addr_w
-                            && mouse_y >= addr_y
-                            && mouse_y <= addr_y + addr_h
-                        {
-                            address_bar_focused = true;
-                            find_bar_open = false;
-                            address_bar_text.clear();
-                            address_bar_cursor = 0;
-                            needs_chrome_redraw = true;
-                            #[cfg(target_os = "windows")]
-                            unsafe {
-                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                SetFocus(window.hwnd() as _);
+                            Some(toolbar::ToolbarHit::Reader) => {
+                                core.run_extension(extensions::READER, webview.as_ref(), &shared, &extensions, anchor(tb.reader));
                             }
-                        } else if mouse_y >= TAB_BAR_H {
-                            let nav_base_x = SIDEBAR_W + 10.0;
-                            if mouse_x >= nav_base_x && mouse_x <= nav_base_x + 22.0 {
-                                if let Ok(mut eng) = engine.lock() {
-                                    if eng.history_index > 0 {
-                                        eng.history_index -= 1;
-                                        let entry = eng.history[eng.history_index].clone();
-                                        let content_w = w - SIDEBAR_W;
-                                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                        let _ = eng.load_url(&entry.url, content_w, content_h);
-                                        address_bar_text = entry.url;
-                                        is_home_page = false;
-                                        needs_chrome_redraw = true;
+                            Some(toolbar::ToolbarHit::Bookmark) => {
+                                let url = address_bar_text.clone();
+                                let result = core.toggle_bookmark(&url, &current_title, browser_storage.as_ref());
+                                if let Some(ref wv) = webview {
+                                    match result {
+                                        Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
+                                        Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
+                                        None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 28.0 && mouse_x <= nav_base_x + 50.0 {
-                                if let Ok(mut eng) = engine.lock() {
-                                    if eng.history_index + 1 < eng.history.len() {
-                                        eng.history_index += 1;
-                                        let entry = eng.history[eng.history_index].clone();
-                                        let content_w = w - SIDEBAR_W;
-                                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                        let _ = eng.load_url(&entry.url, content_w, content_h);
-                                        address_bar_text = entry.url;
-                                        is_home_page = false;
-                                        needs_chrome_redraw = true;
+                            }
+                            Some(toolbar::ToolbarHit::Omnibox) => {
+                                address_bar_focused = true;
+                                find_bar_open = false;
+                                if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
+                                    address_bar_cursor = address_bar_text.chars().count();
+                                    address_all_selected = true;
+                                } else {
+                                    address_bar_text.clear();
+                                    address_bar_cursor = 0;
+                                    address_all_selected = false;
+                                }
+                                #[cfg(target_os = "windows")]
+                                unsafe {
+                                    extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                    SetFocus(window.hwnd() as _);
+                                }
+                            }
+                            Some(toolbar::ToolbarHit::Back) => {
+                                if let Some(ref wv) = webview {
+                                    if core.can_back {
+                                        web::com::go_back(wv);
+                                        let _ = wv.set_visible(true);
+                                        webview_visible = true;
                                     }
                                 }
-                            } else if mouse_x >= nav_base_x + 56.0 && mouse_x <= nav_base_x + 78.0 {
-                                // Reload button
-                                if !is_home_page && !is_settings_page && !is_extensions_page {
-                                    if let Some(ref wv) = webview {
-                                        let _ = wv.load_url(&address_bar_text);
+                            }
+                            Some(toolbar::ToolbarHit::Forward) => {
+                                if let Some(ref wv) = webview {
+                                    if core.can_fwd {
+                                        web::com::go_forward(wv);
+                                        let _ = wv.set_visible(true);
+                                        webview_visible = true;
                                     }
                                 }
-                                needs_chrome_redraw = true;
-                            } else if mouse_x >= nav_base_x + 84.0 && mouse_x <= nav_base_x + 106.0 {
+                            }
+                            Some(toolbar::ToolbarHit::Reload) => {
+                                if is_home_page {
+                                    load_internal_page = Some("home".to_string());
+                                } else if is_extensions_page {
+                                    load_internal_page = Some("extensions".to_string());
+                                } else if is_settings_page {
+                                    load_internal_page = Some("settings".to_string());
+                                } else if let Some(ref wv) = webview {
+                                    web::com::reload(wv);
+                                }
+                            }
+                            Some(toolbar::ToolbarHit::Home) => {
                                 is_home_page = true;
                                 is_settings_page = false;
                                 is_extensions_page = false;
@@ -907,7 +910,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 load_internal_page = Some("home".to_string());
                             }
-                            if address_bar_focused {
+                            None => {}
+                        }
+                        if hit.is_some() || mouse_y >= TAB_BAR_H {
+                            if hit != Some(toolbar::ToolbarHit::Omnibox) && address_bar_focused {
                                 address_bar_focused = false;
                                 address_bar_text = tabs[active_tab_idx].url.clone();
                             }
@@ -933,12 +939,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if content_x >= cx && content_x <= cx + card_w
                                 && content_y >= cy && content_y <= cy + card_h
                             {
-                                extensions[i].enabled = !extensions[i].enabled;
-                                let is_on = extensions[i].enabled;
-                                let js = if is_on { extensions[i].inject_js } else { extensions[i].disable_js };
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.evaluate_script(js);
-                                }
+                                core.toggle_extension(i, webview.as_ref(), &shared, &mut extensions, browser_storage.as_ref());
                                 needs_chrome_redraw = true;
                                 break;
                             }
@@ -1035,6 +1036,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let ctrl = modifiers.control_key();
                     if ctrl {
                         match key_event.logical_key {
+                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("u") && !address_bar_focused && !home_search_focused && !find_bar_open => {
+                                if let Ok(mut q) = shared.nav.lock() {
+                                    q.push(String::from("axomai://viewsource-current"));
+                                }
+                            }
+                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("a") && address_bar_focused => {
+                                address_bar_cursor = address_bar_text.chars().count();
+                                address_all_selected = !address_bar_text.is_empty();
+                                needs_chrome_redraw = true;
+                            }
+                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("v") && (address_bar_focused || home_search_focused || find_bar_open) => {
+                                // Paste: newlines would break the single-line fields, so they become spaces.
+                                if let Some(text) = sys::clipboard_text() {
+                                    let text: String = text.chars().map(|c| if c == '\r' || c == '\n' || c == '\t' { ' ' } else { c }).collect();
+                                    if address_bar_focused {
+                                        if address_all_selected {
+                                            address_bar_text.clear();
+                                            address_bar_cursor = 0;
+                                            address_all_selected = false;
+                                        }
+                                        let at = address_bar_text.char_indices().nth(address_bar_cursor).map(|(i, _)| i).unwrap_or(address_bar_text.len());
+                                        address_bar_text.insert_str(at, &text);
+                                        address_bar_cursor += text.chars().count();
+                                    } else if home_search_focused {
+                                        let at = home_search_text.char_indices().nth(home_search_cursor).map(|(i, _)| i).unwrap_or(home_search_text.len());
+                                        home_search_text.insert_str(at, &text);
+                                        home_search_cursor += text.chars().count();
+                                    } else {
+                                        find_text.push_str(&text);
+                                        if let Some(ref wv) = webview {
+                                            let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
+                                            let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
+                                        }
+                                    }
+                                    needs_chrome_redraw = true;
+                                }
+                            }
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("t") => {
                                 tabs.push(DesktopTab {
                                     title: String::from("New Tab"),
@@ -1089,7 +1127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let page = if is_extensions_page { "extensions" } else if is_settings_page { "settings" } else { "home" };
                                     load_internal_page = Some(page.to_string());
                                 } else if let Some(ref wv) = webview {
-                                    let _ = wv.load_url(&cur.url);
+                                    tab_load(wv, &shared, &cur.url);
                                     if !webview_visible {
                                         let _ = wv.set_visible(true);
                                         webview_visible = true;
@@ -1100,8 +1138,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("l") => {
                                 address_bar_focused = true;
                                 find_bar_open = false;
-                                address_bar_text.clear();
-                                address_bar_cursor = 0;
+                                if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
+                                    address_bar_cursor = address_bar_text.chars().count();
+                                    address_all_selected = true;
+                                } else {
+                                    address_bar_text.clear();
+                                    address_bar_cursor = 0;
+                                    address_all_selected = false;
+                                }
                                 needs_chrome_redraw = true;
                                 #[cfg(target_os = "windows")]
                                 unsafe {
@@ -1110,19 +1154,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("d") => {
-                                if let Some(ref s) = browser_storage {
-                                    if !is_home_page && !address_bar_text.is_empty()
-                                        && !address_bar_text.starts_with("about:")
-                                        && !address_bar_text.starts_with("axomai://")
-                                    {
-                                        let title = tabs[active_tab_idx].title.clone();
-                                        let _ = s.add_bookmark(&address_bar_text, &title, "Unsorted");
+                                // Same toggle as the toolbar star: a second Ctrl+D removes the bookmark instead of duplicating it.
+                                let url = address_bar_text.clone();
+                                let result = core.toggle_bookmark(&url, &current_title, browser_storage.as_ref());
+                                if let Some(ref wv) = webview {
+                                    match result {
+                                        Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
+                                        Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
+                                        None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
                                     }
                                 }
                             }
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("r") => {
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.load_url(&address_bar_text);
+                                if is_home_page {
+                                    load_internal_page = Some("home".to_string());
+                                } else if is_extensions_page {
+                                    load_internal_page = Some("extensions".to_string());
+                                } else if is_settings_page {
+                                    load_internal_page = Some("settings".to_string());
+                                } else if let Some(ref wv) = webview {
+                                    web::com::reload(wv);
                                 }
                             }
                             Key::Character(ref ch) if ch.eq_ignore_ascii_case("h") => {
@@ -1185,8 +1236,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 needs_chrome_redraw = true;
                             }
-                            Key::Character(ref ch) if !key_event.repeat => {
-                                find_text.push_str(ch);
+                            Key::Character(_) | Key::Space => {
+                                // Space arrives as its own key (not `Character`), and held keys must repeat.
+                                match key_event.logical_key {
+                                    Key::Character(ref ch) => find_text.push_str(ch),
+                                    _ => find_text.push(' '),
+                                }
                                 if let Some(ref wv) = webview {
                                     let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
                                     let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
@@ -1196,6 +1251,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             _ => {}
                         }
                     } else if address_bar_focused {
+                        if address_all_selected {
+                            // Whole address selected: editing keys replace it, navigation keys just drop the selection.
+                            let len = address_bar_text.chars().count();
+                            match key_event.logical_key {
+                                Key::Character(_) | Key::Space | Key::Backspace | Key::Delete => {
+                                    address_bar_text.clear();
+                                    address_bar_cursor = 0;
+                                    address_all_selected = false;
+                                    if matches!(key_event.logical_key, Key::Backspace | Key::Delete) {
+                                        needs_chrome_redraw = true;
+                                        return;
+                                    }
+                                }
+                                Key::ArrowLeft | Key::Home => {
+                                    address_bar_cursor = 0;
+                                    address_all_selected = false;
+                                    needs_chrome_redraw = true;
+                                    return;
+                                }
+                                Key::ArrowRight | Key::End => {
+                                    address_bar_cursor = len;
+                                    address_all_selected = false;
+                                    needs_chrome_redraw = true;
+                                    return;
+                                }
+                                _ => {}
+                            }
+                        }
                         let is_arrow_left = matches!(key_event.logical_key, Key::ArrowLeft) || matches!(key_event.physical_key, KeyCode::ArrowLeft);
                         let is_arrow_right = matches!(key_event.logical_key, Key::ArrowRight) || matches!(key_event.physical_key, KeyCode::ArrowRight);
                         let is_home_key = matches!(key_event.logical_key, Key::Home) || matches!(key_event.physical_key, KeyCode::Home);
@@ -1249,62 +1332,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Key::Enter => {
                                 address_bar_focused = false;
-                                let url = if address_bar_text.contains("://")
-                                    || address_bar_text.contains('.')
-                                {
-                                    if !address_bar_text.contains("://") {
-                                        format!("https://{}", address_bar_text)
-                                    } else {
-                                        address_bar_text.clone()
+                                address_all_selected = false;
+                                let url = match omnibox::resolve(&address_bar_text, |q| selected_search_engine.search_url(q)) {
+                                    Some(omnibox::Target::Navigate(u)) => u,
+                                    Some(omnibox::Target::Internal(cmd)) => {
+                                        if let Ok(mut q) = shared.nav.lock() {
+                                            q.push(format!("axomai://{}", cmd));
+                                        }
+                                        needs_chrome_redraw = true;
+                                        return;
                                     }
-                                } else if !address_bar_text.is_empty() {
-                                    selected_search_engine.search_url(&address_bar_text)
-                                } else {
-                                    return;
+                                    Some(omnibox::Target::ViewSource(u)) => {
+                                        if let Ok(mut q) = shared.nav.lock() {
+                                            q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
+                                        }
+                                        address_bar_text = tabs[active_tab_idx].url.clone();
+                                        needs_chrome_redraw = true;
+                                        return;
+                                    }
+                                    None => {
+                                        address_bar_text = tabs[active_tab_idx].url.clone();
+                                        needs_chrome_redraw = true;
+                                        return;
+                                    }
                                 };
                                 if webview.is_none() {
-                                    let cw = w_of(&gpu_renderer) / scale_factor;
-                                    let ch = h_of(&gpu_renderer) / scale_factor;
-                                    let nav_clone = nav_url_shared.clone();
-                                    let init_js = build_extension_init_script(&extensions);
-                                    webview = WebViewBuilder::new()
-                                        .with_url(&url)
-                                        .with_devtools(false)
-                                        .with_background_color((255, 255, 255, 255))
-                                        .with_initialization_script(&init_js)
-                                        .with_bounds(Rect {
-                                            position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                                            size: wry::dpi::LogicalSize::new(
-                                                (cw - SIDEBAR_W) as u32,
-                                                (ch - CHROME_TOP) as u32,
-                                            ).into(),
-                                        })
-                                        .with_navigation_handler(move |nav_url: String| {
-                                            if let Ok(mut nav) = nav_clone.lock() {
-                                                *nav = Some(nav_url);
-                                            }
-                                            true
-                                        })
-                                        .with_download_started_handler({
-                                            let dl_dir = download_dir.clone();
-                                            move |url, path| {
-                                                let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
-                                                let fname = if fname.is_empty() { "download" } else { fname };
-                                                *path = dl_dir.join(fname);
-                                                true
-                                            }
-                                        })
-                                        .with_download_completed_handler({
-                                            let dl_sig = download_signal.clone();
-                                            move |url, path, success| {
-                                                let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
-                                                if let Ok(mut sig) = dl_sig.lock() {
-                                                    sig.push((url, fname, success));
-                                                }
-                                            }
-                                        })
-                                        .build_as_child(&window)
-                                        .ok();
+                                    let cw = w_of(&gpu_renderer);
+                                    let ch = h_of(&gpu_renderer);
+                                    webview = web::build_webview(&window, (cw, ch), CHROME_TOP, web::Initial::Url(&url), &shared, (255, 255, 255, 255));
+                                    core.apply_extensions(webview.as_ref(), &shared, &extensions);
                                     webview_visible = webview.is_some();
                                     if webview.is_some() {
                                         println!("[Axomai] WebView2 initialized successfully");
@@ -1327,12 +1383,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 address_bar_text = tabs[active_tab_idx].url.clone();
                                 needs_chrome_redraw = true;
                             }
-                            Key::Character(ref ch) if !key_event.repeat => {
+                            Key::Character(_) | Key::Space => {
+                                let typed: String = match key_event.logical_key {
+                                    Key::Character(ref ch) => ch.to_string(),
+                                    _ => " ".to_string(),
+                                };
                                 let byte_pos = address_bar_text.char_indices()
                                     .nth(address_bar_cursor).map(|(i, _)| i)
                                     .unwrap_or(address_bar_text.len());
-                                address_bar_text.insert_str(byte_pos, ch);
-                                address_bar_cursor += ch.chars().count();
+                                address_bar_text.insert_str(byte_pos, &typed);
+                                address_bar_cursor += typed.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
@@ -1371,61 +1431,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Key::Enter => {
                                 home_search_focused = false;
-                                if !home_search_text.is_empty() {
-                                    let url = if home_search_text.contains("://")
-                                        || home_search_text.contains('.')
-                                    {
-                                        if !home_search_text.contains("://") {
-                                            format!("https://{}", home_search_text)
-                                        } else {
-                                            home_search_text.clone()
+                                if !home_search_text.trim().is_empty() {
+                                    let url = match omnibox::resolve(&home_search_text, |q| selected_search_engine.search_url(q)) {
+                                        Some(omnibox::Target::Navigate(u)) => u,
+                                        Some(omnibox::Target::Internal(cmd)) => {
+                                            if let Ok(mut q) = shared.nav.lock() {
+                                                q.push(format!("axomai://{}", cmd));
+                                            }
+                                            home_search_text.clear();
+                                            needs_chrome_redraw = true;
+                                            return;
                                         }
-                                    } else {
-                                        selected_search_engine.search_url(&home_search_text)
+                                        Some(omnibox::Target::ViewSource(u)) => {
+                                            if let Ok(mut q) = shared.nav.lock() {
+                                                q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
+                                            }
+                                            home_search_text.clear();
+                                            needs_chrome_redraw = true;
+                                            return;
+                                        }
+                                        None => return,
                                     };
                                     if webview.is_none() {
-                                        let cw = w_of(&gpu_renderer) / scale_factor;
-                                        let ch = h_of(&gpu_renderer) / scale_factor;
-                                        let nav_clone = nav_url_shared.clone();
-                                        let init_js = build_extension_init_script(&extensions);
-                                        webview = WebViewBuilder::new()
-                                            .with_url(&url)
-                                            .with_devtools(false)
-                                            .with_background_color((255, 255, 255, 255))
-                                            .with_initialization_script(&init_js)
-                                            .with_bounds(Rect {
-                                                position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                                                size: wry::dpi::LogicalSize::new(
-                                                    (cw - SIDEBAR_W) as u32,
-                                                    (ch - CHROME_TOP) as u32,
-                                                ).into(),
-                                            })
-                                            .with_navigation_handler(move |nav_url: String| {
-                                                if let Ok(mut nav) = nav_clone.lock() {
-                                                    *nav = Some(nav_url);
-                                                }
-                                                true
-                                            })
-                                            .with_download_started_handler({
-                                                let dl_dir = download_dir.clone();
-                                                move |url, path| {
-                                                    let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
-                                                    let fname = if fname.is_empty() { "download" } else { fname };
-                                                    *path = dl_dir.join(fname);
-                                                    true
-                                                }
-                                            })
-                                            .with_download_completed_handler({
-                                                let dl_sig = download_signal.clone();
-                                                move |url, path, success| {
-                                                    let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
-                                                    if let Ok(mut sig) = dl_sig.lock() {
-                                                        sig.push((url, fname, success));
-                                                    }
-                                                }
-                                            })
-                                            .build_as_child(&window)
-                                            .ok();
+                                        let cw = w_of(&gpu_renderer);
+                                        let ch = h_of(&gpu_renderer);
+                                        webview = web::build_webview(&window, (cw, ch), CHROME_TOP, web::Initial::Url(&url), &shared, (255, 255, 255, 255));
+                                        core.apply_extensions(webview.as_ref(), &shared, &extensions);
                                         webview_visible = webview.is_some();
                                     } else if let Some(ref wv) = webview {
                                         let _ = wv.load_url(&url);
@@ -1446,12 +1477,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 home_search_text.clear();
                                 needs_chrome_redraw = true;
                             }
-                            Key::Character(ref ch) if !key_event.repeat => {
+                            Key::Character(_) | Key::Space => {
+                                let typed: String = match key_event.logical_key {
+                                    Key::Character(ref ch) => ch.to_string(),
+                                    _ => " ".to_string(),
+                                };
                                 let byte_pos = home_search_text.char_indices()
                                     .nth(home_search_cursor).map(|(i, _)| i)
                                     .unwrap_or(home_search_text.len());
-                                home_search_text.insert_str(byte_pos, ch);
-                                home_search_cursor += ch.chars().count();
+                                home_search_text.insert_str(byte_pos, &typed);
+                                home_search_cursor += typed.chars().count();
                                 needs_chrome_redraw = true;
                             }
                             _ => {}
@@ -1532,9 +1567,123 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Event::MainEventsCleared => {
-                if let Ok(mut nav) = nav_url_shared.lock() {
-                    if let Some(url) = nav.take() {
-                        if url.starts_with("axomai://newtab") {
+                {
+                    for url in shared.drain_nav() {
+                        if url == "axomai://viewsource-current" {
+                            if address_bar_text.starts_with("http://") || address_bar_text.starts_with("https://") {
+                                viewsource::fetch(address_bar_text.clone(), &shared);
+                            } else if let Some(ref wv) = webview {
+                                core.toast(wv, "View source works on web pages", None, &shared);
+                            }
+                        } else if url.starts_with("axomai://viewsource/") {
+                            let target = url_decode(&url["axomai://viewsource/".len()..]);
+                            if target.starts_with("http://") || target.starts_with("https://") {
+                                viewsource::fetch(target, &shared);
+                            }
+                        } else if url == "axomai://focus-url" {
+                            address_bar_focused = true;
+                            find_bar_open = false;
+                            if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
+                                address_bar_cursor = address_bar_text.chars().count();
+                                address_all_selected = true;
+                            } else {
+                                address_bar_text.clear();
+                                address_bar_cursor = 0;
+                                address_all_selected = false;
+                            }
+                            #[cfg(target_os = "windows")]
+                            unsafe {
+                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
+                                SetFocus(window.hwnd() as _);
+                            }
+                            needs_chrome_redraw = true;
+                        } else if url == "axomai://bookmark-toggle" {
+                            let page = address_bar_text.clone();
+                            let result = core.toggle_bookmark(&page, &current_title, browser_storage.as_ref());
+                            if let Some(ref wv) = webview {
+                                match result {
+                                    Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
+                                    Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
+                                    None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
+                                }
+                            }
+                            needs_chrome_redraw = true;
+                        } else if url == "axomai://closetab" {
+                            if tabs.len() > 1 {
+                                tabs.remove(active_tab_idx);
+                                if active_tab_idx >= tabs.len() {
+                                    active_tab_idx = tabs.len() - 1;
+                                }
+                            } else {
+                                tabs[0] = DesktopTab {
+                                    title: String::from("Axomai Browser"),
+                                    url: String::from("about:home"),
+                                    is_home: true,
+                                    is_extensions: false,
+                                    is_settings: false,
+                                };
+                                active_tab_idx = 0;
+                            }
+                            let cur_url = tabs[active_tab_idx].url.clone();
+                            is_home_page = tabs[active_tab_idx].is_home;
+                            is_extensions_page = tabs[active_tab_idx].is_extensions;
+                            is_settings_page = tabs[active_tab_idx].is_settings;
+                            address_bar_text = cur_url.clone();
+                            address_bar_focused = false;
+                            if is_home_page || is_extensions_page || is_settings_page {
+                                load_internal_page = Some(if is_extensions_page { "extensions" } else if is_settings_page { "settings" } else { "home" }.to_string());
+                            } else if let Some(ref wv) = webview {
+                                tab_load(wv, &shared, &cur_url);
+                                let _ = wv.set_visible(true);
+                                webview_visible = true;
+                            }
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://ext-toggle/") {
+                            if let Ok(idx) = url["axomai://ext-toggle/".len()..].parse::<usize>() {
+                                core.toggle_extension(idx, webview.as_ref(), &shared, &mut extensions, browser_storage.as_ref());
+                                if is_extensions_page {
+                                    load_internal_page = Some("extensions".to_string());
+                                }
+                                needs_chrome_redraw = true;
+                            }
+                        } else if url.starts_with("axomai://ext-run/") {
+                            if let Ok(idx) = url["axomai://ext-run/".len()..].parse::<usize>() {
+                                let wpx = w_of(&gpu_renderer);
+                                let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).extensions.right(), scale_factor);
+                                core.run_extension(idx, webview.as_ref(), &shared, &extensions, right);
+                            }
+                        } else if url == "axomai://capture/visible" {
+                            core.capture_visible(webview.as_ref(), &shared);
+                        } else if url == "axomai://capture/full" {
+                            core.capture_full_begin(webview.as_ref(), &shared);
+                        } else if url.starts_with("axomai://snip/") {
+                            core.capture_region(&url["axomai://snip/".len()..], webview.as_ref(), &shared);
+                        } else if url == "axomai://shield" {
+                            let wpx = w_of(&gpu_renderer);
+                            let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).shield.right(), scale_factor);
+                            core.open_shield(webview.as_ref(), &shared, &extensions, right);
+                        } else if url == "axomai://open-folder" {
+                            core.open_capture_folder();
+                        } else if url.starts_with("axomai://theme/") {
+                            core.set_theme(&url["axomai://theme/".len()..], browser_storage.as_ref());
+                            needs_chrome_redraw = true;
+                        } else if url == "axomai://theme-menu" {
+                            let wpx = w_of(&gpu_renderer);
+                            let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).theme.right(), scale_factor);
+                            core.open_theme_menu(webview.as_ref(), &shared, right);
+                        } else if url == "axomai://clear-ram" {
+                            core.free_memory(webview.as_ref(), true);
+                        } else if url.starts_with("axomai://profile-name/") {
+                            core.set_profile_name(&url_decode(&url["axomai://profile-name/".len()..]), browser_storage.as_ref());
+                            needs_chrome_redraw = true;
+                        } else if url == "axomai://clear-data" {
+                            core.clear_browsing_data(webview.as_ref(), browser_storage.as_ref(), &shared);
+                            needs_chrome_redraw = true;
+                        } else if url.starts_with("axomai://ai/") {
+                            let rest = &url["axomai://ai/".len()..];
+                            let (kind, arg) = rest.split_once('/').unwrap_or((rest, ""));
+                            core.ai_request(kind, &url_decode(arg), webview.as_ref(), &shared);
+                        } else if url.starts_with("axomai://newtab") {
                             tabs.push(DesktopTab {
                                 title: String::from("New Tab"),
                                 url: String::from("about:home"),
@@ -1579,16 +1728,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             needs_chrome_redraw = true;
                         } else if url.starts_with("axomai://exit") {
                             *control_flow = ControlFlow::Exit;
-                        } else if url.starts_with("axomai://ext-toggle/") {
-                            if let Ok(idx) = url.trim_start_matches("axomai://ext-toggle/").parse::<usize>() {
-                                if idx < extensions.len() {
-                                    extensions[idx].enabled = !extensions[idx].enabled;
-                                    if is_extensions_page {
-                                        load_internal_page = Some("extensions".to_string());
-                                    }
-                                    needs_chrome_redraw = true;
-                                }
-                            }
                         } else if url.starts_with("axomai://set-engine/") {
                             let name = url.trim_start_matches("axomai://set-engine/");
                             selected_search_engine = match name {
@@ -1706,8 +1845,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 println!("[Axomai] Bookmarked: {}", bookmark_url);
                             }
                             needs_chrome_redraw = true;
-                        } else if url.starts_with("data:") || (url.starts_with("file:") && url.contains("axomai_")) {
-                            // Internal page temp file/data URL — don't update address bar
+                        } else if web::is_internal_url(&url, &shared.ui_prefix) {
+                            // One of our own pages (home / about / generated HTML): show its friendly name, never the file path.
+                            let lower = url.to_ascii_lowercase();
+                            if lower.starts_with(&*shared.ui_prefix) {
+                                let file = lower.trim_start_matches(&*shared.ui_prefix).trim_start_matches('/');
+                                let file = file.split(&['?', '#'][..]).next().unwrap_or("");
+                                if file == "home.html" {
+                                    address_bar_text = String::from("about:home");
+                                    is_home_page = true;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
+                                    current_title = String::from("Axomai Browser");
+                                } else if file == "index.html" {
+                                    address_bar_text = String::from("axomai://about");
+                                    is_home_page = false;
+                                    is_extensions_page = false;
+                                    is_settings_page = false;
+                                    current_title = String::from("About Axomai");
+                                }
+                                needs_chrome_redraw = true;
+                            }
                         } else {
                             if let Some(ref s) = browser_storage {
                                 let _ = s.add_history(&url, "");
@@ -1718,12 +1876,139 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             is_settings_page = false;
                             is_loading = true;
                             loading_progress = 0.0;
+                            loading_since = std::time::Instant::now();
                             needs_chrome_redraw = true;
-                            let has_auto_ext = extensions.iter().any(|e| e.enabled && e.auto_inject);
-                            if has_auto_ext {
-                                ext_inject_time = Some(std::time::Instant::now() + std::time::Duration::from_millis(1200));
+                        }
+                    }
+                }
+                // A navigation that turns into a download never reports 'finished'; do not leave the bar running.
+                if is_loading && loading_since.elapsed() > std::time::Duration::from_secs(45) {
+                    is_loading = false;
+                    loading_progress = 0.0;
+                    needs_chrome_redraw = true;
+                }
+                for ev in shared.drain_events() {
+                    match ev {
+                        web::WebEvent::Title(t) => {
+                            let t = t.trim().to_string();
+                            // Our generated pages announce themselves by title, which keeps the address bar and
+                            // page flags right even after Back/Forward lands on one of them.
+                            if shared.trusted.load(std::sync::atomic::Ordering::SeqCst) {
+                                if let Some((addr, kind, label)) = internal_page_for_title(&t) {
+                                    address_bar_text = addr.to_string();
+                                    is_home_page = false;
+                                    is_extensions_page = kind == "extensions";
+                                    is_settings_page = kind == "settings";
+                                    current_title = label.to_string();
+                                    needs_chrome_redraw = true;
+                                    continue;
+                                }
+                            }
+                            if !t.is_empty() && !is_home_page && !is_extensions_page && !is_settings_page {
+                                if let Some(ref s) = browser_storage {
+                                    let _ = s.update_history_title(&address_bar_text, &t);
+                                }
+                                current_title = t;
+                                needs_chrome_redraw = true;
                             }
                         }
+                        web::WebEvent::LoadStarted(u) => {
+                            if u.starts_with("http://") || u.starts_with("https://") {
+                                if let Some(ref wv) = webview {
+                                    // Web pages that paint no background must show white, not the dark internal-page colour.
+                                    let _ = wv.set_background_color((255, 255, 255, 255));
+                                }
+                                is_loading = true;
+                                loading_progress = 0.0;
+                                loading_since = std::time::Instant::now();
+                                // Until the page reports its own title, show the host rather than the previous page's title.
+                                current_title = blocklist::host_of(&u);
+                                needs_chrome_redraw = true;
+                            }
+                        }
+                        web::WebEvent::LoadFinished(_) => {
+                            is_loading = false;
+                            loading_progress = 0.0;
+                            needs_chrome_redraw = true;
+                        }
+                        web::WebEvent::OpenUrl(u) => {
+                            // Links that ask for a new window (target=_blank, window.open) open in a new tab.
+                            tabs.push(DesktopTab {
+                                title: blocklist::host_of(&u),
+                                url: u.clone(),
+                                is_home: false,
+                                is_extensions: false,
+                                is_settings: false,
+                            });
+                            active_tab_idx = tabs.len() - 1;
+                            is_home_page = false;
+                            is_extensions_page = false;
+                            is_settings_page = false;
+                            address_bar_text = u.clone();
+                            if let Some(ref wv) = webview {
+                                let _ = wv.load_url(&u);
+                                let _ = wv.set_visible(true);
+                                webview_visible = true;
+                            }
+                            needs_chrome_redraw = true;
+                        }
+                        web::WebEvent::Captured(r) => core.on_captured(&r, webview.as_ref(), &shared),
+                        web::WebEvent::PageData(kind, question, payload) => {
+                            if kind == "viewsource" {
+                                // `question` carries the page address, `payload` the finished viewer page.
+                                let label = format!("view-source:{}", question);
+                                tabs.push(DesktopTab {
+                                    title: format!("Source: {}", blocklist::host_of(&question)),
+                                    url: label.clone(),
+                                    is_home: false,
+                                    is_extensions: false,
+                                    is_settings: false,
+                                });
+                                active_tab_idx = tabs.len() - 1;
+                                is_home_page = false;
+                                is_extensions_page = false;
+                                is_settings_page = false;
+                                address_bar_text = label;
+                                current_title = format!("Source: {}", blocklist::host_of(&question));
+                                title_tab = active_tab_idx;
+                                if let Some(ref wv) = webview {
+                                    let _ = wv.set_background_color((15, 23, 42, 255));
+                                    let _ = wv.load_html(&payload);
+                                    let _ = wv.set_visible(true);
+                                    webview_visible = true;
+                                }
+                                needs_chrome_redraw = true;
+                            } else if kind == "capture-full" {
+                                core.capture_full_finish(webview.as_ref(), &shared, &payload);
+                            } else if let Some(k) = kind.strip_prefix("ai-") {
+                                core.ai_respond(k, &question, &payload, webview.as_ref());
+                            }
+                        }
+                    }
+                }
+                core.tick(&extensions);
+                {
+                    // Address bar follows in-page navigation (redirects, pushState) and back/forward state stays live.
+                    if let Some(ref wv) = webview {
+                        if !address_bar_focused && !is_home_page && !is_extensions_page && !is_settings_page
+                            && !address_bar_text.starts_with("view-source:")
+                        {
+                            if let Ok(u) = wv.url() {
+                                if (u.starts_with("http://") || u.starts_with("https://")) && u != address_bar_text {
+                                    address_bar_text = u;
+                                    needs_chrome_redraw = true;
+                                }
+                            }
+                        }
+                    }
+                    let probe = if address_bar_focused { String::new() } else { address_bar_text.clone() };
+                    if core.poll(webview.as_ref(), browser_storage.as_ref(), &probe) {
+                        needs_chrome_redraw = true;
+                    }
+                    let blocked = shared.shield.page_blocked.load(std::sync::atomic::Ordering::Relaxed);
+                    if blocked != last_shield_count {
+                        last_shield_count = blocked;
+                        needs_chrome_redraw = true;
                     }
                 }
                 if let Some(page) = load_internal_page.take() {
@@ -1773,63 +2058,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         String::new()
                     };
 
-                    let cw = w_of(&gpu_renderer) / scale_factor;
-                    let ch = h_of(&gpu_renderer) / scale_factor;
+                    let cw = w_of(&gpu_renderer);
+                    let ch = h_of(&gpu_renderer);
                     if webview.is_none() {
-                        let nav_clone = nav_url_shared.clone();
-                        let builder = WebViewBuilder::new();
-                        let builder = if is_file_page {
-                            builder.with_url(&file_url)
-                        } else {
-                            builder.with_html(&target_html)
-                        };
-                        webview = builder
-                            .with_devtools(false)
-                            .with_background_color((15, 23, 42, 255))
-                            .with_bounds(Rect {
-                                position: wry::dpi::LogicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                                size: wry::dpi::LogicalSize::new(
-                                    (cw - SIDEBAR_W) as u32,
-                                    (ch - CHROME_TOP) as u32,
-                                ).into(),
-                            })
-                            .with_navigation_handler(move |nav_url: String| {
-                                if nav_url.starts_with("axomai://") {
-                                    if let Ok(mut nav) = nav_clone.lock() {
-                                        *nav = Some(nav_url);
-                                    }
-                                    return false;
-                                }
-                                if let Ok(mut nav) = nav_clone.lock() {
-                                    *nav = Some(nav_url);
-                                }
-                                true
-                            })
-                            .with_download_started_handler({
-                                let dl_dir = download_dir.clone();
-                                move |url, path| {
-                                    let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
-                                    let fname = if fname.is_empty() { "download" } else { fname };
-                                    *path = dl_dir.join(fname);
-                                    true
-                                }
-                            })
-                            .with_download_completed_handler({
-                                let dl_sig = download_signal.clone();
-                                move |url, path, success| {
-                                    let fname = path.as_ref().map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string()).unwrap_or_default();
-                                    if let Ok(mut sig) = dl_sig.lock() {
-                                        sig.push((url, fname, success));
-                                    }
-                                }
-                            })
-                            .build_as_child(&window)
-                            .ok();
+                        let initial = if is_file_page { web::Initial::Url(&file_url) } else { web::Initial::Html(&target_html) };
+                        webview = web::build_webview(&window, (cw, ch), CHROME_TOP, initial, &shared, (15, 23, 42, 255));
+                        core.apply_extensions(webview.as_ref(), &shared, &extensions);
                         webview_visible = webview.is_some();
                         if webview.is_some() {
                             println!("[Axomai] WebView created with internal HTML (no temp file)");
                         }
                     } else if let Some(ref wv) = webview {
+                        let _ = wv.set_background_color((15, 23, 42, 255));
                         if is_file_page {
                             let _ = wv.load_url(&file_url);
                         } else {
@@ -1842,20 +2082,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     needs_chrome_redraw = true;
                 }
-                if let Some(t) = ext_inject_time {
-                    if std::time::Instant::now() >= t {
-                        ext_inject_time = None;
-                        if let Some(ref wv) = webview {
-                            for ext in &extensions {
-                                if ext.enabled && ext.auto_inject {
-                                    let _ = wv.evaluate_script(ext.inject_js);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let Ok(mut sigs) = download_signal.lock() {
+                if let Ok(mut sigs) = shared.downloads.lock() {
                     for (url, fname, success) in sigs.drain(..) {
                         if let Some(ref s) = browser_storage {
                             let filepath = download_dir.join(&fname).to_string_lossy().to_string();
@@ -1867,6 +2094,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
+                        if let Some(ref wv) = webview {
+                            if success {
+                                core.toast(wv, &format!("⬇️ Downloaded {}", fname), Some(("Show downloads", &shared.token, "downloads")), &shared);
+                            } else {
+                                core.toast(wv, &format!("Download failed: {}", fname), None, &shared);
+                            }
+                        }
                         println!("[Axomai] Download {}: {} ({})", if success { "completed" } else { "failed" }, fname, url);
                     }
                 }
@@ -1876,6 +2110,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let content_w = w - SIDEBAR_W;
                 let content_h = h - CHROME_TOP;
 
+                if is_loading {
+                    needs_chrome_redraw = true;
+                }
                 let should_render = if is_home_page || is_settings_page || is_extensions_page {
                     needs_chrome_redraw || gpu_renderer.presented_frames < 3
                 } else if let Ok(mut eng) = engine.lock() {
@@ -1890,38 +2127,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     compositor.width = content_w as u32;
                     compositor.height = content_h as u32;
 
+                    // `current_title` belongs to one tab; after a tab switch start from that tab's own title.
+                    if title_tab != active_tab_idx && active_tab_idx < tabs.len() {
+                        current_title = tabs[active_tab_idx].title.clone();
+                        title_tab = active_tab_idx;
+                    }
                     let title = if is_home_page {
                         "Axomai Browser".to_string()
                     } else if is_extensions_page {
                         "Extensions".to_string()
                     } else if is_settings_page {
                         "Settings".to_string()
-                    } else if let Ok(eng) = engine.lock() {
-                        let t = eng.current_title.clone();
-                        if !t.is_empty() && is_loading {
-                            is_loading = false;
-                            loading_progress = 0.0;
-                        }
-                        t
                     } else {
-                        String::new()
+                        current_title.clone()
                     };
 
-                    let history_back = if let Ok(eng) = engine.lock() { eng.history_index > 0 } else { false };
-                    let history_fwd = if let Ok(eng) = engine.lock() { eng.history_index + 1 < eng.history.len() } else { false };
-
-                    let toolbar_icons = [icon_back, icon_forward, icon_reload, icon_home, icon_menu];
                     if active_tab_idx < tabs.len() {
-                        tabs[active_tab_idx].url = address_bar_text.clone();
+                        if !address_bar_focused {
+                            tabs[active_tab_idx].url = address_bar_text.clone();
+                        }
                         tabs[active_tab_idx].is_home = is_home_page;
                         tabs[active_tab_idx].is_extensions = is_extensions_page;
                         tabs[active_tab_idx].is_settings = is_settings_page;
                         tabs[active_tab_idx].title = title.clone();
                     }
+                    let avatar = core.avatar_letter();
+                    let chrome_state = toolbar::ChromeState {
+                        theme: core.theme,
+                        shield_count: shared.shield.page_blocked.load(std::sync::atomic::Ordering::Relaxed),
+                        bookmarked: core.bookmarked,
+                        address_selected: address_all_selected && address_bar_focused,
+                        // While typing, the badge keeps describing the page that is actually loaded.
+                        security: toolbar::Security::from_address(if address_bar_focused { &tabs[active_tab_idx].url } else { &address_bar_text }),
+                        avatar: &avatar,
+                    };
                     let mut quads = build_chrome_quads(
                         &mut compositor, w, h, &address_bar_text, address_bar_focused, address_bar_cursor,
-                        &tabs, active_tab_idx, history_back, history_fwd, sidebar_active, hover_sidebar_idx,
-                        menu_open, hover_menu_idx, &toolbar_icons, &extensions,
+                        &tabs, active_tab_idx, core.can_back, core.can_fwd, sidebar_active, hover_sidebar_idx,
+                        menu_open, hover_menu_idx, &toolbar_icons, &chrome_state,
                     );
 
                     if is_home_page || is_extensions_page || is_settings_page {
@@ -1958,14 +2201,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if is_loading {
-                        loading_progress = (loading_progress + 0.02).min(1.0);
-                        if loading_progress >= 1.0 {
-                            is_loading = false;
-                            loading_progress = 0.0;
-                        } else {
-                            let bar_w = (w - SIDEBAR_W) * loading_progress;
-                            quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(26, 115, 232, 200)));
-                        }
+                        // Eases toward 90% and stays there until the page reports it has finished loading.
+                        loading_progress += (0.9 - loading_progress) * 0.04;
+                        let bar_w = (w - SIDEBAR_W) * loading_progress;
+                        let p = core.theme.primary;
+                        quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(p[0], p[1], p[2], 230)));
                     }
 
                     if compositor.glyph_atlas.dirty {
@@ -2007,3 +2247,22 @@ fn dirs_download() -> PathBuf {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_decode_handles_utf8_and_bad_escapes() {
+        assert_eq!(url_decode("Asha%20Devi"), "Asha Devi");
+        assert_eq!(url_decode("%E0%A6%85%E0%A6%B8%E0%A6%AE"), "\u{985}\u{9b8}\u{9ae}");
+        assert_eq!(url_decode("100%"), "100%");
+        assert_eq!(url_decode("%zz%4"), "%zz%4");
+    }
+
+    #[test]
+    fn internal_titles_map_to_pages() {
+        assert_eq!(internal_page_for_title("History - Axomai Browser").map(|t| t.1), Some("history"));
+        assert!(internal_page_for_title("Some Website").is_none());
+    }
+}

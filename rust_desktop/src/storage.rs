@@ -177,6 +177,31 @@ impl BrowserStorage {
         Ok(count > 0)
     }
 
+    /// Attach a page title to the most recent visit of `url`.
+    pub fn update_history_title(&self, url: &str, title: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE history SET title = ?2 WHERE id = (SELECT MAX(id) FROM history WHERE url = ?1)",
+            params![url, title],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_bookmark_by_url(&self, url: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM bookmarks WHERE url = ?1", params![url])?;
+        Ok(())
+    }
+
+    /// Row count of one of the browsing-data tables (`history`, `bookmarks`, `downloads`).
+    pub fn count(&self, table: &str) -> usize {
+        let sql = match table {
+            "history" => "SELECT COUNT(*) FROM history",
+            "bookmarks" => "SELECT COUNT(*) FROM bookmarks",
+            "downloads" => "SELECT COUNT(*) FROM downloads",
+            _ => return 0,
+        };
+        self.conn.query_row(sql, [], |r| r.get::<_, i64>(0)).map(|n| n as usize).unwrap_or(0)
+    }
+
     pub fn add_download(&self, url: &str, filename: &str, filepath: &str) -> Result<i64, rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO downloads (url, filename, filepath, status) VALUES (?1, ?2, ?3, 'downloading')",

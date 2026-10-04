@@ -180,4 +180,46 @@ impl GlyphAtlas {
         self.dirty = true;
         info
     }
+
+    /// Blit a ready-made `size`x`size` alpha mask (one byte per pixel) into the atlas.
+    /// `id` picks a private-use slot so differently drawn icons never share a cache entry.
+    pub fn blit_mask(&mut self, id: u32, alpha: &[u8], size: u32) -> GlyphInfo {
+        let key = (char::from_u32(0xE100 + id).unwrap_or('\u{E100}'), size);
+        if let Some(info) = self.cache.get(&key) {
+            return *info;
+        }
+        if self.cursor_x + size + 1 > self.size {
+            self.cursor_x = 1;
+            self.cursor_y += self.row_height + 1;
+            self.row_height = 0;
+        }
+        let ox = self.cursor_x;
+        let oy = self.cursor_y;
+        for row in 0..size {
+            for col in 0..size {
+                let dst = ((oy + row) * self.size + ox + col) as usize;
+                if let (Some(px), Some(a)) = (self.pixels.get_mut(dst), alpha.get((row * size + col) as usize)) {
+                    *px = *a;
+                }
+            }
+        }
+        let info = GlyphInfo {
+            u0: ox as f32 / self.size as f32,
+            v0: oy as f32 / self.size as f32,
+            u1: (ox + size) as f32 / self.size as f32,
+            v1: (oy + size) as f32 / self.size as f32,
+            width: size as f32,
+            height: size as f32,
+            advance_width: size as f32,
+            offset_x: 0.0,
+            offset_y: 0.0,
+        };
+        self.cursor_x += size + 1;
+        if size > self.row_height {
+            self.row_height = size;
+        }
+        self.cache.insert(key, info);
+        self.dirty = true;
+        info
+    }
 }

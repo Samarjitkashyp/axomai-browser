@@ -1,12 +1,18 @@
 use axomai_engine::{GpuQuad, NativeGpuCompositor, WgpuRenderer};
-use axomai_engine::glyph_atlas::GlyphInfo;
-use crate::types::{DesktopTab, Extension, SearchEngine, SIDEBAR_ITEMS, SIDEBAR_W, TAB_BAR_H, TOOLBAR_H, CHROME_TOP};
+use crate::types::{DesktopTab, Extension, SearchEngine, SIDEBAR_ITEMS, SIDEBAR_W, CHROME_TOP};
 
 pub fn w_of(r: &WgpuRenderer) -> f32 { r.surface_config.width as f32 }
 pub fn h_of(r: &WgpuRenderer) -> f32 { r.surface_config.height as f32 }
 
+/// The swap-chain is sRGB, so colours written by the shader are treated as linear light. Convert from the sRGB
+/// values used in CSS/design tokens, otherwise every colour comes out lighter than the web UI it mirrors.
+fn srgb_to_linear(v: u8) -> f32 {
+    let s = v as f32 / 255.0;
+    if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+}
+
 pub fn c(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
-    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
+    [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), a as f32 / 255.0]
 }
 
 pub fn render_text(
@@ -67,16 +73,11 @@ pub fn build_chrome_quads(
     hover_sidebar: Option<usize>,
     _menu_open: bool,
     _hover_menu: Option<usize>,
-    icons: &[GlyphInfo; 5],
-    extensions: &[Extension],
+    icons: &crate::toolbar::ToolbarIcons,
+    chrome: &crate::toolbar::ChromeState,
 ) -> Vec<GpuQuad> {
     let mut quads = Vec::new();
 
-    let white = c(255, 255, 255, 255);
-    let tab_bar_bg = c(230, 244, 234, 255);
-    let text_primary = c(32, 33, 36, 255);
-    let text_secondary = c(95, 99, 104, 255);
-    let text_disabled = c(155, 160, 168, 255);
 
     if SIDEBAR_W > 0.0 {
         let bands = 8;
@@ -130,155 +131,10 @@ pub fn build_chrome_quads(
         render_text(compositor, &mut quads, "+ Add Workspace", 18.0, item_y + 12.0, 11.0, sb_accent, SIDEBAR_W);
     }
 
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, 0.0, viewport_w - SIDEBAR_W, TAB_BAR_H, tab_bar_bg));
-
-    let available_w = viewport_w - SIDEBAR_W - 80.0;
-    let tab_count = tabs.len().max(1);
-    let tab_w = ((available_w - 40.0) / tab_count as f32).clamp(110.0, 200.0);
-    let tab_h = TAB_BAR_H - 8.0;
-
-    for (i, t) in tabs.iter().enumerate() {
-        let tab_x = SIDEBAR_W + 8.0 + i as f32 * (tab_w + 4.0);
-        let is_active = i == active_tab_idx;
-        let t_title = if t.title.is_empty() { "New Tab" } else { &t.title };
-
-        if is_active {
-            quads.push(rq(tab_x, 8.0, tab_w, tab_h + 2.0, 8.0, white));
-            quads.push(NativeGpuCompositor::solid_quad(tab_x, TAB_BAR_H - 2.0, tab_w, 2.0, white));
-            quads.push(NativeGpuCompositor::solid_quad(tab_x + 8.0, 8.0, tab_w - 16.0, 2.0, c(16, 185, 129, 255)));
-            quads.push(rq(tab_x + 10.0, 15.0, 16.0, 16.0, 8.0, c(16, 185, 129, 255)));
-            render_text(compositor, &mut quads, "A", tab_x + 13.0, 27.0, 10.0, white, tab_x + 28.0);
-            render_text(compositor, &mut quads, t_title, tab_x + 32.0, 27.0, 12.0, text_primary, tab_x + tab_w - 28.0);
-            render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 12.0, text_secondary, tab_x + tab_w);
-        } else {
-            quads.push(rq(tab_x, 10.0, tab_w, tab_h, 6.0, c(220, 240, 228, 180)));
-            quads.push(rq(tab_x + 10.0, 16.0, 14.0, 14.0, 7.0, c(16, 185, 129, 160)));
-            render_text(compositor, &mut quads, "A", tab_x + 13.0, 27.0, 9.0, white, tab_x + 26.0);
-            render_text(compositor, &mut quads, t_title, tab_x + 30.0, 27.0, 11.5, text_secondary, tab_x + tab_w - 26.0);
-            render_text(compositor, &mut quads, "x", tab_x + tab_w - 18.0, 27.0, 11.5, text_disabled, tab_x + tab_w);
-        }
-    }
-
-    let plus_x = SIDEBAR_W + 8.0 + tabs.len() as f32 * (tab_w + 4.0) + 6.0;
-    quads.push(rq(plus_x, 12.0, 24.0, 24.0, 12.0, c(220, 240, 228, 220)));
-    render_text(compositor, &mut quads, "+", plus_x + 7.0, 28.0, 15.0, text_secondary, plus_x + 24.0);
-
-    let ty = TAB_BAR_H;
-    let toolbar_w = viewport_w - SIDEBAR_W;
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(255, 255, 255, 220)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, ty, toolbar_w, TOOLBAR_H, c(230, 244, 234, 40)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 2.0, toolbar_w * 0.5, 2.0, c(16, 185, 129, 120)));
-    quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W + toolbar_w * 0.5, CHROME_TOP - 2.0, toolbar_w * 0.5, 2.0, c(5, 150, 105, 90)));
-
-    let icon_s = 18.0;
-    let nav_iy = ty + (TOOLBAR_H - icon_s) / 2.0;
-    let nb = SIDEBAR_W + 10.0;
-    let back_c = if history_back { c(60, 65, 75, 255) } else { c(180, 185, 195, 180) };
-    let fwd_c = if history_fwd { c(60, 65, 75, 255) } else { c(180, 185, 195, 180) };
-    quads.push(NativeGpuCompositor::icon_quad(nb, nav_iy, icon_s, &icons[0], back_c));
-    quads.push(NativeGpuCompositor::icon_quad(nb + 28.0, nav_iy, icon_s, &icons[1], fwd_c));
-    quads.push(NativeGpuCompositor::icon_quad(nb + 56.0, nav_iy, icon_s, &icons[2], c(60, 65, 75, 255)));
-    quads.push(NativeGpuCompositor::icon_quad(nb + 84.0, nav_iy, icon_s, &icons[3], c(60, 65, 75, 255)));
-
-    let ax = SIDEBAR_W + 116.0;
-    let ay = ty + 7.0;
-    let ah = TOOLBAR_H - 14.0;
-    let n_enabled_ext = extensions.iter().filter(|e| e.enabled).count() as f32;
-    let extra_icons = 5.0;
-    let right_icons_w = 120.0 + n_enabled_ext * 30.0 + extra_icons * 30.0;
-    let aw = viewport_w - ax - right_icons_w - 10.0;
-    let bar_radius = ah / 2.0;
-
-    if focused {
-        quads.push(rq(ax - 1.0, ay + 2.0, aw + 2.0, ah + 1.0, bar_radius + 1.0, c(16, 185, 129, 25)));
-        quads.push(rq(ax - 1.5, ay - 1.5, aw + 3.0, ah + 3.0, bar_radius + 2.0, c(16, 185, 129, 120)));
-        quads.push(rq(ax, ay, aw, ah, bar_radius, c(255, 255, 255, 252)));
-    } else {
-        quads.push(rq(ax, ay + 1.0, aw, ah, bar_radius, c(0, 0, 0, 6)));
-        quads.push(rq(ax, ay, aw, ah, bar_radius, c(230, 244, 234, 220)));
-        quads.push(NativeGpuCompositor::solid_quad(ax + 8.0, ay + 1.0, aw - 16.0, 1.0, c(255, 255, 255, 100)));
-    }
-
-    let icon_y = ay + ah / 2.0 + 5.0;
-
-    let secure_badge_w = 58.0;
-    let secure_x = ax + 8.0;
-    quads.push(rq(secure_x, ay + 4.0, secure_badge_w, ah - 8.0, (ah - 8.0) / 2.0, c(5, 150, 105, 30)));
-    render_text(compositor, &mut quads, "Secure", secure_x + 6.0, icon_y, 11.0, c(5, 150, 105, 255), secure_x + secure_badge_w);
-    let globe_x = secure_x + secure_badge_w + 6.0;
-    render_text(compositor, &mut quads, "@", globe_x, icon_y, 13.0, c(80, 85, 100, 200), globe_x + 16.0);
-    let addr_text_start = globe_x + 18.0;
-
-    let is_home = address_text == "about:home" || address_text == "axomai://home" || address_text == "axomai://newtab" || address_text.contains("axomai_home.html") || address_text.is_empty();
-    let is_placeholder = is_home && !focused;
-    let display = if is_placeholder { "Search with Axomai or enter address..." } else if is_home && focused && address_text == "about:home" { "" } else { address_text };
-    let dtc = if is_placeholder { c(150, 155, 168, 255) } else { c(40, 42, 50, 255) };
-    if focused && !display.is_empty() {
-        let before_cursor: String = display.chars().take(address_cursor).collect();
-        let cursor_x = render_text(compositor, &mut quads, &before_cursor, addr_text_start, icon_y, 13.0, dtc, ax + aw - 14.0);
-        let after_cursor: String = display.chars().skip(address_cursor).collect();
-        if !after_cursor.is_empty() {
-            render_text(compositor, &mut quads, &after_cursor, cursor_x, icon_y, 13.0, dtc, ax + aw - 14.0);
-        }
-        quads.push(NativeGpuCompositor::solid_quad(cursor_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(16, 185, 129, 200)));
-    } else {
-        let end_x = render_text(compositor, &mut quads, display, addr_text_start, icon_y, 13.0, dtc, ax + aw - 14.0);
-        if focused {
-            quads.push(NativeGpuCompositor::solid_quad(end_x + 1.0, ay + 6.0, 1.5, ah - 12.0, c(16, 185, 129, 200)));
-        }
-    }
-
-    let enabled_exts: Vec<(usize, &Extension)> = extensions.iter().enumerate().filter(|(_, e)| e.enabled).collect();
-    let ext_icons_w = enabled_exts.len() as f32 * 30.0;
-    let right_total = 110.0 + ext_icons_w + extra_icons as f32 * 30.0;
-    let icons_start = viewport_w - right_total;
-    let iy = ty + 10.0;
-    let ih = TOOLBAR_H - 20.0;
-    let icy = iy + ih / 2.0 + 4.0;
-    let icon_color = c(80, 85, 100, 255);
-
-    let mut rx = icons_start + 4.0;
-
-    render_text(compositor, &mut quads, "*", rx + 4.0, icy, 14.0, icon_color, rx + ih);
-    rx += 28.0;
-
-    render_text(compositor, &mut quads, "|", rx + 6.0, icy, 12.0, icon_color, rx + ih);
-    rx += 28.0;
-
-    quads.push(rq(rx, iy + 1.0, ih, ih, ih / 2.0, c(16, 185, 129, 220)));
-    render_text(compositor, &mut quads, "18", rx + 3.0, icy, 10.0, white, rx + ih);
-    rx += 30.0;
-
-    let mut ext_x = rx;
-    for (_idx, ext) in &enabled_exts {
-        let ec = c(ext.icon_color[0], ext.icon_color[1], ext.icon_color[2], 220);
-        quads.push(rq(ext_x, iy + 1.0, ih, ih, ih / 2.0, ec));
-        render_text(compositor, &mut quads, ext.icon_letter, ext_x + 5.0, icy, 11.0, white, ext_x + ih);
-        ext_x += 30.0;
-    }
-
-    quads.push(rq(ext_x, iy + 1.0, ih, ih, 6.0, c(255, 255, 255, 40)));
-    render_text(compositor, &mut quads, "E", ext_x + 6.0, icy, 11.5, icon_color, ext_x + ih);
-    ext_x += 30.0;
-
-    render_text(compositor, &mut quads, "v", ext_x + 5.0, icy, 12.0, icon_color, ext_x + ih);
-    ext_x += 28.0;
-
-    render_text(compositor, &mut quads, "o", ext_x + 5.0, icy, 12.0, icon_color, ext_x + ih);
-    ext_x += 28.0;
-
-    quads.push(rq(ext_x, iy + 1.0, 28.0, ih, ih / 2.0, c(16, 185, 129, 230)));
-    render_text(compositor, &mut quads, "AI", ext_x + 5.0, icy, 11.0, white, ext_x + 28.0);
-    ext_x += 32.0;
-
-    quads.push(rq(ext_x, iy + 1.0, ih, ih, ih / 2.0, c(5, 150, 105, 200)));
-    render_text(compositor, &mut quads, "S", ext_x + 6.0, icy, 11.0, white, ext_x + ih);
-    ext_x += 30.0;
-
-    let menu_icon_s = 18.0;
-    let menu_icon_y = ty + (TOOLBAR_H - menu_icon_s) / 2.0;
-    quads.push(NativeGpuCompositor::icon_quad(ext_x, menu_icon_y, menu_icon_s, &icons[4], icon_color));
-
+    quads.extend(crate::toolbar::build_toolbar_quads(
+        compositor, viewport_w, address_text, focused, address_cursor, tabs, active_tab_idx,
+        history_back, history_fwd, icons, chrome,
+    ));
     quads
 }
 

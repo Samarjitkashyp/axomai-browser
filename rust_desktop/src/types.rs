@@ -61,9 +61,6 @@ pub struct Extension {
     pub icon_letter: &'static str,
     pub icon_color: [u8; 3],
     pub enabled: bool,
-    pub auto_inject: bool,
-    pub inject_js: &'static str,
-    pub disable_js: &'static str,
 }
 
 pub struct SidebarItem {
@@ -89,6 +86,6 @@ pub const SIDEBAR_ITEMS: &[SidebarItem] = &[
 ];
 
 pub const SIDEBAR_W: f32 = 0.0;
-pub const TAB_BAR_H: f32 = 40.0;
-pub const TOOLBAR_H: f32 = 44.0;
+pub const TAB_BAR_H: f32 = 44.0;
+pub const TOOLBAR_H: f32 = 48.0;
 pub const CHROME_TOP: f32 = TAB_BAR_H + TOOLBAR_H;
