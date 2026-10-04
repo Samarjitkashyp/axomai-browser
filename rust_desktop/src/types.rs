@@ -58,3 +58,4 @@ pub const SIDEBAR_W: f32 = 0.0;
 pub const TAB_BAR_H: f32 = 44.0;
 pub const TOOLBAR_H: f32 = 48.0;
 pub const CHROME_TOP: f32 = TAB_BAR_H + TOOLBAR_H;
+pub const BOOKMARK_BAR_H: f32 = 32.0;

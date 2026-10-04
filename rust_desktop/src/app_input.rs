@@ -8,7 +8,7 @@ use crate::overlays;
 use crate::sys;
 use crate::tabs::TabKind;
 use crate::toolbar::{self, ToolbarHit, ToolbarLayout};
-use crate::types::{CHROME_TOP, TAB_BAR_H};
+use crate::types::{BOOKMARK_BAR_H, CHROME_TOP, TAB_BAR_H};
 use tao::event::{ElementState, KeyEvent, MouseButton};
 use tao::keyboard::{Key, KeyCode};
 use tao::window::CursorIcon;
@@ -82,6 +82,8 @@ impl App {
                 Some(_) => CursorIcon::Hand,
                 None => CursorIcon::Default,
             }
+        } else if self.settings.bookmark_bar && y < CHROME_TOP + BOOKMARK_BAR_H {
+            if self.bar_layout().iter().any(|(r, _, _)| r.contains(x, y)) { CursorIcon::Hand } else { CursorIcon::Default }
         } else {
             CursorIcon::Default
         };
@@ -95,6 +97,12 @@ impl App {
                 self.left_down = true;
                 if y < CHROME_TOP {
                     self.chrome_click(x, y);
+                } else if self.settings.bookmark_bar && y < CHROME_TOP + BOOKMARK_BAR_H {
+                    self.core.close_popups(self.webview.as_ref());
+                    self.addr_focused = false;
+                    self.addr_selected = false;
+                    self.hide_suggestions();
+                    self.bar_click(x, y);
                 }
             }
             (ElementState::Released, MouseButton::Left) => {
@@ -201,6 +209,9 @@ impl App {
             self.addr_focused = false;
             self.addr_selected = false;
         }
+        if !self.addr_focused {
+            self.hide_suggestions();
+        }
         self.redraw = true;
     }
 
@@ -217,6 +228,7 @@ impl App {
                 None => self.core.toast(wv, "Only web pages can be bookmarked", None, &shared),
             }
         }
+        self.refresh_bar();
         self.redraw = true;
     }
 
@@ -306,6 +318,7 @@ impl App {
         let at = self.addr_byte_index(self.addr_cursor);
         self.addr_text.insert_str(at, s);
         self.addr_cursor += s.chars().count();
+        self.update_suggestions();
         self.redraw = true;
     }
 
@@ -318,6 +331,7 @@ impl App {
             self.addr_text.replace_range(start..end, "");
             self.addr_cursor -= 1;
         }
+        self.update_suggestions();
         self.redraw = true;
     }
 
@@ -329,6 +343,7 @@ impl App {
             let end = self.addr_byte_index(self.addr_cursor + 1);
             self.addr_text.replace_range(start..end, "");
         }
+        self.update_suggestions();
         self.redraw = true;
     }
 
@@ -341,6 +356,8 @@ impl App {
     /// Enter in the address bar.
     pub fn submit_address(&mut self) {
         let text = self.addr_text.clone();
+        self.suggestions.clear();
+        self.hide_suggestions();
         self.addr_focused = false;
         self.addr_selected = false;
         let engine = self.search_engine;
@@ -383,6 +400,7 @@ impl App {
                             sys::set_clipboard_text(&self.addr_text);
                             if ch.eq_ignore_ascii_case("x") {
                                 self.addr_replace_selection();
+                                self.update_suggestions();
                                 self.redraw = true;
                             }
                         }
@@ -405,6 +423,11 @@ impl App {
         let home = matches!(ev.logical_key, Key::Home) || matches!(ev.physical_key, KeyCode::Home);
         let end = matches!(ev.logical_key, Key::End) || matches!(ev.physical_key, KeyCode::End);
         let len = self.addr_text.chars().count();
+        let up = matches!(ev.logical_key, Key::ArrowUp);
+        let down = matches!(ev.logical_key, Key::ArrowDown);
+        if (up || down) && self.move_suggestion(if down { 1 } else { -1 }) {
+            return;
+        }
         if left {
             // With everything selected, Left jumps to the start and Right to the end, like other browsers.
             let to = if self.addr_selected { 0 } else { self.addr_cursor.saturating_sub(1) };
@@ -420,8 +443,15 @@ impl App {
             match ev.logical_key {
                 Key::Backspace => self.addr_backspace(),
                 Key::Delete => self.addr_delete(),
-                Key::Enter => self.submit_address(),
+                Key::Enter => {
+                    if self.sugg_sel > 0 {
+                        self.open_suggestion(self.sugg_sel);
+                    } else {
+                        self.submit_address();
+                    }
+                }
                 Key::Escape => {
+                    self.hide_suggestions();
                     self.addr_focused = false;
                     self.addr_selected = false;
                     self.redraw = true;

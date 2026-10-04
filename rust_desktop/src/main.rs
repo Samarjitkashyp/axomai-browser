@@ -3,6 +3,7 @@ pub mod ai;
 pub mod app;
 pub mod app_commands;
 pub mod app_input;
+pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
 pub mod ext_scripts;
@@ -16,6 +17,7 @@ pub mod rendering;
 pub mod settings;
 pub mod settings_page;
 pub mod storage;
+pub mod suggest;
 pub mod sys;
 pub mod tabs;
 pub mod theme;
@@ -176,10 +178,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         private_window,
         exit: false,
         view_pending: false,
+        suggestions: Vec::new(),
+        sugg_sel: 0,
+        sugg_shown: false,
+        sugg_hide_at: None,
+        bar_marks: Vec::new(),
         safe: false,
         proxy,
         _instance: instance,
     };
+    app.refresh_bar();
     app.restore_or_start(saved_tabs);
 
     event_loop.run(move |event, _, flow| {

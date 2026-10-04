@@ -52,6 +52,14 @@ pub struct App {
     pub addr_selected: bool,
     /// When the address bar last took focus; the web view's own "got focus" echo right after is ignored.
     pub addr_focus_at: Instant,
+    /// Dropdown under the address bar (matches only; row 0 of the popup is the typed text).
+    pub suggestions: Vec<crate::suggest::Suggestion>,
+    pub sugg_sel: usize,
+    pub sugg_shown: bool,
+    /// A click in the page closes the dropdown shortly after, unless the click was on a row of it.
+    pub sugg_hide_at: Option<Instant>,
+    /// Bookmarks listed on the bookmarks bar (newest first, as stored).
+    pub bar_marks: Vec<crate::storage::Bookmark>,
 
     pub mouse: (f32, f32),
     pub left_down: bool,
@@ -150,10 +158,11 @@ impl App {
     /// Place the active web view under the toolbar, filling the rest of the window.
     pub fn fit_active_view(&self) {
         let (w, h) = self.window_size();
+        let top = self.chrome_top();
         if let Some(wv) = &self.webview {
             let _ = wv.set_bounds(wry::Rect {
-                position: wry::dpi::PhysicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                size: wry::dpi::PhysicalSize::new((w - SIDEBAR_W).max(1.0) as u32, (h - CHROME_TOP).max(1.0) as u32).into(),
+                position: wry::dpi::PhysicalPosition::new(SIDEBAR_W as i32, top as i32).into(),
+                size: wry::dpi::PhysicalSize::new((w - SIDEBAR_W).max(1.0) as u32, (h - top).max(1.0) as u32).into(),
             });
         }
     }
@@ -163,6 +172,10 @@ impl App {
     fn tick(&mut self) {
         self.process_commands();
         self.process_web_events();
+        if self.sugg_hide_at.is_some_and(|t| t.elapsed() > std::time::Duration::from_millis(300)) {
+            self.sugg_hide_at = None;
+            self.hide_suggestions();
+        }
         self.process_downloads();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();
@@ -314,7 +327,14 @@ impl App {
             // Source tabs keep their own "Source: host" title; every other generated page is handled above.
             TabKind::Web => {
                 t.title = title.clone();
-                let (url, private) = (t.url.clone(), t.private || self.private_window);
+                let (mut url, private) = (t.url.clone(), t.private || self.private_window);
+                // The tab's address can still be the previous page right after typing a new one; the web view's own
+                // source is the document this title belongs to.
+                if idx == self.active {
+                    if let Some(u) = self.webview.as_ref().and_then(|wv| wv.url().ok()).filter(|u| u.starts_with("http")) {
+                        url = u;
+                    }
+                }
                 if !private && matches!(t.kind, TabKind::Web) {
                     if let Some(s) = &self.storage {
                         let _ = s.update_history_title(&url, &title);
@@ -403,6 +423,7 @@ impl App {
             &chrome,
         );
 
+        quads.extend(self.bar_quads());
         if self.tabs[idx].loading {
             // Eases toward 90% and stays there until the page reports that it has finished loading.
             self.loading_progress += (0.9 - self.loading_progress) * 0.04;

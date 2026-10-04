@@ -33,7 +33,7 @@ impl Rect {
     fn cx(&self) -> f32 {
         self.x + self.w / 2.0
     }
-    fn cy(&self) -> f32 {
+    pub fn cy(&self) -> f32 {
         self.y + self.h / 2.0
     }
 }
@@ -312,7 +312,7 @@ fn rr(x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) -> GpuQuad {
     NativeGpuCompositor::rounded_quad(x, y, w, h, r.min(w / 2.0).min(h / 2.0), color)
 }
 
-fn rr_rect(r: Rect, radius: f32, color: [f32; 4]) -> GpuQuad {
+pub fn rr_rect(r: Rect, radius: f32, color: [f32; 4]) -> GpuQuad {
     rr(r.x, r.y, r.w, r.h, radius, color)
 }
 

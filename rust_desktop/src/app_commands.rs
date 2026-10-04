@@ -12,7 +12,7 @@ use crate::overlays;
 use crate::pages;
 use crate::tabs::TabKind;
 use crate::toolbar;
-use crate::types::{SearchEngine, CHROME_TOP};
+use crate::types::SearchEngine;
 use crate::viewsource;
 use crate::web::{self, Initial, WebShared};
 
@@ -159,7 +159,7 @@ impl App {
                 Content::Url(u) => Initial::Url(u),
                 Content::Html(h) => Initial::Html(h),
             };
-            self.webview = web::build_webview(&self.window, (w, h), CHROME_TOP, initial, &shared, bg);
+            self.webview = web::build_webview(&self.window, (w, h), self.chrome_top(), initial, &shared, bg);
             if self.webview.is_some() {
                 let doc = self.tabs[idx].doc.clone();
                 self.core.apply_extensions(self.webview.as_ref(), &doc, &shared, &self.extensions);
@@ -340,6 +340,7 @@ impl App {
                 if self.addr_focused && self.addr_focus_at.elapsed() > std::time::Duration::from_millis(600) {
                     self.addr_focused = false;
                     self.addr_selected = false;
+                    self.sugg_hide_at = Some(std::time::Instant::now());
                     self.redraw = true;
                 }
             }
@@ -482,6 +483,8 @@ impl App {
                 let _ = s.delete_history(id);
             }
             self.load_active_page();
+        } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
+            self.open_suggestion(row);
         } else if let Some(q) = cmd.strip_prefix("search/") {
             let url = format!("{}{}", self.search_engine.js_search_template(), q);
             self.navigate_active(&url);
@@ -489,6 +492,7 @@ impl App {
             if let Some(s) = &self.storage {
                 let _ = s.remove_bookmark(id);
             }
+            self.refresh_bar();
             self.open_internal("bookmarks");
         }
     }
@@ -549,6 +553,10 @@ impl App {
                     self.refresh_internal_page();
                 }
                 "language" => self.refresh_internal_page(),
+                "bookmark_bar" => {
+                    self.refresh_bar();
+                    self.fit_active_view();
+                }
                 _ => {}
             }
             self.redraw = true;

@@ -423,6 +423,19 @@ pub fn toast(theme: &Theme, message: &str, action: Option<(&str, &str, &str)>) -
     )
 }
 
+/// The address-bar dropdown: rows are (icon, title, subtitle); clicking one posts `suggest/<row>`.
+pub fn suggest_popup(theme: &Theme, token: &str, left: f32, width: f32, rows: &[(String, String, String)], selected: usize) -> String {
+    let data = serde_json::to_string(&rows.iter().map(|(i, t, s)| json!([i, truncate(t, 90), truncate(s, 100)])).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
+    let extra = format!(".card{{top:4px;left:{:.0}px;padding:6px;border-radius:16px}}.row{{padding:7px 10px}}.row.sel{{background:var(--hover)}}", left);
+    format!(
+        "var __o=document.getElementById('__ax_pop_suggest');if(__o)__o.remove();{}         var rows={};var sel={};css({});var card=el('div','card');         rows.forEach(function(r,i){{var b=el('div','row'+(i===sel?' sel':''));var em=el('span','em',r[0]);var tx=el('span','tx');tx.appendChild(el('b','',r[1]));tx.appendChild(el('i','',r[2]));b.appendChild(em);b.appendChild(tx);         b.addEventListener('mousedown',function(e){{e.preventDefault();e.stopPropagation();go('suggest/'+i)}});card.appendChild(b)}});         root.appendChild(card);document.documentElement.appendChild(host)}})();",
+        open(theme, token, "__ax_pop_suggest"),
+        data,
+        selected,
+        css_literal(&extra, 6.0, width),
+    )
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
