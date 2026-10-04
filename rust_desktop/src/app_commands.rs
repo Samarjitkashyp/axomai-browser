@@ -129,11 +129,15 @@ impl App {
             }
             TabKind::Page("history") => {
                 let entries = self.storage.as_ref().and_then(|s| s.get_history(1000).ok()).unwrap_or_default();
-                pages::history_page(&ctx, &entries)
+                let urls: Vec<&str> = entries.iter().map(|e| e.url.as_str()).collect();
+                let icons = self.icon_map(&urls);
+                pages::history_page(&ctx, &entries, &icons)
             }
             TabKind::Page("bookmarks") => {
                 let entries = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default();
-                pages::bookmarks_page(&ctx, &entries)
+                let urls: Vec<&str> = entries.iter().map(|e| e.url.as_str()).collect();
+                let icons = self.icon_map(&urls);
+                pages::bookmarks_page(&ctx, &entries, &icons)
             }
             TabKind::Page("passwords") => {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
@@ -314,6 +318,8 @@ impl App {
             self.apply_setting("download_dir", payload);
         } else if kind == "capture-full" {
             self.core.capture_full_finish(self.webview.as_ref(), &shared, payload);
+        } else if kind == "site-icon" {
+            self.site_icon_arrived(question, payload);
         } else if kind == "news" {
             self.news_arrived(idx, question, payload);
         } else if let Some(k) = kind.strip_prefix("ai-") {

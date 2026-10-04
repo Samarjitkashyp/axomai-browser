@@ -69,6 +69,9 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    /// Atlas slot of each site's saved icon, and the hosts whose icon is being fetched.
+    pub host_slots: std::collections::HashMap<String, usize>,
+    pub icon_pending: std::collections::HashSet<String>,
     /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
     pub news_cache: std::collections::HashMap<String, (Instant, String)>,
     pub news_pending: std::collections::HashSet<String>,
@@ -294,6 +297,7 @@ impl App {
                 }
                 WebEvent::Title(t) => self.on_title(idx, t),
                 WebEvent::Favicon(bytes) => {
+                    self.store_site_icon(idx, &bytes);
                     if let Some(slot) = self.favicons.add(&bytes) {
                         self.tabs[idx].favicon = Some(slot);
                         self.redraw = true;

@@ -25,6 +25,7 @@ pub mod pages;
 pub mod rendering;
 pub mod settings;
 pub mod settings_page;
+pub mod site_icons;
 pub mod splitview;
 pub mod storage;
 pub mod suggest;
@@ -240,6 +241,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        host_slots: Default::default(),
+        icon_pending: Default::default(),
         news_cache: Default::default(),
         news_pending: Default::default(),
         split: None,
@@ -254,8 +257,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
     app.apply_privacy_settings();
-    app.refresh_bar();
     app.restore_or_start(saved_tabs);
+    app.refresh_bar();
 
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_millis(16));
