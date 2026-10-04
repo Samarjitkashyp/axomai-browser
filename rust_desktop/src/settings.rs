@@ -91,6 +91,8 @@ pub struct Settings {
     /// Let the AI panel use Claude (the user's own API key) instead of the on-device assistant.
     pub ai_llm: bool,
     pub ai_model: String,
+    /// "anthropic" or "openai".
+    pub ai_provider: String,
     /// UI language code ("en", "as", "hi", ...).
     pub language: String,
 }
@@ -111,6 +113,7 @@ impl Default for Settings {
             weather_city: "jorhat".into(),
             ai_llm: false,
             ai_model: crate::llm::DEFAULT_MODEL.into(),
+            ai_provider: "anthropic".into(),
             language: "en".into(),
         }
     }
@@ -165,6 +168,9 @@ impl Settings {
         if let Some(v) = get("ai_llm").and_then(|v| truthy(&v)) {
             s.ai_llm = v;
         }
+        if let Some(v) = get("ai_provider").filter(|v| crate::llm::Provider::parse(v).is_some()) {
+            s.ai_provider = v;
+        }
         if let Some(v) = get("ai_model").filter(|v| crate::llm::valid_model(v)) {
             s.ai_model = v;
         }
@@ -212,6 +218,7 @@ impl Settings {
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
             "ai_llm" => truthy(value).map(|v| self.ai_llm = v).is_some(),
+            "ai_provider" => crate::llm::Provider::parse(value).is_some().then(|| self.ai_provider = value.to_string()).is_some(),
             "ai_model" => crate::llm::valid_model(value).then(|| self.ai_model = value.to_string()).is_some(),
             "weather_city" => CITIES.iter().any(|(k, _)| *k == value).then(|| self.weather_city = value.to_string()).is_some(),
             "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),

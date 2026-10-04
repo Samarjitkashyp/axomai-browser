@@ -670,7 +670,18 @@ impl App {
                     self.refresh_internal_page();
                 }
                 "language" | "weather_city" => self.refresh_internal_page(),
-                "ai_llm" => self.core.ai_llm = self.settings.ai_llm,
+                "ai_llm" => self.sync_ai_core(),
+                "ai_provider" => {
+                    // The other service has its own key: cloud mode stays off until that one is saved.
+                    if self.ai_key().is_none() {
+                        self.settings.ai_llm = false;
+                        if let Some(s) = &self.storage {
+                            let _ = s.set_setting("ai_llm", "false");
+                        }
+                    }
+                    self.sync_ai_core();
+                    self.refresh_internal_page();
+                }
                 "https_only" | "tracking" => self.apply_privacy_settings(),
                 "gpc" => {
                     self.apply_privacy_settings();
@@ -695,7 +706,7 @@ impl App {
     pub fn reset_settings(&mut self) {
         if let Some(s) = &self.storage {
             for key in [
-                "startup", "restore_session", "home_url", "password_manager", "weather_city", "ai_llm", "ai_model", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
+                "startup", "restore_session", "home_url", "password_manager", "weather_city", "ai_llm", "ai_model", "ai_provider", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
                 "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
@@ -705,6 +716,7 @@ impl App {
         self.core.set_passwords(true);
         self.core.set_gpc(true);
         self.core.ai_llm = false;
+        self.core.ai_label = "Claude";
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);
@@ -868,16 +880,26 @@ impl App {
         self.window.set_focus();
     }
 
-    /// The saved Anthropic key, decrypted on demand (it only ever exists in memory for the length of a request).
+    pub fn provider(&self) -> crate::llm::Provider {
+        crate::llm::Provider::parse(&self.settings.ai_provider).unwrap_or(crate::llm::Provider::Anthropic)
+    }
+
+    /// Keep the AI panel's mode and label in step with the settings and the saved key.
+    pub fn sync_ai_core(&mut self) {
+        self.core.ai_llm = self.settings.ai_llm && self.ai_key().is_some();
+        self.core.ai_label = self.provider().label();
+    }
+
+    /// The saved key of the chosen provider, decrypted on demand (it only exists in memory for one request).
     pub fn ai_key(&self) -> Option<String> {
-        let hex = self.storage.as_ref()?.get_setting("ai_key_enc").ok().flatten()?;
+        let hex = self.storage.as_ref()?.get_setting(self.provider().key_setting()).ok().flatten()?;
         crate::secret::decrypt(&crate::llm::hex_decode(&hex)?)
     }
 
     fn save_ai_key(&mut self, key: &str) {
         let key = key.trim();
         let stored = crate::llm::valid_key(key)
-            && crate::secret::encrypt(key).and_then(|blob| self.storage.as_ref().and_then(|s| s.set_setting("ai_key_enc", &crate::llm::hex_encode(&blob)).ok())).is_some();
+            && crate::secret::encrypt(key).and_then(|blob| self.storage.as_ref().and_then(|s| s.set_setting(self.provider().key_setting(), &crate::llm::hex_encode(&blob)).ok())).is_some();
         if let Some(wv) = &self.webview {
             let shared = self.shared();
             self.core.toast(wv, if stored { "API key saved (encrypted)" } else { "That does not look like a valid API key" }, None, &shared);
@@ -887,25 +909,32 @@ impl App {
 
     fn clear_ai_key(&mut self) {
         if let Some(s) = &self.storage {
-            let _ = s.delete_setting("ai_key_enc");
+            let _ = s.delete_setting(self.provider().key_setting());
             let _ = s.set_setting("ai_llm", "false");
         }
         self.settings.ai_llm = false;
-        self.core.ai_llm = false;
+        self.sync_ai_core();
         self.refresh_internal_page();
     }
 
     /// Ask Claude about the page text on a helper thread; the answer returns as an `ai-llm` event.
     fn ask_llm(&mut self, idx: usize, kind: &str, question: &str, raw_page: &str, key: String) {
         let page: String = serde_json::from_str::<String>(raw_page).unwrap_or_default();
-        if let Some(wv) = &self.webview {
-            let _ = wv.evaluate_script(&overlays::ai_result("Claude", &["Thinking\u{2026}".to_string()], &[]));
+        // At most PER_MINUTE requests a minute and PER_DAY a day; beyond that the on-device answer is used.
+        if let Err(wait) = self.ai_limiter.check(std::time::Instant::now()) {
+            let msg = format!("Too many AI requests (limit: {} a minute, {} a day). Try again in {}.", crate::llm::PER_MINUTE, crate::llm::PER_DAY, crate::llm::wait_text(wait));
+            self.core.ai_llm_done(kind, question, &page, Err(msg), self.webview.as_ref());
+            return;
         }
-        let (shared, model, lang) = (self.tabs[idx].shared.clone(), self.settings.ai_model.clone(), self.settings.language.clone());
+        if let Some(wv) = &self.webview {
+            let _ = wv.evaluate_script(&overlays::ai_result(self.core.ai_label, &["Thinking\u{2026}".to_string()], &[]));
+        }
+        let provider = self.provider();
+        let (shared, model, lang) = (self.tabs[idx].shared.clone(), provider.model_for(&self.settings.ai_model), self.settings.language.clone());
         let (kind, question) = (kind.to_string(), question.to_string());
         std::thread::spawn(move || {
-            let body = crate::llm::request_body(&model, &kind, &question, &page, &lang);
-            let result = crate::llm::call(&crate::llm::base_url(), &key, &body);
+            let body = crate::llm::build_request(provider, &model, &kind, &question, &page, &lang);
+            let result = crate::llm::call_provider(provider, &crate::llm::base_url_for(provider), &key, &body);
             let payload = match result {
                 Ok(text) => serde_json::json!({"ok": true, "text": text, "page": page}),
                 Err(error) => serde_json::json!({"ok": false, "error": error, "page": page}),

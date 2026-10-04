@@ -177,17 +177,20 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     // ---- AI assistant
-    let models: Vec<(String, String)> = crate::llm::MODELS.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
+    let provider = crate::llm::Provider::parse(&s.ai_provider).unwrap_or(crate::llm::Provider::Anthropic);
+    let models: Vec<(String, String)> = provider.models().iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
+    let providers = vec![("anthropic".to_string(), "Claude (Anthropic)".to_string()), ("openai".to_string(), "ChatGPT (OpenAI)".to_string())];
     let key_status = if v.ai_key_saved { t("settings.ai_key.saved") } else { t("settings.ai_key.none") };
     let ai = format!(
-        "{}{}{}",
+        "{}{}{}{}",
         row(
             t("settings.ai_llm"),
             t("settings.ai_llm.desc"),
             &switch(&format!("data-set=\"ai_llm\"{}", if v.ai_key_saved { "" } else { " disabled" }), s.ai_llm && v.ai_key_saved)
         ),
+        row(t("settings.ai_provider"), "", &select("ai_provider", &providers, &s.ai_provider)),
         row(
-            t("settings.ai_key"),
+            if provider == crate::llm::Provider::OpenAi { t("settings.ai_key.openai") } else { t("settings.ai_key") },
             &format!("{} \u{2014} {}", t("settings.ai_key.desc"), key_status),
             &format!(
                 "<input type=\"password\" id=\"aikey\" placeholder=\"sk-ant-\u{2026}\" autocomplete=\"off\" spellcheck=\"false\"> \
@@ -196,7 +199,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
                 escape(t("settings.ai_key.remove"))
             )
         ),
-        row(t("settings.ai_model"), "", &select("ai_model", &models, &s.ai_model)),
+        row(t("settings.ai_model"), "", &select("ai_model", &models, &provider.model_for(&s.ai_model))),
     );
 
     let body = format!(
@@ -293,6 +296,7 @@ mod tests {
                 "language" => "en",
                 "weather_city" => "guwahati",
                 "ai_model" => "claude-sonnet-5-5",
+                "ai_provider" => "openai",
                 "download_dir" => "C:\\x",
                 _ => "1",
             };

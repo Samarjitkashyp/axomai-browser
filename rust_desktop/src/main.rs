@@ -228,6 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        ai_limiter: llm::RateLimiter::new(),
         split: None,
         last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
         last_handoff_poll: std::time::Instant::now(),
@@ -239,7 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
-    app.core.ai_llm = app.settings.ai_llm && app.ai_key().is_some();
+    app.sync_ai_core();
     app.apply_privacy_settings();
     app.refresh_bar();
     app.restore_or_start(saved_tabs);

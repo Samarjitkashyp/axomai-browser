@@ -28,6 +28,8 @@ pub struct Core {
     pub gpc: bool,
     /// The AI panel uses Claude (user's key) rather than the on-device assistant.
     pub ai_llm: bool,
+    /// Name of the cloud AI that answers ("Claude" / "OpenAI").
+    pub ai_label: &'static str,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -74,6 +76,7 @@ impl Core {
             passwords: true,
             gpc: true,
             ai_llm: false,
+            ai_label: "Claude",
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -368,7 +371,7 @@ impl Core {
         if let Some(wv) = wv {
             let host = shared.shield.page_host.lock().map(|h| h.clone()).unwrap_or_default();
             let host = if host.is_empty() { "this page".to_string() } else { host };
-            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title, self.ai_llm));
+            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title, self.ai_llm.then_some(self.ai_label)));
         }
     }
 
@@ -527,13 +530,13 @@ impl Core {
         let Some(wv) = wv else { return };
         match result {
             Ok(text) => {
-                let title = if kind == "ask" { "Answer \u{00B7} Claude" } else { "Summary \u{00B7} Claude" };
-                let _ = wv.evaluate_script(&overlays::ai_result(title, &crate::llm::paragraphs(&text), &[]));
+                let title = format!("{} \u{00B7} {}", if kind == "ask" { "Answer" } else { "Summary" }, self.ai_label);
+                let _ = wv.evaluate_script(&overlays::ai_result(&title, &crate::llm::paragraphs(&text), &[]));
             }
             Err(msg) => {
                 let raw = serde_json::to_string(page_text).unwrap_or_default();
                 self.ai_respond(kind, question, &raw, Some(wv));
-                let note = format!("Claude could not answer: {} Showing the on-device result instead.", msg);
+                let note = format!("{} could not answer: {} Showing the on-device result instead.", self.ai_label, msg);
                 let _ = wv.evaluate_script(&overlays::ai_note(&note));
             }
         }
