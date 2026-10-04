@@ -16,6 +16,8 @@ const NAV: &[(&str, &str, &str)] = &[
     ("bookmarks", "\u{2B50}", "Bookmarks"),
     ("downloads", "\u{2B07}\u{FE0F}", "Downloads"),
     ("passwords", "\u{1F511}", "Passwords"),
+    ("readinglist", "\u{1F4D6}", "Reading list"),
+    ("notes", "\u{1F4DD}", "Notes"),
     ("extensions", "\u{1F9E9}", "Extensions"),
     ("settings", "\u{2699}\u{FE0F}", "Settings"),
 ];
@@ -26,6 +28,8 @@ fn nav_key(id: &str) -> &'static str {
         "bookmarks" => "nav.bookmarks",
         "downloads" => "nav.downloads",
         "passwords" => "nav.passwords",
+        "readinglist" => "nav.readinglist",
+        "notes" => "nav.notes",
         "extensions" => "nav.extensions",
         _ => "nav.settings",
     }

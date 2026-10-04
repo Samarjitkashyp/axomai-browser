@@ -29,6 +29,8 @@ impl TabKind {
             "axomai://downloads" => TabKind::Page("downloads"),
             "axomai://passwords" => TabKind::Page("passwords"),
             "axomai://permissions" => TabKind::Page("permissions"),
+            "axomai://readinglist" => TabKind::Page("readinglist"),
+            "axomai://notes" => TabKind::Page("notes"),
             "axomai://about" => TabKind::About,
             a if a.starts_with("view-source:") => TabKind::Source,
             _ => TabKind::Web,
@@ -57,6 +59,8 @@ impl TabKind {
             TabKind::Page("downloads") => "Downloads",
             TabKind::Page("passwords") => "Passwords",
             TabKind::Page("permissions") => "Permissions",
+            TabKind::Page("readinglist") => "Reading list",
+            TabKind::Page("notes") => "Notes",
             TabKind::Page(_) => "Axomai",
             TabKind::About => "About Axomai",
             TabKind::Source => "Source",
@@ -80,6 +84,8 @@ pub struct Tab {
     pub favicon: Option<usize>,
     pub audio: bool,
     pub muted: bool,
+    /// Muted because its site is on the muted list (undone when the tab leaves that site).
+    pub site_muted: bool,
     pub loading: bool,
     pub suspended: bool,
     pub last_active: Instant,
@@ -92,6 +98,8 @@ pub struct Tab {
     /// What the tab showed before a typed address, until the new page proves itself with a title (a download
     /// never does, so the tab goes back to this).
     pub prev_nav: Option<(TabKind, String, String)>,
+    /// Tab group (`App::groups`).
+    pub group: Option<u32>,
 }
 
 impl Tab {
@@ -112,6 +120,7 @@ impl Tab {
             favicon: None,
             audio: false,
             muted: false,
+            site_muted: false,
             loading: false,
             suspended: false,
             last_active: Instant::now(),
@@ -119,6 +128,7 @@ impl Tab {
             source_html: None,
             zoom: 1.0,
             prev_nav: None,
+            group: None,
         }
     }
 }

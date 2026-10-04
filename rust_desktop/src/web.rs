@@ -70,6 +70,8 @@ pub enum WebEvent {
     PermissionAsk { id: u64, uri: String, name: String },
     /// HTTPS-only mode cancelled this http:// navigation; load this https:// address instead.
     Upgrade(String),
+    /// The address belongs to a blocked site; show the block page instead.
+    SiteBlocked(String),
     /// The https:// address we upgraded to did not load; this is the original http:// address.
     UpgradeFailed(String),
     /// The page zoom changed (factor, 1.0 = 100%).
@@ -92,6 +94,8 @@ pub struct Shield {
     /// Hosts the user chose to open over plain http for this session, and https addresses we upgraded to.
     pub https_exempt: Arc<Mutex<std::collections::HashSet<String>>>,
     pub upgraded: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Sites the user blocked; opening one shows the block page instead.
+    pub blocked_sites: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl Shield {
@@ -106,6 +110,7 @@ impl Shield {
             gpc: Arc::new(AtomicBool::new(true)),
             https_exempt: Default::default(),
             upgraded: Default::default(),
+            blocked_sites: Default::default(),
         }
     }
 
@@ -121,6 +126,7 @@ impl Shield {
             gpc: self.gpc.clone(),
             https_exempt: self.https_exempt.clone(),
             upgraded: self.upgraded.clone(),
+            blocked_sites: self.blocked_sites.clone(),
         }
     }
 }
@@ -265,6 +271,10 @@ pub fn build_webview(
             .into(),
         })
         .with_navigation_handler(move |url: String| {
+            if nav_shared.shield.blocked_sites.lock().map_or(false, |b| !b.is_empty() && crate::siterules::matches_any(&b, &url)) {
+                nav_shared.push_event(WebEvent::SiteBlocked(url));
+                return false;
+            }
             if nav_shared.shield.https_only.load(Ordering::Relaxed) && url.get(..7).map_or(false, |p| p.eq_ignore_ascii_case("http://")) {
                 let exempt = nav_shared.shield.https_exempt.lock().map(|e| e.clone()).unwrap_or_default();
                 if let Some(https) = crate::permissions::upgrade_target(&url, &exempt) {
@@ -506,6 +516,7 @@ pub mod com {
                     (0x46, true, false) => "find".into(),               // F
                     (0x50, true, false) => "print".into(),              // P
                     (0x4E, true, false) => "new-window".into(),         // N
+                    (0x41, true, true) => "tab-search".into(),          // Ctrl+Shift+A
                     (0x4E, true, true) => "new-incognito".into(),       // Shift+N
                     (0x4F, true, true) => "bookmarks".into(),           // Shift+O
                     (0x2E, true, true) => "clear-data-dialog".into(),   // Shift+Delete

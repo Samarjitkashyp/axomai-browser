@@ -1,6 +1,8 @@
-# 🚀 Axomai Browser `v1.6.0` (Final Production Edition)
+# 🚀 Axomai Browser `v2.0.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
+
+**New in 2.0 (desktop app):** tab search and tab groups, reading list, notes on pages, dark mode for websites, cookie-banner hiding, YouTube ad skipping, clean printouts, find-in-page with match count and highlight, mute / block a site, and 35 weather cities. See [CHANGELOG.md](CHANGELOG.md) for details and honest limits.
 
 A modern, high-performance web browser designed with an independent Rust engine core, Google V8 JavaScript & WebAssembly bytecode runtime, WebGPU & WebGL 2.0 hardware graphics pipeline, WebRTC P2P real-time communication, Automated Background Updater & Cryptographic Signature Verification, Heritage Theme Engine (Assam Cultural Presets), AI Smart Workspaces & Tab Hibernation, Built-in Secure VPN & DNS-over-HTTPS, Floating PiP with 300% Audio Booster, Split-Screen Dual Browsing Studio, Full-Page Screenshot & Annotation Studio, Opera GX Resource Performance Limiter, Native Web3 Multi-Chain Wallet, Built-in AdBlocker & Privacy Shield, Distraction-Free Reader Mode, Multi-Threaded Chunk Download Manager, Native SVG & PDF Vector Engine, End-to-End Encrypted Cloud/Device Sync, Accessibility Tree (AOM), On-Device AI & Multilingual Translator, Permissions & Geolocation Manager, Web Cryptography (CSPRNG, SHA, AES), Web Audio API synthesizer graph, Dedicated Web Workers & OffscreenCanvas, WebAuthn Passkeys authentication, Android NDK/JNI mobile bridge, W3C WPT automated test harness, native media demuxer & codecs, W3C-compliant Web Platform APIs, native windowing, multi-process sandbox architecture, Chrome DevTools protocol backend, and a glassmorphic desktop interface.
 

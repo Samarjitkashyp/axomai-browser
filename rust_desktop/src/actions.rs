@@ -26,6 +26,8 @@ pub struct Core {
     pub passwords: bool,
     /// Whether pages see `navigator.globalPrivacyControl`.
     pub gpc: bool,
+    /// Dark mode / cookie banners / YouTube / print tweaks for web pages.
+    pub tweaks: crate::site_tweaks::Tweaks,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -71,6 +73,7 @@ impl Core {
             ext_generation: 0,
             passwords: true,
             gpc: true,
+            tweaks: Default::default(),
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -100,6 +103,10 @@ impl Core {
                 script.push('\n');
                 script.push_str("try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true})}catch(e){}");
             }
+            if self.tweaks.any() {
+                script.push('\n');
+                script.push_str(&self.tweaks.script());
+            }
             if self.passwords {
                 script.push('\n');
                 script.push_str(crate::passwords::PAGE_SCRIPT);
@@ -120,6 +127,13 @@ impl Core {
     pub fn set_gpc(&mut self, on: bool) {
         if self.gpc != on {
             self.gpc = on;
+            self.ext_generation += 1;
+        }
+    }
+
+    pub fn set_tweaks(&mut self, t: crate::site_tweaks::Tweaks) {
+        if self.tweaks != t {
+            self.tweaks = t;
             self.ext_generation += 1;
         }
     }
@@ -574,6 +588,13 @@ pub fn menu_key(cmd: &str) -> &'static str {
         "extensions" => "menu.extensions",
         "theme-menu" => "menu.theme-menu",
         "split-view" => "menu.split-view",
+        "tab-search" => "menu.tab-search",
+        "reading-add" => "menu.reading-add",
+        "site-mute" => "menu.site-mute",
+        "site-block-current" => "menu.site-block-current",
+        "note-new" => "menu.note-new",
+        "readinglist" => "menu.readinglist",
+        "notes" => "menu.notes",
         "print" => "menu.print",
         "save-pdf" => "menu.save-pdf",
         "clear-ram" => "menu.clear-ram",
@@ -593,7 +614,14 @@ pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "🕒", label: "History", cmd: "history", danger: false },
     overlays::MenuEntry { emoji: "⬇️", label: "Downloads", cmd: "downloads", danger: false },
     overlays::MenuEntry { emoji: "🧩", label: "Extensions", cmd: "extensions", danger: false },
+    overlays::MenuEntry { emoji: "📚", label: "Reading list", cmd: "readinglist", danger: false },
+    overlays::MenuEntry { emoji: "🗒️", label: "Notes", cmd: "notes", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
+    overlays::MenuEntry { emoji: "📖", label: "Add to reading list", cmd: "reading-add", danger: false },
+    overlays::MenuEntry { emoji: "📝", label: "Add note to this page", cmd: "note-new", danger: false },
+    overlays::MenuEntry { emoji: "🔇", label: "Mute / unmute this site", cmd: "site-mute", danger: false },
+    overlays::MenuEntry { emoji: "⛔", label: "Block this site", cmd: "site-block-current", danger: true },
+    overlays::MenuEntry { emoji: "🔎", label: "Search tabs", cmd: "tab-search", danger: false },
     overlays::MenuEntry { emoji: "◫", label: "Split view", cmd: "split-view", danger: false },
     overlays::MenuEntry { emoji: "🎨", label: "Heritage Themes", cmd: "theme-menu", danger: false },
     overlays::MenuEntry { emoji: "🖨️", label: "Print…", cmd: "print", danger: false },

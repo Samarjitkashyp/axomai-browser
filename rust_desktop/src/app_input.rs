@@ -51,6 +51,7 @@ pub fn shortcut_command(key: &Key, ctrl: bool, shift: bool, alt: bool) -> Option
                 ('d', false) => "bookmark-toggle".into(),
                 ('u', false) => "viewsource-current".into(),
                 ('f', false) => "find".into(),
+                ('a', true) => "tab-search".into(),
                 ('p', false) => "print".into(),
                 ('r', false) => "reload".into(),
                 ('r', true) => "reload-hard".into(),
@@ -279,6 +280,7 @@ impl App {
         let Some(t) = self.tabs.get(idx) else { return };
         let id = t.id;
         let e = |emoji: &str, label: &str, cmd: String, danger: bool| (emoji.to_string(), label.to_string(), cmd, danger);
+        let group_now = t.group;
         let mut items = vec![
             e("\u{1F504}", "Reload", format!("tab-reload/{}", id), false),
             e("\u{1F4D1}", "Duplicate", format!("tab-duplicate/{}", id), false),
@@ -286,6 +288,16 @@ impl App {
         ];
         if t.audio || t.muted {
             items.push(e(if t.muted { "\u{1F50A}" } else { "\u{1F507}" }, if t.muted { "Unmute tab" } else { "Mute tab" }, format!("tab-mute/{}", id), false));
+        }
+        items.push(e("", "-", String::new(), false));
+        items.push(e("\u{1F3F7}\u{FE0F}", "Add to new group\u{2026}", format!("tab-group-prompt/{}", id), false));
+        for g in &self.groups {
+            if group_now != Some(g.id) {
+                items.push(e(crate::tabgroups::GROUP_COLORS[g.color].1, &format!("Add to group: {}", g.name), format!("tab-group-add/{}/{}", id, g.id), false));
+            }
+        }
+        if group_now.is_some() {
+            items.push(e("\u{274C}", "Remove from group", format!("tab-ungroup/{}", id), false));
         }
         items.push(e("", "-", String::new(), false));
         items.push(e("\u{2795}", "New tab", "newtab".into(), false));
@@ -512,6 +524,7 @@ mod tests {
 
     #[test]
     fn zoom_reload_and_navigation_shortcuts() {
+        assert_eq!(shortcut_command(&ch("A"), true, true, false).as_deref(), Some("tab-search"));
         assert_eq!(shortcut_command(&ch("="), true, false, false).as_deref(), Some("zoom-in"));
         assert_eq!(shortcut_command(&ch("+"), true, true, false).as_deref(), Some("zoom-in"));
         assert_eq!(shortcut_command(&ch("-"), true, false, false).as_deref(), Some("zoom-out"));

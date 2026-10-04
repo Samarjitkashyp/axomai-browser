@@ -79,7 +79,12 @@ impl App {
             return;
         }
         let Ok(msg) = serde_json::from_str::<Value>(json) else { return };
-        if msg.get("ax").and_then(|v| v.as_str()) != Some("pw") || !self.settings.password_manager {
+        let ax = msg.get("ax").and_then(|v| v.as_str());
+        if ax == Some("note") {
+            self.on_note_message(tab_idx, source, &msg);
+            return;
+        }
+        if ax != Some("pw") || !self.settings.password_manager {
             return;
         }
         let Some(origin) = origin_of(source) else { return };

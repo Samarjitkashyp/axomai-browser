@@ -30,11 +30,30 @@ pub struct DownloadEntry {
 }
 
 #[derive(Debug, Clone)]
+pub struct ReadingItem {
+    pub id: i64,
+    pub url: String,
+    pub title: String,
+    pub added_at: String,
+    pub read: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Note {
+    pub id: i64,
+    pub page: String,
+    pub text: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SavedTab {
     pub position: i32,
     pub url: String,
     pub title: String,
     pub is_active: bool,
+    /// `"<colour>|<name>"` of the tab's group, or empty.
+    pub group: String,
 }
 
 pub struct BrowserStorage {
@@ -53,6 +72,13 @@ impl BrowserStorage {
     }
 
     fn init_tables(&self) -> Result<(), rusqlite::Error> {
+        self.create_tables()?;
+        // Added later: the tab group of each saved tab (older databases get the column here).
+        let _ = self.conn.execute("ALTER TABLE tabs ADD COLUMN grp TEXT NOT NULL DEFAULT ''", []);
+        Ok(())
+    }
+
+    fn create_tables(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,6 +111,25 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS site_rules (
+                host TEXT PRIMARY KEY,
+                muted INTEGER NOT NULL DEFAULT 0,
+                blocked INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS reading_list (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL DEFAULT '',
+                added_at TEXT NOT NULL DEFAULT (datetime('now')),
+                read INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page TEXT NOT NULL,
+                text TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_notes_page ON notes(page);
             CREATE TABLE IF NOT EXISTS favicons (host TEXT PRIMARY KEY, icon BLOB NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
             CREATE TABLE IF NOT EXISTS site_zoom (origin TEXT PRIMARY KEY, factor REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS site_permissions (
@@ -349,6 +394,80 @@ impl BrowserStorage {
         Ok(())
     }
 
+    /// Add a page to the reading list. `Ok(false)` when it was already there.
+    pub fn reading_add(&self, url: &str, title: &str) -> Result<bool, rusqlite::Error> {
+        Ok(self.conn.execute("INSERT OR IGNORE INTO reading_list (url, title) VALUES (?1, ?2)", params![url, title])? > 0)
+    }
+
+    /// Unread items first, then newest first.
+    pub fn reading_items(&self) -> Vec<ReadingItem> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, url, title, datetime(added_at, 'localtime'), read FROM reading_list ORDER BY read ASC, id DESC") else { return Vec::new() };
+        stmt.query_map([], |r| Ok(ReadingItem { id: r.get(0)?, url: r.get(1)?, title: r.get(2)?, added_at: r.get(3)?, read: r.get::<_, i64>(4)? != 0 }))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn reading_set_read(&self, id: i64, read: bool) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE reading_list SET read = ?1 WHERE id = ?2", params![read as i64, id])?;
+        Ok(())
+    }
+
+    pub fn reading_delete(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM reading_list WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn reading_clear_read(&self) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM reading_list WHERE read = 1", [])?;
+        Ok(())
+    }
+
+    /// Change the mute and/or block flag of a site (`None` keeps the current value). Rows with both off are removed.
+    pub fn site_rule_set(&self, host: &str, muted: Option<bool>, blocked: Option<bool>) -> Result<(), rusqlite::Error> {
+        self.conn.execute("INSERT OR IGNORE INTO site_rules (host) VALUES (?1)", params![host])?;
+        if let Some(m) = muted {
+            self.conn.execute("UPDATE site_rules SET muted = ?1 WHERE host = ?2", params![m as i64, host])?;
+        }
+        if let Some(b) = blocked {
+            self.conn.execute("UPDATE site_rules SET blocked = ?1 WHERE host = ?2", params![b as i64, host])?;
+        }
+        self.conn.execute("DELETE FROM site_rules WHERE muted = 0 AND blocked = 0", [])?;
+        Ok(())
+    }
+
+    /// `(host, muted, blocked)` for every site with a rule.
+    pub fn site_rules(&self) -> Vec<(String, bool, bool)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT host, muted, blocked FROM site_rules ORDER BY host") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn note_add(&self, page: &str, text: &str) -> Result<i64, rusqlite::Error> {
+        self.conn.execute("INSERT INTO notes (page, text) VALUES (?1, ?2)", params![page, text])?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// `(id, text)` of the notes of one page, oldest first.
+    pub fn notes_for(&self, page: &str) -> Vec<(i64, String)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, text FROM notes WHERE page = ?1 ORDER BY id ASC") else { return Vec::new() };
+        stmt.query_map(params![page], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn note_update(&self, id: i64, text: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE notes SET text = ?1, updated_at = datetime('now') WHERE id = ?2", params![text, id])?;
+        Ok(())
+    }
+
+    pub fn note_delete(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Every non-empty note, newest first.
+    pub fn notes_all(&self) -> Vec<Note> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, page, text, datetime(updated_at, 'localtime') FROM notes WHERE trim(text) <> '' ORDER BY updated_at DESC, id DESC") else { return Vec::new() };
+        stmt.query_map([], |r| Ok(Note { id: r.get(0)?, page: r.get(1)?, text: r.get(2)?, updated_at: r.get(3)? })).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
     pub fn get_site_zoom(&self, origin: &str) -> Option<f64> {
         self.conn.query_row("SELECT factor FROM site_zoom WHERE origin = ?1", params![origin], |r| r.get(0)).ok()
     }
@@ -474,17 +593,17 @@ impl BrowserStorage {
     pub fn save_tabs(&self, tabs: &[SavedTab]) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM tabs", [])?;
         let mut stmt = self.conn.prepare(
-            "INSERT INTO tabs (position, url, title, is_active) VALUES (?1, ?2, ?3, ?4)"
+            "INSERT INTO tabs (position, url, title, is_active, grp) VALUES (?1, ?2, ?3, ?4, ?5)"
         )?;
         for tab in tabs {
-            stmt.execute(params![tab.position, tab.url, tab.title, tab.is_active as i32])?;
+            stmt.execute(params![tab.position, tab.url, tab.title, tab.is_active as i32, tab.group])?;
         }
         Ok(())
     }
 
     pub fn get_tabs(&self) -> Result<Vec<SavedTab>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT position, url, title, is_active FROM tabs ORDER BY position ASC"
+            "SELECT position, url, title, is_active, grp FROM tabs ORDER BY position ASC"
         )?;
         let entries = stmt.query_map([], |row| {
             Ok(SavedTab {
@@ -492,6 +611,7 @@ impl BrowserStorage {
                 url: row.get(1)?,
                 title: row.get(2)?,
                 is_active: row.get::<_, i32>(3)? != 0,
+                group: row.get(4)?,
             })
         })?.collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
@@ -620,6 +740,68 @@ mod tests {
         st.set_favicon("a.test", b"icon-2").unwrap();
         assert_eq!(st.get_favicon("a.test").unwrap(), b"icon-2");
         assert_eq!(st.get_favicon("b.test"), None);
+    }
+
+    #[test]
+    fn saved_tabs_keep_their_group() {
+        let st = temp_storage();
+        let tabs = vec![
+            SavedTab { position: 0, url: "https://a.test".into(), title: "A".into(), is_active: false, group: "2|Work".into() },
+            SavedTab { position: 1, url: "https://b.test".into(), title: "B".into(), is_active: true, group: String::new() },
+        ];
+        st.save_tabs(&tabs).unwrap();
+        let back = st.get_tabs().unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].group, "2|Work");
+        assert_eq!(back[1].group, "");
+    }
+
+    #[test]
+    fn site_rules_keep_each_flag_and_drop_empty_rows() {
+        let st = temp_storage();
+        st.site_rule_set("a.com", Some(true), None).unwrap();
+        st.site_rule_set("a.com", None, Some(true)).unwrap();
+        st.site_rule_set("b.com", None, Some(true)).unwrap();
+        assert_eq!(st.site_rules(), vec![("a.com".to_string(), true, true), ("b.com".to_string(), false, true)]);
+        st.site_rule_set("a.com", Some(false), None).unwrap();
+        st.site_rule_set("b.com", None, Some(false)).unwrap();
+        assert_eq!(st.site_rules(), vec![("a.com".to_string(), false, true)]);
+        st.site_rule_set("a.com", None, Some(false)).unwrap();
+        assert!(st.site_rules().is_empty());
+    }
+
+    #[test]
+    fn reading_list_adds_once_and_orders_unread_first() {
+        let st = temp_storage();
+        assert!(st.reading_add("https://a.test/1", "One").unwrap());
+        assert!(!st.reading_add("https://a.test/1", "One again").unwrap(), "no duplicates");
+        st.reading_add("https://a.test/2", "Two").unwrap();
+        let items = st.reading_items();
+        assert_eq!(items[0].title, "Two", "newest unread first");
+        st.reading_set_read(items[0].id, true).unwrap();
+        let items = st.reading_items();
+        assert_eq!(items[0].title, "One");
+        assert!(items[1].read);
+        st.reading_clear_read().unwrap();
+        assert_eq!(st.reading_items().len(), 1);
+        st.reading_delete(st.reading_items()[0].id).unwrap();
+        assert!(st.reading_items().is_empty());
+    }
+
+    #[test]
+    fn notes_are_per_page_and_empty_ones_are_not_listed() {
+        let st = temp_storage();
+        let a = st.note_add("https://a.test/p", "").unwrap();
+        let b = st.note_add("https://a.test/p", "remember this").unwrap();
+        st.note_add("https://b.test/", "other page").unwrap();
+        assert_eq!(st.notes_for("https://a.test/p").len(), 2);
+        assert_eq!(st.notes_for("https://c.test/").len(), 0);
+        st.note_update(a, "typed later").unwrap();
+        assert_eq!(st.notes_all().len(), 3);
+        st.note_update(a, "   ").unwrap();
+        assert_eq!(st.notes_all().len(), 2, "blank notes stay off the Notes page");
+        st.note_delete(b).unwrap();
+        assert_eq!(st.notes_for("https://a.test/p").len(), 1);
     }
 
     #[test]

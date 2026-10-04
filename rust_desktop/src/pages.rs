@@ -388,6 +388,21 @@ pub fn https_warning_page(ctx: &PageCtx, host: &str, http_url: &str) -> String {
     ui_shell::page(ctx, "", "Connection not secure", &body, "")
 }
 
+pub fn site_blocked_page(ctx: &PageCtx, host: &str) -> String {
+    let l = ctx.lang;
+    let body = format!(
+        "{head}<div class=\"card\" style=\"padding:22px 24px\"><p>{text}</p>\
+         <p style=\"margin-top:16px;display:flex;gap:10px\"><button class=\"btn\" onclick=\"go('https-back')\">{back}</button>\
+         <button class=\"btn ghost\" data-host=\"{attr}\" onclick=\"go('site-unblock/'+encodeURIComponent(this.dataset.host))\">{unblock}</button></p></div>",
+        head = ui_shell::heading(tr(l, "blocked.title"), host),
+        text = escape(tr(l, "blocked.text")),
+        back = escape(tr(l, "blocked.back")),
+        unblock = escape(tr(l, "blocked.unblock")),
+        attr = escape(host)
+    );
+    ui_shell::page(ctx, "", "Site blocked", &body, "")
+}
+
 pub struct AboutInfo {
     pub version: &'static str,
     pub webview: String,
@@ -411,6 +426,61 @@ pub fn about_page(ctx: &PageCtx, info: &AboutInfo) -> String {
         privacy = escape(tr(l, "about.privacy")),
     );
     ui_shell::page(ctx, "", "About", &body, "")
+}
+
+pub fn reading_list_page(ctx: &PageCtx, items: &[crate::storage::ReadingItem], icons: &Icons) -> String {
+    let l = ctx.lang;
+    let mut rows = String::new();
+    for i in items {
+        let title = if i.title.is_empty() { &i.url } else { &i.title };
+        rows.push_str(&format!(
+            "<div class=\"item\"{click}{style}>{icon}<div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
+             <button class=\"btn ghost\" onclick=\"event.stopPropagation();go('reading-{action}/{id}')\">{label}</button>\
+             <button class=\"x\" title=\"{del}\" onclick=\"event.stopPropagation();go('reading-delete/{id}')\">\u{2715}</button></div>",
+            click = link_attr(&i.url),
+            style = if i.read { " style=\"opacity:.6\"" } else { "" },
+            icon = icon_cell(icons, &i.url, "\u{1F4D6}"),
+            title = escape(&truncate(title, 90)),
+            url = escape(&truncate(&i.url, 100)),
+            time = escape(&i.added_at.chars().take(10).collect::<String>()),
+            action = if i.read { "unread" } else { "read" },
+            label = escape(if i.read { tr(l, "rl.mark_unread") } else { tr(l, "rl.mark_read") }),
+            del = escape(tr(l, "common.delete")),
+            id = i.id
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str(&format!("<div class=\"empty\">{}</div>", escape(tr(l, "readinglist.empty"))));
+    }
+    let body = format!(
+        "{head}<div class=\"bar\" style=\"display:flex\"><span style=\"flex:1\"></span><button class=\"btn danger\" onclick=\"go('reading-clear-read/0')\">{clear}</button></div><div class=\"card\">{rows}</div>",
+        head = ui_shell::heading(tr(l, "readinglist.title"), tr(l, "readinglist.sub")),
+        clear = escape(tr(l, "rl.clear_read")),
+        rows = rows
+    );
+    ui_shell::page(ctx, "readinglist", "Reading list", &body, "")
+}
+
+pub fn notes_page(ctx: &PageCtx, notes: &[crate::storage::Note]) -> String {
+    let l = ctx.lang;
+    let mut rows = String::new();
+    for n in notes {
+        rows.push_str(&format!(
+            "<div class=\"item\"{click}><div class=\"ic\">\u{1F4DD}</div><div class=\"t\"><b style=\"white-space:pre-wrap;font-weight:600\">{text}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
+             <button class=\"x\" title=\"{del}\" onclick=\"event.stopPropagation();go('note-delete/{id}')\">\u{2715}</button></div>",
+            click = link_attr(&n.page),
+            text = escape(&truncate(&n.text, 300)),
+            url = escape(&truncate(&n.page, 100)),
+            time = escape(&n.updated_at.chars().take(10).collect::<String>()),
+            del = escape(tr(l, "common.delete")),
+            id = n.id
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str(&format!("<div class=\"empty\">{}</div>", escape(tr(l, "notes.empty"))));
+    }
+    let body = format!("{head}<div class=\"card\">{rows}</div>", head = ui_shell::heading(tr(l, "notes.title"), tr(l, "notes.sub")), rows = rows);
+    ui_shell::page(ctx, "notes", "Notes", &body, "")
 }
 
 pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
@@ -538,6 +608,26 @@ mod tests {
         assert!(html.contains("1.6.0") && html.contains("130.0.1") && html.contains("AxomaiBrowser"));
         assert!(html.contains("github.com/Samarjitkashyp/axomai-browser"));
         assert!(!html.contains("Search the web"), "no home-page mockup");
+    }
+
+    #[test]
+    fn blocked_page_names_the_site_and_offers_unblock() {
+        let html = site_blocked_page(&ctx(), "ex<b>.com");
+        assert!(html.contains("ex&lt;b&gt;.com") && !html.contains("ex<b>.com"));
+        assert!(html.contains("site-unblock/") && html.contains("go('https-back')"));
+    }
+
+    #[test]
+    fn reading_list_and_notes_pages() {
+        let item = |id, read| crate::storage::ReadingItem { id, url: "https://a.test/x".into(), title: "<T>".into(), added_at: "2026-10-04 10:00:00".into(), read };
+        let html = reading_list_page(&ctx(), &[item(1, false), item(2, true)], &Icons::new());
+        assert!(html.contains("go('reading-read/1')") && html.contains("go('reading-unread/2')") && html.contains("&lt;T&gt;"));
+        assert!(html.contains("go('reading-clear-read/0')"));
+        assert!(reading_list_page(&ctx(), &[], &Icons::new()).contains("Nothing saved yet"));
+        let n = crate::storage::Note { id: 5, page: "https://a.test/p".into(), text: "buy <b>tea</b>".into(), updated_at: "2026-10-04 11:00:00".into() };
+        let html = notes_page(&ctx(), &[n]);
+        assert!(html.contains("buy &lt;b&gt;tea&lt;/b&gt;") && html.contains("go('note-delete/5')"));
+        assert!(notes_page(&ctx(), &[]).contains("No notes yet"));
     }
 
     #[test]

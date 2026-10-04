@@ -1,6 +1,28 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
-## [Unreleased] — Desktop shell: working toolbar & real extensions
+## [`v2.0.0`] — Desktop browser, second generation (2026-10-04)
+### Added in 2.0
+- **Tab search** (Ctrl+Shift+A): a popup that filters every open tab by title or address; Enter switches to it.
+- **Tab groups**: give tabs a name and one of six colours (tab menu > Add to new group); grouped tabs sit together, show a coloured bar and are restored with the session.
+- **Reading list**: save a page to read later (menu > Add to reading list), mark items read / unread, clear the read ones; its own page with site icons.
+- **Notes on pages**: sticky notes (menu > Add note to this page) that return every time you open the same page, are edited in place and are listed on the Notes page. Not saved in private windows.
+- **Dark mode for websites** (Settings, off by default): inverts light pages and leaves images, video and already-dark pages alone.
+- **Hide cookie banners** (on by default): hides the common cookie-consent pop-ups and unlocks scrolling they locked. It hides them, it does not click "reject".
+- **Skip YouTube ads** (on by default): clicks Skip, fast-forwards unskippable ads, hides ad slots and switches next-video autoplay off.
+- **Clean printouts** (on by default): menus, ads, comments, sidebars and iframes are left out when you print or save as PDF.
+- **Better find in page**: every match is highlighted, the current one in orange, with an "n / total" count.
+- **Mute site and Block site**: a muted site stays silent in every tab; a blocked site shows a block page with an Unblock button. Both are managed under Settings > Muted and blocked sites.
+- **35 weather cities** for the home page (all main Assam towns, the other north-eastern capitals and the big Indian cities) instead of 7.
+- Settings keep their scroll position when a site rule is added or removed.
+
+### Fixed in 2.0
+- Document-start page scripts could throw before the page had a root element and silently stop; they now wait for it, and each tweak runs on its own so one failing cannot stop the others.
+
+### Notes for 2.0
+- The YouTube and cookie-banner scripts depend on those sites' current markup and may need updating when it changes; they were tested against local test pages, not against the live sites.
+- The engine crate (`native/rust_engine`) is unchanged and keeps its own 1.6.0 version.
+
+## [`v2.0.0` earlier work] — Desktop shell: working toolbar & real extensions
 ### Fixed
 - Space key works in the address bar, home search and find bar (it arrives as its own key, not a character); held keys repeat.
 - Ctrl+V pastes into the address bar / home search / find bar; Ctrl+A selects the whole address; focusing the bar selects the address so typing replaces it.

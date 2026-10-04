@@ -55,6 +55,8 @@ pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
         "Downloads" => ("axomai://downloads", TabKind::Page("downloads")),
         "Passwords" => ("axomai://passwords", TabKind::Page("passwords")),
         "Permissions" => ("axomai://permissions", TabKind::Page("permissions")),
+        "Reading list" => ("axomai://readinglist", TabKind::Page("readinglist")),
+        "Notes" => ("axomai://notes", TabKind::Page("notes")),
         _ => return None,
     })
 }
@@ -91,7 +93,7 @@ impl App {
         )
     }
 
-    fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
+    pub fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
         PageCtx { theme: self.core.theme, token: &shared.token, lang: &self.settings.language }
     }
 
@@ -124,6 +126,7 @@ impl App {
                         download_dir,
                         version: env!("CARGO_PKG_VERSION"),
                         is_default: crate::launch::is_default(),
+                        site_rules: &self.storage.as_ref().map(|s| s.site_rules()).unwrap_or_default(),
                     },
                 )
             }
@@ -139,6 +142,13 @@ impl App {
                 let icons = self.icon_map(&urls);
                 pages::bookmarks_page(&ctx, &entries, &icons)
             }
+            TabKind::Page("readinglist") => {
+                let items = self.storage.as_ref().map(|s| s.reading_items()).unwrap_or_default();
+                let urls: Vec<&str> = items.iter().map(|i| i.url.as_str()).collect();
+                let icons = self.icon_map(&urls);
+                pages::reading_list_page(&ctx, &items, &icons)
+            }
+            TabKind::Page("notes") => pages::notes_page(&ctx, &self.storage.as_ref().map(|s| s.notes_all()).unwrap_or_default()),
             TabKind::Page("passwords") => {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
                 pages::passwords_page(&ctx, &logins, &never)
@@ -261,6 +271,8 @@ impl App {
             "downloads" => TabKind::Page("downloads"),
             "passwords" => TabKind::Page("passwords"),
             "permissions" => TabKind::Page("permissions"),
+            "readinglist" => TabKind::Page("readinglist"),
+            "notes" => TabKind::Page("notes"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -330,6 +342,37 @@ impl App {
     pub fn command(&mut self, cmd: &str) {
         let shared = self.shared();
         // ---- tabs and windows
+        if cmd == "tab-search" {
+            self.open_tab_search();
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-go/") {
+            self.tab_search_go(id);
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-group-prompt/") {
+            self.open_group_prompt(id);
+            return;
+        }
+        if let Some(rest) = cmd.strip_prefix("tab-group-new/") {
+            let mut p = rest.splitn(3, '/');
+            if let (Some(id), Some(color), Some(name)) = (p.next().and_then(|v| v.parse::<u64>().ok()), p.next().and_then(|v| v.parse::<usize>().ok()), p.next()) {
+                self.tab_group_new(id, color, &url_decode(name));
+            }
+            return;
+        }
+        if let Some(rest) = cmd.strip_prefix("tab-group-add/") {
+            if let Some((id, gid)) = rest.split_once('/') {
+                if let (Ok(id), Ok(gid)) = (id.parse::<u64>(), gid.parse::<u32>()) {
+                    self.tab_group_add(id, gid);
+                }
+            }
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-ungroup/") {
+            self.tab_ungroup(id);
+            return;
+        }
         if let Some(id) = tab_arg(cmd, "page-focus/") {
             self.on_pane_focus(id);
             self.command("page-focus");
@@ -396,6 +439,10 @@ impl App {
             "new-incognito" => spawn_window(true),
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
+            "reading-add" => self.reading_add(),
+            "site-mute" => self.site_mute_current(),
+            "site-block-current" => self.site_block_current(),
+            "note-new" => self.note_new(),
             "page-focus" => {
                 // Giving the web view focus ourselves (tab switch) echoes back as a focus event; only a real click counts.
                 if self.addr_focused && self.addr_focus_at.elapsed() > std::time::Duration::from_millis(600) {
@@ -460,7 +507,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" => {
                 self.open_internal(cmd)
             }
 
@@ -594,6 +641,13 @@ impl App {
             self.bookmarks_changed();
         } else if let Some((action, arg)) = cmd.strip_prefix("perm-").and_then(|r| r.split_once('/')) {
             self.permission_command(action, &url_decode(arg));
+        } else if let Some((action, id)) = cmd.strip_prefix("reading-").and_then(|r| r.rsplit_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
+            self.reading_command(action, id);
+        } else if let Some((action, host)) = ["block", "unblock", "mute", "unmute"].iter().find_map(|a| cmd.strip_prefix(&format!("site-{}/", a)).map(|h| (*a, h))) {
+            let host = url_decode(host);
+            self.site_rule_command(action, &host);
+        } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
+            self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {
             self.news_request(cat);
         } else if let Some(url) = cmd.strip_prefix("qr-for/") {
@@ -675,6 +729,10 @@ impl App {
                     self.core.set_gpc(self.settings.gpc);
                     self.sync_extensions_for_active();
                 }
+                "dark_sites" | "cookie_banners" | "youtube_ads" | "print_clean" => {
+                    self.core.set_tweaks(self.settings.tweaks());
+                    self.sync_extensions_for_active();
+                }
                 "password_manager" => {
                     self.core.set_passwords(self.settings.password_manager);
                     self.sync_extensions_for_active();
@@ -694,7 +752,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }
@@ -702,6 +760,7 @@ impl App {
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
         self.core.set_gpc(true);
+        self.core.set_tweaks(self.settings.tweaks());
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);

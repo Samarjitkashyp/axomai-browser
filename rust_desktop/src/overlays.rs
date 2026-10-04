@@ -144,7 +144,8 @@ finish(card);
     js
 }
 
-/// Find-in-page bar, living inside the page so the web view cannot cover it. Uses `window.find`.
+/// Find-in-page bar, living inside the page so the web view cannot cover it. Every match is highlighted (the current
+/// one in orange) and counted, using the CSS Custom Highlight API.
 pub fn find_popup(theme: &Theme) -> String {
     let mut js = String::from("(function(){");
     js.push_str(&shell(theme, "__ax_pop_find"));
@@ -152,19 +153,32 @@ pub fn find_popup(theme: &Theme) -> String {
         r#"
 var card=document.createElement('div');card.className='bar';
 var inp=document.createElement('input');inp.placeholder='Find in page';inp.spellcheck=false;
-function clearSel(){try{window.getSelection().removeAllRanges()}catch(e){}}
-function run(back){var q=inp.value;if(!q){clearSel();info.textContent='';return}
-  var ok=window.find(q,false,back,true,false,false,false);info.textContent=ok?'':'No matches';info.style.color=ok?'':'#dc2626'}
-function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
 var info=document.createElement('span');info.className='info';
-inp.addEventListener('input',function(){clearSel();run(false)});
+var ranges=[],cur=0,pst=document.getElementById('__ax_find_css');
+if(!pst){pst=document.createElement('style');pst.id='__ax_find_css';pst.textContent='::highlight(ax-find){background:#fde047;color:#000}::highlight(ax-find-cur){background:#f97316;color:#000}';(document.head||document.documentElement).appendChild(pst)}
+function clearAll(){try{CSS.highlights.delete('ax-find');CSS.highlights.delete('ax-find-cur')}catch(e){}ranges=[]}
+function collect(q){ranges=[];if(!q||!document.body)return;var ql=q.toLowerCase();
+  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){var p=n.parentElement;if(!p)return 2;var t=p.tagName;if(t==='SCRIPT'||t==='STYLE'||t==='NOSCRIPT'||t==='TEXTAREA')return 2;return n.nodeValue.trim()===''?2:1}});
+  var n;while((n=w.nextNode())){var s=n.nodeValue.toLowerCase(),i=0;
+    while((i=s.indexOf(ql,i))>=0){var r=document.createRange();r.setStart(n,i);r.setEnd(n,i+ql.length);i+=ql.length;if(r.getClientRects().length)ranges.push(r);if(ranges.length>=3000)return}}}
+function paint(scroll){
+  try{CSS.highlights.set('ax-find',new Highlight(...ranges));
+    if(ranges.length){var h=new Highlight(ranges[cur]);h.priority=1;CSS.highlights.set('ax-find-cur',h)}else{CSS.highlights.delete('ax-find-cur')}}catch(e){}
+  if(!ranges.length){info.textContent=inp.value?'No matches':'';info.style.color=inp.value?'#dc2626':'';return}
+  info.textContent=(cur+1)+' / '+ranges.length;info.style.color='';
+  if(scroll){var el=ranges[cur].startContainer.parentElement;if(el)el.scrollIntoView({block:'center',inline:'nearest'})}}
+function run(){clearAll();collect(inp.value);cur=0;paint(true)}
+function step(d){if(!ranges.length){run();return}cur=(cur+d+ranges.length)%ranges.length;paint(true)}
+function close(){clearAll();if(pst)pst.remove();host.remove()}
+function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
+inp.addEventListener('input',run);
 inp.addEventListener('keydown',function(e){e.stopPropagation();
-  if(e.key==='Enter'){e.preventDefault();run(e.shiftKey)}
-  else if(e.key==='Escape'){e.preventDefault();clearSel();host.remove()}},true);
+  if(e.key==='Enter'){e.preventDefault();step(e.shiftKey?-1:1)}
+  else if(e.key==='Escape'){e.preventDefault();close()}},true);
 card.appendChild(inp);card.appendChild(info);
-btn('↑','Previous (Shift+Enter)',function(){run(true)});
-btn('↓','Next (Enter)',function(){run(false)});
-btn('✕','Close (Esc)',function(){clearSel();host.remove()});
+btn('↑','Previous (Shift+Enter)',function(){step(-1)});
+btn('↓','Next (Enter)',function(){step(1)});
+btn('✕','Close (Esc)',close);
 css('.bar{position:fixed;top:8px;right:24px;display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px 8px;font-size:13px;color:var(--text)}'+
 'input{width:210px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:transparent;color:var(--heading);font:inherit;outline:none}input:focus{border-color:var(--primary)}'+
 '.info{font-size:11px;min-width:58px;color:var(--muted)}button{border:0;background:var(--hover);color:var(--heading);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px}button:hover{background:var(--primary-light)}');
@@ -499,6 +513,106 @@ var h=document.getElementById('__ax_pop_pw');if(h)h.remove();
         serde_json::to_string(user).unwrap_or_else(|_| "\"\"".into()),
         serde_json::to_string(pass).unwrap_or_else(|_| "\"\"".into())
     )
+}
+
+const GROUP_PROMPT_JS: &str = r#"
+var d=__DATA__;var sel=3;
+css('.card input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:transparent;color:var(--heading);font:inherit;outline:none;margin:2px 0 10px}.card input:focus{border-color:var(--primary)}'+
+ '.sw2{display:flex;gap:8px;padding:2px 2px 12px}.sw2 button{width:30px;height:30px;border-radius:50%;border:3px solid transparent;cursor:pointer}.sw2 button.on{border-color:var(--heading)}'+
+ '.acts2{display:flex;gap:8px;justify-content:flex-end}');
+var card=el('div','card');card.style.padding='14px 16px';
+card.appendChild(el('b','','New tab group'));card.firstChild.style.cssText='display:block;margin-bottom:10px;color:var(--heading)';
+var inp=document.createElement('input');inp.placeholder='Group name (optional)';inp.maxLength=24;card.appendChild(inp);
+var sw=el('div','sw2');var btns=[];
+d.colors.forEach(function(c,i){var b=document.createElement('button');b.style.background='rgb('+c[1]+')';b.title=c[0];b.onclick=function(){sel=i;paint()};sw.appendChild(b);btns.push(b)});
+function paint(){btns.forEach(function(b,i){b.className=i===sel?'on':''})}paint();card.appendChild(sw);
+var acts=el('div','acts2');var cancel=el('button','btn ghost','Cancel');cancel.onclick=function(){host.remove()};var ok=el('button','btn','Create group');
+function create(){var n=inp.value.trim()||d.colors[sel][0];host.remove();go('tab-group-new/'+d.tab+'/'+sel+'/'+encodeURIComponent(n))}
+ok.onclick=create;acts.appendChild(cancel);acts.appendChild(ok);card.appendChild(acts);
+inp.addEventListener('keydown',function(e){e.stopPropagation();if(e.key==='Enter'){e.preventDefault();create()}else if(e.key==='Escape'){host.remove()}},true);
+finish(card);inp.focus();
+"#;
+
+const TAB_SEARCH_JS: &str = r#"
+var d=__DATA__;var sel=0,shown=[];
+css('.card{padding:10px}.card input{width:100%;border:1px solid var(--border);border-radius:12px;padding:11px 14px;background:transparent;color:var(--heading);font:inherit;font-size:14px;outline:none;margin-bottom:8px}.card input:focus{border-color:var(--primary)}'+
+ '.row.sel{background:var(--hover)}.row .em{background:var(--primary-light);color:var(--primary);border-radius:8px;font-weight:800;font-size:13px;width:28px;height:28px;display:flex;align-items:center;justify-content:center}'+
+ '.tag{font-size:10.5px;font-weight:700;border-radius:99px;padding:2px 8px;color:#fff;margin-left:6px}.lst{max-height:360px;overflow:auto}');
+var card=el('div','card');var inp=document.createElement('input');inp.placeholder='Search your open tabs';card.appendChild(inp);
+var list=el('div','lst');card.appendChild(list);
+function pick(r){host.remove();go('tab-go/'+r[0])}
+function render(){var q=inp.value.toLowerCase().trim();list.textContent='';
+ shown=d.filter(function(r){return (r[1]+' '+r[2]+' '+r[3]).toLowerCase().indexOf(q)>=0});if(sel>=shown.length)sel=0;
+ shown.forEach(function(r,i){var b=el('button','row'+(i===sel?' sel':''));b.appendChild(el('span','em',(r[1]||r[2]||'?').charAt(0).toUpperCase()));
+  var tx=el('span','tx');var t=el('b','',r[1]||r[2]);if(r[5])t.textContent+='  \u00b7 current';tx.appendChild(t);tx.appendChild(el('i','',r[2]));b.appendChild(tx);
+  if(r[3]){var g=el('span','tag',r[3]);g.style.background='rgb('+r[4]+')';b.appendChild(g)}
+  b.onclick=function(){pick(r)};list.appendChild(b)});
+ if(!shown.length)list.appendChild(el('div','sub','No tab matches'))}
+inp.addEventListener('input',function(){sel=0;render()});
+inp.addEventListener('keydown',function(e){e.stopPropagation();
+ if(e.key==='ArrowDown'){e.preventDefault();sel=Math.min(sel+1,shown.length-1);render()}
+ else if(e.key==='ArrowUp'){e.preventDefault();sel=Math.max(sel-1,0);render()}
+ else if(e.key==='Enter'){e.preventDefault();if(shown[sel])pick(shown[sel])}
+ else if(e.key==='Escape'){host.remove()}},true);
+render();finish(card);inp.focus();
+"#;
+
+/// Asks for a tab group's name and colour; creating it posts `tab-group-new/<tab>/<colour>/<name>`.
+pub fn group_prompt(theme: &Theme, token: &str, tab_id: u64) -> String {
+    let colors: Vec<_> = crate::tabgroups::GROUP_COLORS.iter().map(|(n, _, c)| json!([n, format!("{},{},{}", c[0], c[1], c[2])])).collect();
+    let data = json!({"tab": tab_id, "colors": colors});
+    let mut js = open(theme, token, "__ax_pop_group");
+    js.push_str(&css_wrap(".card{left:calc(50% - 150px);top:70px}", 300.0));
+    js.push_str(&GROUP_PROMPT_JS.replace("__DATA__", &data.to_string()));
+    js.push_str("})();");
+    js
+}
+
+/// Search box over the list of open tabs (Ctrl+Shift+A); choosing one posts `tab-go/<id>`.
+pub fn tab_search_popup(theme: &Theme, token: &str, rows: &[(u64, String, String, String, [u8; 3], bool)]) -> String {
+    let data: Vec<_> = rows.iter().map(|(id, t, u, g, c, a)| json!([id, truncate(t, 80), truncate(u, 90), g, format!("{},{},{}", c[0], c[1], c[2]), a])).collect();
+    let mut js = open(theme, token, "__ax_pop_tabsearch");
+    js.push_str(&css_wrap(".card{left:calc(50% - 270px);top:70px}", 540.0));
+    js.push_str(&TAB_SEARCH_JS.replace("__DATA__", &serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())));
+    js.push_str("})();");
+    js
+}
+
+/// `css(...)` call for a popup placed with its own `.card` rule.
+fn css_wrap(extra: &str, width: f32) -> String {
+    format!("\ncss({});\n", css_literal(extra, 6.0, width))
+}
+
+const NOTES_JS: &str = r#"
+(function(d){
+var old=document.getElementById('__ax_notes');if(old)old.remove();
+var host=document.createElement('div');host.id='__ax_notes';host.style.cssText='all:initial;position:fixed;top:12px;right:12px;z-index:2147483646';
+var root=host.attachShadow({mode:'closed'});
+var st=document.createElement('style');
+st.textContent='*{box-sizing:border-box;font-family:"Segoe UI",system-ui,sans-serif}.note{width:250px;background:#fef08a;color:#422006;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);margin-bottom:10px;overflow:hidden}'+
+ '.bar{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fde047;font-size:12px;font-weight:700}.bar button{border:0;background:transparent;font-size:15px;cursor:pointer;color:#713f12}'+
+ 'textarea{display:block;width:100%;height:110px;border:0;outline:0;resize:vertical;background:transparent;padding:8px 10px;font-size:13px;line-height:1.4;color:#422006}';
+root.appendChild(st);
+function post(o){o.ax='note';try{window.chrome.webview.postMessage(o)}catch(e){}}
+var focusTa=null;
+d.notes.forEach(function(n){
+ var card=document.createElement('div');card.className='note';
+ var bar=document.createElement('div');bar.className='bar';var t=document.createElement('span');t.textContent='\ud83d\udcdd Note';bar.appendChild(t);
+ var x=document.createElement('button');x.textContent='\u2715';x.title='Delete note';bar.appendChild(x);card.appendChild(bar);
+ var ta=document.createElement('textarea');ta.maxLength=2000;ta.value=n.t;ta.placeholder='Type your note\u2026';card.appendChild(ta);
+ var timer=null;ta.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(function(){post({k:'save',id:n.id,t:ta.value})},500)});
+ ta.addEventListener('keydown',function(e){e.stopPropagation()},true);ta.addEventListener('keyup',function(e){e.stopPropagation()},true);
+ x.onclick=function(){post({k:'del',id:n.id});card.remove();if(!root.querySelector('.note'))host.remove()};
+ root.appendChild(card);if(n.id===d.focus)focusTa=ta;
+});
+document.documentElement.appendChild(host);if(focusTa)focusTa.focus();
+})(__DATA__);
+"#;
+
+/// Sticky notes of a page, shown at its top-right corner. `focus` is the id of a note that was just created.
+pub fn notes_overlay(_theme: &Theme, notes: &[(i64, String)], focus: i64) -> String {
+    let data = json!({"notes": notes.iter().map(|(id, t)| json!({"id": id, "t": t})).collect::<Vec<_>>(), "focus": focus});
+    NOTES_JS.replace("__DATA__", &data.to_string())
 }
 
 fn truncate(s: &str, n: usize) -> String {
