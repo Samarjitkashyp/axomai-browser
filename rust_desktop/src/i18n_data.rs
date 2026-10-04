@@ -109,6 +109,12 @@ pub const EN_MORE: Table = &[
     ("siterules.unblock", "Unblock"),
     ("menu.site-mute", "Mute / unmute this site"),
     ("menu.site-block-current", "Block this site"),
+    ("settings.shortcuts", "Search shortcuts"),
+    ("shortcuts.builtin", "Built in"),
+    ("shortcuts.remove", "Remove"),
+    ("shortcuts.add", "Add a shortcut"),
+    ("shortcuts.add.desc", "Type @keyword then your search in the address bar. Use %s where the search words go."),
+    ("shortcuts.save", "Save"),
 ];
 
 pub const HI: Table = &[
@@ -283,6 +289,12 @@ pub const HI: Table = &[
     ("siterules.unblock", "अनब्लॉक"),
     ("menu.site-mute", "इस साइट को म्यूट / अनम्यूट करें"),
     ("menu.site-block-current", "इस साइट को ब्लॉक करें"),
+    ("settings.shortcuts", "खोज शॉर्टकट"),
+    ("shortcuts.builtin", "पहले से मौजूद"),
+    ("shortcuts.remove", "हटाएँ"),
+    ("shortcuts.add", "शॉर्टकट जोड़ें"),
+    ("shortcuts.add.desc", "एड्रेस बार में @कीवर्ड और फिर अपनी खोज लिखें। जहाँ खोज शब्द जाएँ वहाँ %s लिखें।"),
+    ("shortcuts.save", "सहेजें"),
 ];
 
 pub const BN: Table = &[
@@ -457,6 +469,12 @@ pub const BN: Table = &[
     ("siterules.unblock", "আনব্লক"),
     ("menu.site-mute", "এই সাইট মিউট / আনমিউট করুন"),
     ("menu.site-block-current", "এই সাইট ব্লক করুন"),
+    ("settings.shortcuts", "অনুসন্ধান শর্টকাট"),
+    ("shortcuts.builtin", "অন্তর্নির্মিত"),
+    ("shortcuts.remove", "সরান"),
+    ("shortcuts.add", "শর্টকাট যোগ করুন"),
+    ("shortcuts.add.desc", "অ্যাড্রেস বারে @কিওয়ার্ড তারপর আপনার অনুসন্ধান লিখুন। যেখানে অনুসন্ধানের শব্দ যাবে সেখানে %s দিন।"),
+    ("shortcuts.save", "সংরক্ষণ"),
 ];
 
 pub const AS: Table = &[
@@ -631,4 +649,10 @@ pub const AS: Table = &[
     ("siterules.unblock", "অনব্লক"),
     ("menu.site-mute", "এই ছাইট মিউট / অনমিউট কৰক"),
     ("menu.site-block-current", "এই ছাইট ব্লক কৰক"),
+    ("settings.shortcuts", "সন্ধান চৰ্টকাট"),
+    ("shortcuts.builtin", "আগৰে পৰা থকা"),
+    ("shortcuts.remove", "আঁতৰাওক"),
+    ("shortcuts.add", "চৰ্টকাট যোগ কৰক"),
+    ("shortcuts.add.desc", "ঠিকনা বাৰত @কীৱৰ্ড তাৰ পিছত আপোনাৰ সন্ধান লিখক। সন্ধানৰ শব্দ য'ত যাব তাত %s দিয়ক।"),
+    ("shortcuts.save", "সংৰক্ষণ"),
 ];

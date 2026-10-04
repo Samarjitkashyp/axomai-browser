@@ -646,6 +646,12 @@ impl App {
         } else if let Some((action, host)) = ["block", "unblock", "mute", "unmute"].iter().find_map(|a| cmd.strip_prefix(&format!("site-{}/", a)).map(|h| (*a, h))) {
             let host = url_decode(host);
             self.site_rule_command(action, &host);
+        } else if let Some((kw, tpl)) = cmd.strip_prefix("shortcut-add/").and_then(|r| r.split_once('/')) {
+            let (kw, tpl) = (url_decode(kw), url_decode(tpl));
+            self.shortcut_add(&kw, &tpl);
+        } else if let Some(kw) = cmd.strip_prefix("shortcut-del/") {
+            let kw = url_decode(kw);
+            self.shortcut_remove(&kw);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {
@@ -752,7 +758,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }
@@ -760,6 +766,7 @@ impl App {
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
         self.core.set_gpc(true);
+        self.settings.shortcuts.clear();
         self.core.set_tweaks(self.settings.tweaks());
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;

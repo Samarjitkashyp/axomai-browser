@@ -398,6 +398,11 @@ impl App {
         self.hide_suggestions();
         self.addr_focused = false;
         self.addr_selected = false;
+        if let Some((url, _)) = crate::shortcuts::expand(&text, &self.settings.shortcuts) {
+            self.navigate_active(&url);
+            self.redraw = true;
+            return;
+        }
         let engine = self.search_engine;
         match omnibox::resolve(&text, |q| engine.search_url(q)) {
             Some(omnibox::Target::Navigate(u)) => self.navigate_active(&u),

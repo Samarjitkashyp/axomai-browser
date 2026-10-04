@@ -114,6 +114,8 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Address-bar search shortcuts you added: (`@keyword`, address with `%s`).
+    pub shortcuts: Vec<(String, String)>,
     /// Dark mode for websites.
     pub dark_sites: bool,
     /// Hide cookie-consent banners.
@@ -141,6 +143,7 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            shortcuts: Vec::new(),
             dark_sites: false,
             cookie_banners: true,
             youtube_ads: true,
@@ -199,6 +202,9 @@ impl Settings {
         }
         if let Some(v) = get("weather_city").filter(|v| CITIES.iter().any(|(k, _)| k == v)) {
             s.weather_city = v;
+        }
+        if let Some(v) = get("shortcuts") {
+            s.shortcuts = crate::shortcuts::parse_list(&v);
         }
         if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
             s.password_manager = v;
