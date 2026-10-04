@@ -115,6 +115,15 @@ pub const EN_MORE: Table = &[
     ("shortcuts.add", "Add a shortcut"),
     ("shortcuts.add.desc", "Type @keyword then your search in the address bar. Use %s where the search words go."),
     ("shortcuts.save", "Save"),
+    ("nav.sessions", "Sessions"),
+    ("sessions.title", "Sessions"),
+    ("sessions.sub", "Sets of tabs you saved under a name"),
+    ("sessions.empty", "No saved sessions yet. Use the menu → Save tabs as a session."),
+    ("sessions.save", "Save open tabs"),
+    ("sessions.open", "Open all"),
+    ("sessions.tabs", "tabs"),
+    ("menu.sessions", "Sessions"),
+    ("menu.session-prompt", "Save tabs as a session…"),
 ];
 
 pub const HI: Table = &[
@@ -295,6 +304,15 @@ pub const HI: Table = &[
     ("shortcuts.add", "शॉर्टकट जोड़ें"),
     ("shortcuts.add.desc", "एड्रेस बार में @कीवर्ड और फिर अपनी खोज लिखें। जहाँ खोज शब्द जाएँ वहाँ %s लिखें।"),
     ("shortcuts.save", "सहेजें"),
+    ("nav.sessions", "सत्र"),
+    ("sessions.title", "सत्र"),
+    ("sessions.sub", "नाम देकर सहेजे गए टैब के समूह"),
+    ("sessions.empty", "अभी कोई सहेजा सत्र नहीं है। मेनू → टैब को सत्र के रूप में सहेजें का उपयोग करें।"),
+    ("sessions.save", "खुले टैब सहेजें"),
+    ("sessions.open", "सभी खोलें"),
+    ("sessions.tabs", "टैब"),
+    ("menu.sessions", "सत्र"),
+    ("menu.session-prompt", "टैब को सत्र के रूप में सहेजें…"),
 ];
 
 pub const BN: Table = &[
@@ -475,6 +493,15 @@ pub const BN: Table = &[
     ("shortcuts.add", "শর্টকাট যোগ করুন"),
     ("shortcuts.add.desc", "অ্যাড্রেস বারে @কিওয়ার্ড তারপর আপনার অনুসন্ধান লিখুন। যেখানে অনুসন্ধানের শব্দ যাবে সেখানে %s দিন।"),
     ("shortcuts.save", "সংরক্ষণ"),
+    ("nav.sessions", "সেশন"),
+    ("sessions.title", "সেশন"),
+    ("sessions.sub", "নাম দিয়ে সংরক্ষিত ট্যাবের সেট"),
+    ("sessions.empty", "এখনও কোনো সংরক্ষিত সেশন নেই। মেনু → ট্যাব সেশন হিসেবে সংরক্ষণ করুন ব্যবহার করুন।"),
+    ("sessions.save", "খোলা ট্যাব সংরক্ষণ করুন"),
+    ("sessions.open", "সব খুলুন"),
+    ("sessions.tabs", "ট্যাব"),
+    ("menu.sessions", "সেশন"),
+    ("menu.session-prompt", "ট্যাব সেশন হিসেবে সংরক্ষণ করুন…"),
 ];
 
 pub const AS: Table = &[
@@ -655,4 +682,13 @@ pub const AS: Table = &[
     ("shortcuts.add", "চৰ্টকাট যোগ কৰক"),
     ("shortcuts.add.desc", "ঠিকনা বাৰত @কীৱৰ্ড তাৰ পিছত আপোনাৰ সন্ধান লিখক। সন্ধানৰ শব্দ য'ত যাব তাত %s দিয়ক।"),
     ("shortcuts.save", "সংৰক্ষণ"),
+    ("nav.sessions", "ছেচন"),
+    ("sessions.title", "ছেচন"),
+    ("sessions.sub", "নাম দি সংৰক্ষণ কৰা টেবৰ গোট"),
+    ("sessions.empty", "এতিয়ালৈকে কোনো সংৰক্ষিত ছেচন নাই। মেনু → টেব ছেচন হিচাপে সংৰক্ষণ কৰক ব্যৱহাৰ কৰক।"),
+    ("sessions.save", "খোলা টেব সংৰক্ষণ কৰক"),
+    ("sessions.open", "সকলো খোলক"),
+    ("sessions.tabs", "টেব"),
+    ("menu.sessions", "ছেচন"),
+    ("menu.session-prompt", "টেব ছেচন হিচাপে সংৰক্ষণ কৰক…"),
 ];

@@ -39,6 +39,14 @@ pub struct ReadingItem {
 }
 
 #[derive(Debug, Clone)]
+pub struct SavedSession {
+    pub id: i64,
+    pub name: String,
+    pub urls: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct Note {
     pub id: i64,
     pub page: String,
@@ -111,6 +119,12 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                urls TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
             CREATE TABLE IF NOT EXISTS site_rules (
                 host TEXT PRIMARY KEY,
                 muted INTEGER NOT NULL DEFAULT 0,
@@ -441,6 +455,35 @@ impl BrowserStorage {
         stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
     }
 
+    /// Save (or replace) a named set of addresses.
+    pub fn session_save(&self, name: &str, urls: &[String]) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO sessions (name, urls) VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET urls = excluded.urls, created_at = datetime('now')",
+            params![name, urls.join("\n")],
+        )?;
+        Ok(())
+    }
+
+    fn session_from_row(r: &rusqlite::Row) -> rusqlite::Result<SavedSession> {
+        let urls: String = r.get(2)?;
+        Ok(SavedSession { id: r.get(0)?, name: r.get(1)?, urls: urls.lines().filter(|l| !l.is_empty()).map(String::from).collect(), created_at: r.get(3)? })
+    }
+
+    /// Newest first.
+    pub fn sessions(&self) -> Vec<SavedSession> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, name, urls, datetime(created_at, 'localtime') FROM sessions ORDER BY created_at DESC, id DESC") else { return Vec::new() };
+        stmt.query_map([], Self::session_from_row).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn session_get(&self, id: i64) -> Option<SavedSession> {
+        self.conn.query_row("SELECT id, name, urls, datetime(created_at, 'localtime') FROM sessions WHERE id = ?1", params![id], Self::session_from_row).ok()
+    }
+
+    pub fn session_delete(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn note_add(&self, page: &str, text: &str) -> Result<i64, rusqlite::Error> {
         self.conn.execute("INSERT INTO notes (page, text) VALUES (?1, ?2)", params![page, text])?;
         Ok(self.conn.last_insert_rowid())
@@ -754,6 +797,22 @@ mod tests {
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].group, "2|Work");
         assert_eq!(back[1].group, "");
+    }
+
+    #[test]
+    fn sessions_are_saved_by_name_and_replaced_on_reuse() {
+        let st = temp_storage();
+        st.session_save("Work", &["https://a.test".to_string(), "https://b.test".to_string()]).unwrap();
+        st.session_save("Work", &["https://c.test".to_string()]).unwrap();
+        st.session_save("Fun", &["https://d.test".to_string()]).unwrap();
+        let all = st.sessions();
+        assert_eq!(all.len(), 2);
+        let work = all.iter().find(|s| s.name == "Work").unwrap();
+        assert_eq!(work.urls, vec!["https://c.test".to_string()]);
+        assert_eq!(st.session_get(work.id).unwrap().name, "Work");
+        st.session_delete(work.id).unwrap();
+        assert!(st.session_get(work.id).is_none());
+        assert_eq!(st.sessions().len(), 1);
     }
 
     #[test]

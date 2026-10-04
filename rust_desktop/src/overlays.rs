@@ -568,6 +568,29 @@ pub fn group_prompt(theme: &Theme, token: &str, tab_id: u64) -> String {
     js
 }
 
+const NAME_PROMPT_JS: &str = r#"
+var d=__DATA__;
+css('.card input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:transparent;color:var(--heading);font:inherit;outline:none;margin:2px 0 10px}.card input:focus{border-color:var(--primary)}.acts2{display:flex;gap:8px;justify-content:flex-end}');
+var card=el('div','card');card.style.padding='14px 16px';
+var t=el('b','',d.title);t.style.cssText='display:block;margin-bottom:10px;color:var(--heading)';card.appendChild(t);
+var inp=document.createElement('input');inp.placeholder=d.placeholder;inp.maxLength=40;card.appendChild(inp);
+var acts=el('div','acts2');var cancel=el('button','btn ghost','Cancel');cancel.onclick=function(){host.remove()};var ok=el('button','btn',d.ok);
+function go2(){var n=inp.value.trim();if(!n)return;host.remove();go(d.cmd+'/'+encodeURIComponent(n))}
+ok.onclick=go2;acts.appendChild(cancel);acts.appendChild(ok);card.appendChild(acts);
+inp.addEventListener('keydown',function(e){e.stopPropagation();if(e.key==='Enter'){e.preventDefault();go2()}else if(e.key==='Escape'){host.remove()}},true);
+finish(card);inp.focus();
+"#;
+
+/// Asks for one name; confirming posts `<cmd>/<name>`.
+pub fn name_prompt(theme: &Theme, token: &str, title: &str, placeholder: &str, ok: &str, cmd: &str) -> String {
+    let data = json!({"title": title, "placeholder": placeholder, "ok": ok, "cmd": cmd});
+    let mut js = open(theme, token, "__ax_pop_name");
+    js.push_str(&css_wrap(".card{left:calc(50% - 150px);top:70px}", 300.0));
+    js.push_str(&NAME_PROMPT_JS.replace("__DATA__", &data.to_string()));
+    js.push_str("})();");
+    js
+}
+
 /// Search box over the list of open tabs (Ctrl+Shift+A); choosing one posts `tab-go/<id>`.
 pub fn tab_search_popup(theme: &Theme, token: &str, rows: &[(u64, String, String, String, [u8; 3], bool)]) -> String {
     let data: Vec<_> = rows.iter().map(|(id, t, u, g, c, a)| json!([id, truncate(t, 80), truncate(u, 90), g, format!("{},{},{}", c[0], c[1], c[2]), a])).collect();

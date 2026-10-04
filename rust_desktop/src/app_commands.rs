@@ -57,6 +57,7 @@ pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
         "Permissions" => ("axomai://permissions", TabKind::Page("permissions")),
         "Reading list" => ("axomai://readinglist", TabKind::Page("readinglist")),
         "Notes" => ("axomai://notes", TabKind::Page("notes")),
+        "Sessions" => ("axomai://sessions", TabKind::Page("sessions")),
         _ => return None,
     })
 }
@@ -148,6 +149,7 @@ impl App {
                 let icons = self.icon_map(&urls);
                 pages::reading_list_page(&ctx, &items, &icons)
             }
+            TabKind::Page("sessions") => pages::sessions_page(&ctx, &self.storage.as_ref().map(|s| s.sessions()).unwrap_or_default()),
             TabKind::Page("notes") => pages::notes_page(&ctx, &self.storage.as_ref().map(|s| s.notes_all()).unwrap_or_default()),
             TabKind::Page("passwords") => {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
@@ -273,6 +275,7 @@ impl App {
             "permissions" => TabKind::Page("permissions"),
             "readinglist" => TabKind::Page("readinglist"),
             "notes" => TabKind::Page("notes"),
+            "sessions" => TabKind::Page("sessions"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -440,6 +443,7 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "session-prompt" => self.open_session_prompt(),
             "site-mute" => self.site_mute_current(),
             "site-block-current" => self.site_block_current(),
             "note-new" => self.note_new(),
@@ -507,7 +511,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" | "sessions" => {
                 self.open_internal(cmd)
             }
 
@@ -652,6 +656,13 @@ impl App {
         } else if let Some(kw) = cmd.strip_prefix("shortcut-del/") {
             let kw = url_decode(kw);
             self.shortcut_remove(&kw);
+        } else if let Some(name) = cmd.strip_prefix("session-save/") {
+            let name = url_decode(name);
+            self.session_save(&name);
+        } else if let Some(id) = cmd.strip_prefix("session-open/").and_then(|v| v.parse::<i64>().ok()) {
+            self.session_open(id);
+        } else if let Some(id) = cmd.strip_prefix("session-delete/").and_then(|v| v.parse::<i64>().ok()) {
+            self.session_delete(id);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {
@@ -668,8 +679,9 @@ impl App {
         } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
             self.open_suggestion(row);
         } else if let Some(q) = cmd.strip_prefix("search/") {
-            let url = format!("{}{}", self.search_engine.js_search_template(), q);
-            self.navigate_active(&url);
+            // The home page search box: same rules as the address bar (shortcuts like @yt, localhost, ...).
+            self.addr_text = url_decode(q);
+            self.submit_address();
         } else if let Some(id) = cmd.strip_prefix("remove-bookmark/").and_then(|v| v.parse::<i64>().ok()) {
             if let Some(s) = &self.storage {
                 let _ = s.remove_bookmark(id);
