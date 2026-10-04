@@ -103,7 +103,7 @@ impl BrowserStorage {
 
     pub fn get_history(&self, limit: usize) -> Result<Vec<HistoryEntry>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, url, title, visit_time FROM history ORDER BY visit_time DESC LIMIT ?1"
+            "SELECT id, url, title, datetime(visit_time, 'localtime') FROM history ORDER BY id DESC LIMIT ?1"
         )?;
         let entries = stmt.query_map(params![limit as i64], |row| {
             Ok(HistoryEntry {
@@ -119,9 +119,9 @@ impl BrowserStorage {
     pub fn search_history(&self, query: &str, limit: usize) -> Result<Vec<HistoryEntry>, rusqlite::Error> {
         let pattern = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
-            "SELECT id, url, title, visit_time FROM history
+            "SELECT id, url, title, datetime(visit_time, 'localtime') FROM history
              WHERE url LIKE ?1 OR title LIKE ?1
-             ORDER BY visit_time DESC LIMIT ?2"
+             ORDER BY id DESC LIMIT ?2"
         )?;
         let entries = stmt.query_map(params![pattern, limit as i64], |row| {
             Ok(HistoryEntry {
@@ -149,7 +149,7 @@ impl BrowserStorage {
 
     pub fn get_bookmarks(&self) -> Result<Vec<Bookmark>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, url, title, folder, created_at FROM bookmarks ORDER BY created_at DESC"
+            "SELECT id, url, title, folder, created_at FROM bookmarks ORDER BY id DESC"
         )?;
         let entries = stmt.query_map([], |row| {
             Ok(Bookmark {
@@ -161,6 +161,31 @@ impl BrowserStorage {
             })
         })?.collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
+    }
+
+    pub fn update_bookmark(&self, id: i64, title: &str, folder: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE bookmarks SET title = ?1, folder = ?2 WHERE id = ?3", params![title, folder, id])?;
+        Ok(())
+    }
+
+    /// Delete a folder: its bookmarks move to `fallback`.
+    pub fn delete_folder(&self, folder: &str, fallback: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE bookmarks SET folder = ?2 WHERE folder = ?1", params![folder, fallback])?;
+        Ok(())
+    }
+
+    /// Add imported bookmarks, skipping addresses that are already saved. Returns how many were new.
+    pub fn import_bookmarks(&self, items: &[(String, String, String)]) -> usize {
+        let mut added = 0;
+        for (folder, title, url) in items {
+            if self.is_bookmarked(url).unwrap_or(true) {
+                continue;
+            }
+            if self.add_bookmark(url, title, folder).is_ok() {
+                added += 1;
+            }
+        }
+        added
     }
 
     pub fn remove_bookmark(&self, id: i64) -> Result<(), rusqlite::Error> {
@@ -388,6 +413,22 @@ mod tests {
         st.clear_downloads_since(None).unwrap();
         assert_eq!(st.count("history"), 0);
         assert_eq!(st.count("downloads"), 0);
+    }
+
+    #[test]
+    fn bookmark_editing_and_import() {
+        let st = temp_storage();
+        let id = st.add_bookmark("https://a.test", "A", "Unsorted").unwrap();
+        st.update_bookmark(id, "Alpha", "Work").unwrap();
+        let b = st.get_bookmarks().unwrap();
+        assert_eq!((b[0].title.as_str(), b[0].folder.as_str()), ("Alpha", "Work"));
+        let items = vec![
+            ("Imp".to_string(), "dup".to_string(), "https://a.test".to_string()),
+            ("Imp".to_string(), "B".to_string(), "https://b.test".to_string()),
+        ];
+        assert_eq!(st.import_bookmarks(&items), 1, "existing addresses are skipped");
+        st.delete_folder("Imp", "Unsorted").unwrap();
+        assert!(st.get_bookmarks().unwrap().iter().all(|b| b.folder != "Imp"));
     }
 
     #[test]

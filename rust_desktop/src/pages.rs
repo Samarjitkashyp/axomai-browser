@@ -46,54 +46,122 @@ var q=document.getElementById('q');
 if(q)q.addEventListener('input',function(){var v=q.value.toLowerCase();document.querySelectorAll('.item').forEach(function(e){e.style.display=e.textContent.toLowerCase().indexOf(v)>=0?'':'none'})});
 "#;
 
+const HISTORY_JS: &str = r#"
+var q=document.getElementById('q');
+function filt(){var v=q.value.toLowerCase();document.querySelectorAll('.fgroup').forEach(function(g){var any=false;g.querySelectorAll('.item').forEach(function(e){var ok=e.textContent.toLowerCase().indexOf(v)>=0;e.style.display=ok?'':'none';if(ok)any=true});g.style.display=any?'':'none'})}
+if(q)q.addEventListener('input',filt);
+function delrange(){var r=document.getElementById('range').value;var label=document.getElementById('range').selectedOptions[0].textContent;if(confirm('Delete browsing history for: '+label+'?'))go('clear-data-range/'+r+'/h')}
+"#;
+
 pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
-    let mut rows = String::new();
+    // Entries arrive newest first with local "YYYY-MM-DD HH:MM:SS" times; one group per day.
+    let mut groups = String::new();
+    let mut day = String::new();
+    let mut open = false;
     for e in entries {
+        let d: String = e.visit_time.chars().take(10).collect();
+        if d != day || !open {
+            if open {
+                groups.push_str("</div></div>");
+            }
+            groups.push_str(&format!("<div class=\"fgroup\"><div class=\"fh\"><b>{}</b></div><div class=\"card\">", escape(&d)));
+            day = d;
+            open = true;
+        }
         let title = if e.title.is_empty() { &e.url } else { &e.title };
-        rows.push_str(&format!(
+        let time: String = e.visit_time.chars().skip(11).take(5).collect();
+        groups.push_str(&format!(
             "<div class=\"item\"{click}><div class=\"ic\">\u{1F552}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
              <button class=\"x\" title=\"Remove from history\" onclick=\"event.stopPropagation();go('history-delete/{id}')\">\u{2715}</button></div>",
             click = link_attr(&e.url),
             title = escape(&truncate(title, 90)),
             url = escape(&truncate(&e.url, 100)),
-            time = escape(&e.visit_time),
+            time = escape(&time),
             id = e.id
         ));
     }
-    if rows.is_empty() {
-        rows.push_str("<div class=\"empty\">No browsing history yet.</div>");
+    if open {
+        groups.push_str("</div></div>");
+    } else {
+        groups.push_str("<div class=\"card\"><div class=\"empty\">No browsing history yet.</div></div>");
     }
     let body = format!(
-        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search history\" style=\"flex:1\"><button class=\"btn danger\" onclick=\"if(confirm('Clear all browsing history?'))go('clear-history')\">Clear all</button></div><div class=\"card\">{rows}</div>",
-        head = ui_shell::heading("History", "Pages you have visited"),
-        rows = rows
+        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search history\" style=\"flex:1\">\
+         <select id=\"range\"><option value=\"hour\">Last hour</option><option value=\"day\">Last 24 hours</option><option value=\"week\">Last 7 days</option><option value=\"month\">Last 4 weeks</option><option value=\"all\" selected>All time</option></select>\
+         <button class=\"btn danger\" onclick=\"delrange()\">Delete</button></div>\
+         <style>.fh{{display:flex;align-items:center;gap:10px;margin:18px 4px 8px;color:var(--heading)}}\
+         select{{border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:var(--surface);color:var(--text);font:inherit}}</style>{groups}",
+        head = ui_shell::heading("History", "Pages you have visited (the latest 1000)"),
+        groups = groups
     );
-    ui_shell::page(ctx, "history", "History", &body, FILTER_JS)
+    ui_shell::page(ctx, "history", "History", &body, HISTORY_JS)
 }
 
+const BOOKMARKS_JS: &str = r#"
+var q=document.getElementById('q');
+function filt(){var v=q.value.toLowerCase();document.querySelectorAll('.fgroup').forEach(function(g){var any=false;g.querySelectorAll('.item').forEach(function(e){var ok=e.textContent.toLowerCase().indexOf(v)>=0;e.style.display=ok?'':'none';if(ok)any=true});g.style.display=any?'':'none'})}
+if(q)q.addEventListener('input',filt);
+function mv(id,sel){var v=sel.value;if(v==='\u0001new'){v=prompt('New folder name');if(!v||!v.trim()){sel.value=sel.dataset.cur;return}}go('bm-move/'+id+'/'+encodeURIComponent(v.trim()))}
+function rn(id,t){var v=prompt('Bookmark title',t);if(v!==null&&v.trim())go('bm-rename/'+id+'/'+encodeURIComponent(v.trim()))}
+function df(el){if(confirm('Delete this folder? Its bookmarks move to Unsorted.'))go('bm-folder-delete/'+encodeURIComponent(el.dataset.folder))}
+"#;
+
 pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
-    let mut rows = String::new();
+    // Folders in order of first appearance, "Bookmarks bar" and "Unsorted" always first.
+    let mut folders: Vec<String> = vec![crate::bookmarks_io::BAR_FOLDER.to_string(), crate::bookmarks_io::DEFAULT_FOLDER.to_string()];
     for b in bookmarks {
-        let title = if b.title.is_empty() { &b.url } else { &b.title };
-        rows.push_str(&format!(
-            "<div class=\"item\"{click}><div class=\"ic\">\u{2B50}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{folder}</div>\
-             <button class=\"x\" title=\"Remove bookmark\" onclick=\"event.stopPropagation();go('remove-bookmark/{id}')\">\u{2715}</button></div>",
-            click = link_attr(&b.url),
-            title = escape(&truncate(title, 90)),
-            url = escape(&truncate(&b.url, 100)),
-            folder = escape(&b.folder),
-            id = b.id
+        if !folders.contains(&b.folder) {
+            folders.push(b.folder.clone());
+        }
+    }
+    let option = |current: &str, f: &str| format!("<option value=\"{v}\"{sel}>{v}</option>", v = escape(f), sel = if f == current { " selected" } else { "" });
+    let mut groups = String::new();
+    for f in &folders {
+        let members: Vec<&Bookmark> = bookmarks.iter().filter(|b| &b.folder == f).collect();
+        if members.is_empty() {
+            continue;
+        }
+        let protected = f == crate::bookmarks_io::DEFAULT_FOLDER || f == crate::bookmarks_io::BAR_FOLDER;
+        let mut rows = String::new();
+        for b in members {
+            let title = if b.title.is_empty() { &b.url } else { &b.title };
+            let options: String = folders.iter().map(|o| option(&b.folder, o)).collect();
+            rows.push_str(&format!(
+                "<div class=\"item\"{click}><div class=\"ic\">\u{2B50}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div>\
+                 <select data-cur=\"{cur}\" title=\"Move to folder\" onclick=\"event.stopPropagation()\" onchange=\"mv({id},this)\">{options}<option value=\"\u{1}new\">\u{FF0B} New folder\u{2026}</option></select>\
+                 <button class=\"x\" title=\"Rename\" data-t=\"{title_attr}\" onclick=\"event.stopPropagation();rn({id},this.dataset.t)\">\u{270E}</button>\
+                 <button class=\"x\" title=\"Remove bookmark\" onclick=\"event.stopPropagation();go('remove-bookmark/{id}')\">\u{2715}</button></div>",
+                click = link_attr(&b.url),
+                title = escape(&truncate(title, 90)),
+                title_attr = escape(title),
+                url = escape(&truncate(&b.url, 100)),
+                cur = escape(&b.folder),
+                options = options,
+                id = b.id
+            ));
+        }
+        groups.push_str(&format!(
+            "<div class=\"fgroup\"><div class=\"fh\"><b>\u{1F4C1} {name}</b><span>{n}</span>{del}</div><div class=\"card\">{rows}</div></div>",
+            name = escape(f),
+            n = bookmarks.iter().filter(|b| &b.folder == f).count(),
+            del = if protected { String::new() } else { format!("<button class=\"x\" title=\"Delete folder\" data-folder=\"{}\" onclick=\"df(this)\">\u{2715}</button>", escape(f)) },
+            rows = rows
         ));
     }
-    if rows.is_empty() {
-        rows.push_str("<div class=\"empty\">No bookmarks yet. Press the star in the address bar to add one.</div>");
+    if groups.is_empty() {
+        groups.push_str("<div class=\"card\"><div class=\"empty\">No bookmarks yet. Press the star in the address bar to add one, or import them below.</div></div>");
     }
     let body = format!(
-        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search bookmarks\" style=\"flex:1\"></div><div class=\"card\">{rows}</div>",
-        head = ui_shell::heading("Bookmarks", "Pages you saved"),
-        rows = rows
+        "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search bookmarks\" style=\"flex:1\">\
+         <button class=\"btn ghost\" onclick=\"go('bm-import-chrome')\">Import from Chrome</button>\
+         <button class=\"btn ghost\" onclick=\"go('bm-import-file')\">Import file\u{2026}</button>\
+         <button class=\"btn ghost\" onclick=\"go('bm-export')\">Export</button></div>\
+         <style>.fh{{display:flex;align-items:center;gap:10px;margin:18px 4px 8px;color:var(--heading)}}.fh span{{color:var(--muted);font-size:12px;flex:1}}\
+         select{{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:var(--surface);color:var(--text);font:inherit;max-width:150px}}</style>{groups}",
+        head = ui_shell::heading("Bookmarks", "Pages you saved, in folders"),
+        groups = groups
     );
-    ui_shell::page(ctx, "bookmarks", "Bookmarks", &body, FILTER_JS)
+    ui_shell::page(ctx, "bookmarks", "Bookmarks", &body, BOOKMARKS_JS)
 }
 
 /// Live numbers for a running download: (received, total, paused).
@@ -228,6 +296,24 @@ mod tests {
         assert!(html.contains("go('history-delete/7')"));
         assert_eq!(html.matches("location.href=&quot;").count(), 1, "only the https row is clickable");
         assert!(html.contains("<title>History - Axomai Browser</title>"));
+    }
+
+    #[test]
+    fn history_is_grouped_by_day_and_has_range_delete() {
+        let e = |id, url: &str, t: &str| HistoryEntry { id, url: url.into(), title: String::new(), visit_time: t.into() };
+        let html = history_page(&ctx(), &[e(3, "https://a.test", "2026-10-04 10:00:00"), e(2, "https://b.test", "2026-10-04 09:00:00"), e(1, "https://c.test", "2026-10-03 23:00:00")]);
+        assert_eq!(html.matches("class=\"fgroup\"").count(), 2);
+        assert!(html.contains("2026-10-03") && html.contains("delrange()"));
+    }
+
+    #[test]
+    fn bookmarks_are_grouped_into_folders() {
+        let b = |id, url: &str, folder: &str| Bookmark { id, url: url.into(), title: "T".into(), folder: folder.into(), created_at: String::new() };
+        let html = bookmarks_page(&ctx(), &[b(1, "https://a.test", "Work"), b(2, "https://b.test", "Unsorted"), b(3, "https://c.test", "Work")]);
+        assert_eq!(html.matches("class=\"fgroup\"").count(), 2, "empty folders are not listed");
+        assert!(html.contains("go('bm-import-chrome')") && html.contains("go('bm-export')"));
+        assert!(html.contains("data-folder=\"Work\""), "custom folders can be deleted");
+        assert!(!html.contains("data-folder=\"Unsorted\""));
     }
 
     #[test]

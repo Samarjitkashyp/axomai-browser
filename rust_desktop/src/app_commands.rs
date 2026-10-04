@@ -108,7 +108,7 @@ impl App {
                 )
             }
             TabKind::Page("history") => {
-                let entries = self.storage.as_ref().and_then(|s| s.get_history(300).ok()).unwrap_or_default();
+                let entries = self.storage.as_ref().and_then(|s| s.get_history(1000).ok()).unwrap_or_default();
                 pages::history_page(&ctx, &entries)
             }
             TabKind::Page("bookmarks") => {
@@ -263,6 +263,8 @@ impl App {
                 let _ = wv.load_html(payload);
             }
             self.redraw = true;
+        } else if kind == "bookmark-file" {
+            self.import_bookmark_file(payload);
         } else if kind == "download-target" {
             if let Ok(id) = question.parse::<u64>() {
                 self.on_download_target(id, payload);
@@ -423,6 +425,9 @@ impl App {
             }
             "add-bookmark" => self.toggle_bookmark_now(),
             "settings-reset" => self.reset_settings(),
+            "bm-import-chrome" => self.import_chrome_bookmarks(),
+            "bm-import-file" => self.pick_bookmark_file(),
+            "bm-export" => self.export_bookmarks(),
             "pick-download-dir" => self.pick_download_dir(),
             _ => self.command_with_argument(cmd),
         }
@@ -487,6 +492,17 @@ impl App {
                 let _ = s.delete_history(id);
             }
             self.load_active_page();
+        } else if let Some(rest) = cmd.strip_prefix("bm-move/") {
+            let (id, folder) = rest.split_once('/').unwrap_or((rest, ""));
+            self.bookmark_move(id.parse().unwrap_or(-1), &url_decode(folder));
+        } else if let Some(rest) = cmd.strip_prefix("bm-rename/") {
+            let (id, title) = rest.split_once('/').unwrap_or((rest, ""));
+            self.bookmark_rename(id.parse().unwrap_or(-1), &url_decode(title));
+        } else if let Some(folder) = cmd.strip_prefix("bm-folder-delete/") {
+            if let Some(s) = &self.storage {
+                let _ = s.delete_folder(&url_decode(folder), crate::bookmarks_io::DEFAULT_FOLDER);
+            }
+            self.bookmarks_changed();
         } else if let Some((action, id)) = cmd.strip_prefix("dl-").and_then(|r| r.split_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
             self.download_command(action, id);
         } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
@@ -498,8 +514,7 @@ impl App {
             if let Some(s) = &self.storage {
                 let _ = s.remove_bookmark(id);
             }
-            self.refresh_bar();
-            self.open_internal("bookmarks");
+            self.bookmarks_changed();
         }
     }
 

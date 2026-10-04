@@ -121,7 +121,13 @@ impl App {
     // ------------------------------------------------------------------ bookmarks bar
 
     pub fn refresh_bar(&mut self) {
-        self.bar_marks = if self.settings.bookmark_bar { self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default() } else { Vec::new() };
+        // The bar shows the "Bookmarks bar" folder and everything saved with the star ("Unsorted").
+        self.bar_marks = if self.settings.bookmark_bar {
+            let all = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default();
+            all.into_iter().filter(|b| b.folder == crate::bookmarks_io::BAR_FOLDER || b.folder == crate::bookmarks_io::DEFAULT_FOLDER).collect()
+        } else {
+            Vec::new()
+        };
         self.redraw = true;
     }
 

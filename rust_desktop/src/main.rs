@@ -6,6 +6,8 @@ pub mod app_input;
 pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
+pub mod bookmarks_io;
+pub mod app_bookmarks;
 pub mod downloads;
 pub mod ext_scripts;
 pub mod extensions;
