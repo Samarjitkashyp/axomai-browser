@@ -201,7 +201,7 @@ impl App {
         let mut leave_address = !matches!(hit, Some(ToolbarHit::Omnibox));
         match hit {
             Some(ToolbarHit::Extensions) => self.core.open_extensions(self.webview.as_ref(), &shared, &self.extensions, anchor(tb.extensions)),
-            Some(ToolbarHit::Menu) => self.core.open_menu(self.webview.as_ref(), &shared, anchor(tb.menu)),
+            Some(ToolbarHit::Menu) => self.core.open_menu(self.webview.as_ref(), &shared, anchor(tb.menu), &self.settings.language),
             Some(ToolbarHit::Downloads) => self.open_internal("downloads"),
             Some(ToolbarHit::Theme) => self.core.open_theme_menu(self.webview.as_ref(), &shared, anchor(tb.theme)),
             Some(ToolbarHit::Shield) => self.core.open_shield(self.webview.as_ref(), &shared, &self.extensions, anchor(tb.shield)),

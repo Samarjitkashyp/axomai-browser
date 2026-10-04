@@ -20,10 +20,21 @@ const NAV: &[(&str, &str, &str)] = &[
     ("settings", "\u{2699}\u{FE0F}", "Settings"),
 ];
 
+fn nav_key(id: &str) -> &'static str {
+    match id {
+        "history" => "nav.history",
+        "bookmarks" => "nav.bookmarks",
+        "downloads" => "nav.downloads",
+        "passwords" => "nav.passwords",
+        "extensions" => "nav.extensions",
+        _ => "nav.settings",
+    }
+}
+
 const CSS: &str = r#"
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{background:var(--page-bg);color:var(--text);font:14px/1.5 "Plus Jakarta Sans","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--page-bg);color:var(--text);font:14px/1.5 "Plus Jakarta Sans","Segoe UI","Nirmala UI","Noto Sans Bengali","Noto Sans Devanagari",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .app{display:flex;min-height:100%}
 .side{width:220px;flex-shrink:0;padding:22px 14px;border-right:1px solid var(--border);position:sticky;top:0;height:100vh;overflow:auto}
 .brand{display:flex;align-items:center;gap:10px;padding:0 10px 18px;font-weight:800;color:var(--heading);font-size:15px}
@@ -40,8 +51,8 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute
 .row:last-child{border-bottom:0}
 .row .l{flex:1;min-width:0}.row .l b{display:block;color:var(--heading);font-weight:600}.row .l span{color:var(--muted);font-size:12.5px}
 .row.col{flex-direction:column;align-items:stretch;gap:10px}
-input[type=text],input[type=search],select{background:transparent;color:var(--heading);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font:inherit;min-width:200px;outline:none}
-input[type=text]:focus,input[type=search]:focus,select:focus{border-color:var(--primary)}
+input[type=text],input[type=password],input[type=search],select{background:transparent;color:var(--heading);border:1px solid var(--border);border-radius:10px;padding:8px 12px;font:inherit;min-width:200px;outline:none}
+input[type=text]:focus,input[type=password]:focus,input[type=search]:focus,select:focus{border-color:var(--primary)}
 select option{color:#111;background:#fff}
 .btn{border:0;border-radius:10px;padding:8px 16px;background:var(--primary);color:#fff;font:600 13px inherit;font-family:inherit;cursor:pointer}
 .btn:hover{filter:brightness(1.07)}.btn.ghost{background:var(--surface2);color:var(--heading)}.btn.danger{background:var(--danger)}
@@ -75,13 +86,13 @@ select option{color:#111;background:#fff}
 /// Wrap `body` in the shared frame. `active` is the nav entry to highlight ("settings", "history", ...).
 pub fn page(ctx: &PageCtx, active: &str, title: &str, body: &str, script: &str) -> String {
     let mut nav = String::new();
-    for (key, icon, label) in NAV {
+    for (key, icon, _) in NAV {
         nav.push_str(&format!(
             "<a class=\"{}\" onclick=\"go('{}')\"><span>{}</span>{}</a>",
             if *key == active { "on" } else { "" },
             key,
             icon,
-            label
+            crate::i18n::tr(ctx.lang, nav_key(key))
         ));
     }
     format!(

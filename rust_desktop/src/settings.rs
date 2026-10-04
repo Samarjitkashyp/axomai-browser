@@ -88,6 +88,9 @@ pub struct Settings {
     pub password_manager: bool,
     /// Key of the city whose weather the home page shows.
     pub weather_city: String,
+    /// Let the AI panel use Claude (the user's own API key) instead of the on-device assistant.
+    pub ai_llm: bool,
+    pub ai_model: String,
     /// UI language code ("en", "as", "hi", ...).
     pub language: String,
 }
@@ -106,6 +109,8 @@ impl Default for Settings {
             gpc: true,
             password_manager: true,
             weather_city: "jorhat".into(),
+            ai_llm: false,
+            ai_model: crate::llm::DEFAULT_MODEL.into(),
             language: "en".into(),
         }
     }
@@ -157,6 +162,12 @@ impl Settings {
         if let Some(v) = get("tracking").and_then(|v| Tracking::parse(&v)) {
             s.tracking = v;
         }
+        if let Some(v) = get("ai_llm").and_then(|v| truthy(&v)) {
+            s.ai_llm = v;
+        }
+        if let Some(v) = get("ai_model").filter(|v| crate::llm::valid_model(v)) {
+            s.ai_model = v;
+        }
         if let Some(v) = get("weather_city").filter(|v| CITIES.iter().any(|(k, _)| k == v)) {
             s.weather_city = v;
         }
@@ -200,6 +211,8 @@ impl Settings {
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
+            "ai_llm" => truthy(value).map(|v| self.ai_llm = v).is_some(),
+            "ai_model" => crate::llm::valid_model(value).then(|| self.ai_model = value.to_string()).is_some(),
             "weather_city" => CITIES.iter().any(|(k, _)| *k == value).then(|| self.weather_city = value.to_string()).is_some(),
             "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),
             "language" => {

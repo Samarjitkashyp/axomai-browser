@@ -17,6 +17,8 @@ pub struct SettingsView<'a> {
     /// The folder downloads really go to (the setting, or the system Downloads folder).
     pub download_dir: String,
     pub version: &'a str,
+    /// An Anthropic API key is stored (its value is never shown).
+    pub ai_key_saved: bool,
 }
 
 fn row(label: &str, desc: &str, control: &str) -> String {
@@ -172,6 +174,29 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         ),
     );
 
+    // ---- AI assistant
+    let models: Vec<(String, String)> = crate::llm::MODELS.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
+    let key_status = if v.ai_key_saved { t("settings.ai_key.saved") } else { t("settings.ai_key.none") };
+    let ai = format!(
+        "{}{}{}",
+        row(
+            t("settings.ai_llm"),
+            t("settings.ai_llm.desc"),
+            &switch(&format!("data-set=\"ai_llm\"{}", if v.ai_key_saved { "" } else { " disabled" }), s.ai_llm && v.ai_key_saved)
+        ),
+        row(
+            t("settings.ai_key"),
+            &format!("{} \u{2014} {}", t("settings.ai_key.desc"), key_status),
+            &format!(
+                "<input type=\"password\" id=\"aikey\" placeholder=\"sk-ant-\u{2026}\" autocomplete=\"off\" spellcheck=\"false\"> \
+                 <button class=\"btn\" onclick=\"saveKey()\">{}</button> <button class=\"btn ghost\" onclick=\"go('ai-key-clear')\">{}</button>",
+                escape(t("settings.ai_key.save")),
+                escape(t("settings.ai_key.remove"))
+            )
+        ),
+        row(t("settings.ai_model"), "", &select("ai_model", &models, &s.ai_model)),
+    );
+
     let body = format!(
         "{head}{a}{b}{c}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
@@ -180,8 +205,8 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         c = section(t("settings.privacy"), &privacy),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
-        f = section("Browser", &system),
-        g = "",
+        f = section(t("settings.browser"), &system),
+        g = section(t("settings.ai"), &ai),
         ver = escape(v.version),
     );
 
@@ -194,6 +219,7 @@ document.querySelectorAll('[data-set]').forEach(function(el){
   });
 });
 document.querySelectorAll('[data-ext]').forEach(function(el){el.addEventListener('change',function(){go('ext-toggle/'+el.dataset.ext)})});
+function saveKey(){var i=document.getElementById('aikey');var v=(i.value||'').trim();if(v){go('ai-key-save/'+enc(v));i.value=''}}
 function clearData(){
   var f=(document.getElementById('c-h').checked?'h':'')+(document.getElementById('c-d').checked?'d':'')+(document.getElementById('c-k').checked?'k':'')+(document.getElementById('c-c').checked?'c':'');
   if(!f){toast('Choose what to clear');return}
@@ -214,7 +240,7 @@ mod tests {
         let ctx = PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" };
         settings_page(
             &ctx,
-            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0" },
+            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", ai_key_saved: false },
         )
     }
 
@@ -264,6 +290,7 @@ mod tests {
                 "tracking" => "strict",
                 "language" => "en",
                 "weather_city" => "guwahati",
+                "ai_model" => "claude-sonnet-5-5",
                 "download_dir" => "C:\\x",
                 _ => "1",
             };

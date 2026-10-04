@@ -114,6 +114,7 @@ impl App {
                         theme_id: self.core.theme.id,
                         download_dir,
                         version: env!("CARGO_PKG_VERSION"),
+                        ai_key_saved: self.ai_key().is_some(),
                     },
                 )
             }
@@ -295,7 +296,24 @@ impl App {
             self.apply_setting("download_dir", payload);
         } else if kind == "capture-full" {
             self.core.capture_full_finish(self.webview.as_ref(), &shared, payload);
+        } else if kind == "ai-llm" {
+            // question = "<kind>\u{1}<question>", payload = JSON {"ok", "text"/"error", "page"}
+            let (k, q) = question.split_once('\u{1}').unwrap_or((question, ""));
+            let v: serde_json::Value = serde_json::from_str(payload).unwrap_or_default();
+            let page = v.get("page").and_then(|p| p.as_str()).unwrap_or("").to_string();
+            let result = if v.get("ok").and_then(|o| o.as_bool()) == Some(true) {
+                Ok(v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
+            } else {
+                Err(v.get("error").and_then(|t| t.as_str()).unwrap_or("Unknown error").to_string())
+            };
+            self.core.ai_llm_done(k, q, &page, result, self.webview.as_ref());
         } else if let Some(k) = kind.strip_prefix("ai-") {
+            if (k == "summarize" || k == "ask") && self.settings.ai_llm {
+                if let Some(key) = self.ai_key() {
+                    self.ask_llm(idx, k, question, payload, key);
+                    return;
+                }
+            }
             self.core.ai_respond(k, question, payload, self.webview.as_ref());
         }
     }
@@ -549,6 +567,10 @@ impl App {
             self.bookmarks_changed();
         } else if let Some((action, arg)) = cmd.strip_prefix("perm-").and_then(|r| r.split_once('/')) {
             self.permission_command(action, &url_decode(arg));
+        } else if let Some(key) = cmd.strip_prefix("ai-key-save/") {
+            self.save_ai_key(&url_decode(key));
+        } else if cmd == "ai-key-clear" {
+            self.clear_ai_key();
         } else if let Some(url) = cmd.strip_prefix("qr-for/") {
             let right = self.anchor_for(|l| l.qr);
             self.core.open_qr(self.webview.as_ref(), &shared, right, &url_decode(url));
@@ -591,6 +613,11 @@ impl App {
 
     /// One `set/<key>/<value>` message from the Settings page.
     pub fn apply_setting(&mut self, key: &str, value: &str) {
+        // Claude mode needs a key; the page disables the switch, this keeps a forged message from turning it on.
+        if key == "ai_llm" && matches!(value, "1" | "true" | "on") && self.ai_key().is_none() {
+            self.notify_settings_page(false);
+            return;
+        }
         let ok = if key == "search_engine" {
             self.search_engine = match value {
                 "Bing" => SearchEngine::Bing,
@@ -622,6 +649,7 @@ impl App {
                     self.refresh_internal_page();
                 }
                 "language" | "weather_city" => self.refresh_internal_page(),
+                "ai_llm" => self.core.ai_llm = self.settings.ai_llm,
                 "https_only" | "tracking" => self.apply_privacy_settings(),
                 "gpc" => {
                     self.apply_privacy_settings();
@@ -646,7 +674,7 @@ impl App {
     pub fn reset_settings(&mut self) {
         if let Some(s) = &self.storage {
             for key in [
-                "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
+                "startup", "restore_session", "home_url", "password_manager", "weather_city", "ai_llm", "ai_model", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
                 "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
@@ -655,6 +683,7 @@ impl App {
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
         self.core.set_gpc(true);
+        self.core.ai_llm = false;
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);
@@ -788,6 +817,54 @@ impl App {
             Some(wv) if self.core.can_back => web::com::go_back(wv),
             _ => self.open_internal("home"),
         }
+    }
+}
+
+impl App {
+    /// The saved Anthropic key, decrypted on demand (it only ever exists in memory for the length of a request).
+    pub fn ai_key(&self) -> Option<String> {
+        let hex = self.storage.as_ref()?.get_setting("ai_key_enc").ok().flatten()?;
+        crate::secret::decrypt(&crate::llm::hex_decode(&hex)?)
+    }
+
+    fn save_ai_key(&mut self, key: &str) {
+        let key = key.trim();
+        let stored = crate::llm::valid_key(key)
+            && crate::secret::encrypt(key).and_then(|blob| self.storage.as_ref().and_then(|s| s.set_setting("ai_key_enc", &crate::llm::hex_encode(&blob)).ok())).is_some();
+        if let Some(wv) = &self.webview {
+            let shared = self.shared();
+            self.core.toast(wv, if stored { "API key saved (encrypted)" } else { "That does not look like a valid API key" }, None, &shared);
+        }
+        self.refresh_internal_page();
+    }
+
+    fn clear_ai_key(&mut self) {
+        if let Some(s) = &self.storage {
+            let _ = s.delete_setting("ai_key_enc");
+            let _ = s.set_setting("ai_llm", "false");
+        }
+        self.settings.ai_llm = false;
+        self.core.ai_llm = false;
+        self.refresh_internal_page();
+    }
+
+    /// Ask Claude about the page text on a helper thread; the answer returns as an `ai-llm` event.
+    fn ask_llm(&mut self, idx: usize, kind: &str, question: &str, raw_page: &str, key: String) {
+        let page: String = serde_json::from_str::<String>(raw_page).unwrap_or_default();
+        if let Some(wv) = &self.webview {
+            let _ = wv.evaluate_script(&overlays::ai_result("Claude", &["Thinking\u{2026}".to_string()], &[]));
+        }
+        let (shared, model, lang) = (self.tabs[idx].shared.clone(), self.settings.ai_model.clone(), self.settings.language.clone());
+        let (kind, question) = (kind.to_string(), question.to_string());
+        std::thread::spawn(move || {
+            let body = crate::llm::request_body(&model, &kind, &question, &page, &lang);
+            let result = crate::llm::call(&crate::llm::base_url(), &key, &body);
+            let payload = match result {
+                Ok(text) => serde_json::json!({"ok": true, "text": text, "page": page}),
+                Err(error) => serde_json::json!({"ok": false, "error": error, "page": page}),
+            };
+            shared.push_event(web::WebEvent::PageData("ai-llm".into(), format!("{}\u{1}{}", kind, question), payload.to_string()));
+        });
     }
 }
 

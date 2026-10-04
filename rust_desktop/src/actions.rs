@@ -26,6 +26,8 @@ pub struct Core {
     pub passwords: bool,
     /// Whether pages see `navigator.globalPrivacyControl`.
     pub gpc: bool,
+    /// The AI panel uses Claude (user's key) rather than the on-device assistant.
+    pub ai_llm: bool,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -71,6 +73,7 @@ impl Core {
             ext_generation: 0,
             passwords: true,
             gpc: true,
+            ai_llm: false,
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -351,9 +354,13 @@ impl Core {
         }
     }
 
-    pub fn open_menu(&self, wv: Option<&WebView>, shared: &WebShared, right: f32) {
+    pub fn open_menu(&self, wv: Option<&WebView>, shared: &WebShared, right: f32, lang: &str) {
         if let Some(wv) = wv {
-            let _ = wv.evaluate_script(&overlays::menu_popup(self.theme, &shared.token, right, MENU));
+            let entries: Vec<overlays::MenuEntry> = MENU
+                .iter()
+                .map(|e| overlays::MenuEntry { emoji: e.emoji, label: if e.cmd.is_empty() { e.label } else { crate::i18n::tr(lang, menu_key(e.cmd)) }, cmd: e.cmd, danger: e.danger })
+                .collect();
+            let _ = wv.evaluate_script(&overlays::menu_popup(self.theme, &shared.token, right, &entries));
         }
     }
 
@@ -361,7 +368,7 @@ impl Core {
         if let Some(wv) = wv {
             let host = shared.shield.page_host.lock().map(|h| h.clone()).unwrap_or_default();
             let host = if host.is_empty() { "this page".to_string() } else { host };
-            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title));
+            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title, self.ai_llm));
         }
     }
 
@@ -515,6 +522,23 @@ impl Core {
         );
     }
 
+    /// Show the answer Claude wrote (or fall back to the on-device assistant when the request failed).
+    pub fn ai_llm_done(&self, kind: &str, question: &str, page_text: &str, result: Result<String, String>, wv: Option<&WebView>) {
+        let Some(wv) = wv else { return };
+        match result {
+            Ok(text) => {
+                let title = if kind == "ask" { "Answer \u{00B7} Claude" } else { "Summary \u{00B7} Claude" };
+                let _ = wv.evaluate_script(&overlays::ai_result(title, &crate::llm::paragraphs(&text), &[]));
+            }
+            Err(msg) => {
+                let raw = serde_json::to_string(page_text).unwrap_or_default();
+                self.ai_respond(kind, question, &raw, Some(wv));
+                let note = format!("Claude could not answer: {} Showing the on-device result instead.", msg);
+                let _ = wv.evaluate_script(&overlays::ai_note(&note));
+            }
+        }
+    }
+
     pub fn ai_respond(&self, kind: &str, question: &str, raw: &str, wv: Option<&WebView>) {
         let Some(wv) = wv else { return };
         let text = serde_json::from_str::<String>(raw).unwrap_or_default();
@@ -554,6 +578,27 @@ impl Core {
             _ => return,
         };
         let _ = wv.evaluate_script(&js);
+    }
+}
+
+/// Translation key of a menu entry's label.
+pub fn menu_key(cmd: &str) -> &'static str {
+    match cmd {
+        "newtab" => "menu.newtab",
+        "new-window" => "menu.new-window",
+        "new-incognito" => "menu.new-incognito",
+        "home" => "menu.home",
+        "bookmarks" => "menu.bookmarks",
+        "history" => "menu.history",
+        "downloads" => "menu.downloads",
+        "extensions" => "menu.extensions",
+        "theme-menu" => "menu.theme-menu",
+        "print" => "menu.print",
+        "save-pdf" => "menu.save-pdf",
+        "clear-ram" => "menu.clear-ram",
+        "settings" => "menu.settings",
+        "about" => "menu.about",
+        _ => "menu.exit",
     }
 }
 

@@ -2,11 +2,13 @@
 //! does not exist at all comes back as the key itself so a typo is visible rather than blank.
 
 /// (code, name in its own language)
-pub const LANGUAGES: &[(&str, &str)] = &[("en", "English")];
+pub const LANGUAGES: &[(&str, &str)] = &[("en", "English"), ("as", "অসমীয়া"), ("hi", "हिन्दी"), ("bn", "বাংলা")];
 
 pub fn is_supported(code: &str) -> bool {
     LANGUAGES.iter().any(|(c, _)| *c == code)
 }
+
+pub use crate::i18n_data::{Table, AS, BN, EN_MORE, HI};
 
 const EN: &[(&str, &str)] = &[
     ("settings.title", "Settings"),
@@ -80,19 +82,20 @@ const EN: &[(&str, &str)] = &[
 
 fn table(lang: &str) -> &'static [(&'static str, &'static str)] {
     match lang {
+        "hi" => HI,
+        "bn" => BN,
+        "as" => AS,
         _ => EN,
     }
 }
 
+fn find(t: &'static [(&'static str, &'static str)], key: &str) -> Option<&'static str> {
+    t.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
 /// Look `key` up in `lang`, then in English.
 pub fn tr(lang: &str, key: &'static str) -> &'static str {
-    if let Some((_, v)) = table(lang).iter().find(|(k, _)| *k == key) {
-        return v;
-    }
-    if let Some((_, v)) = EN.iter().find(|(k, _)| *k == key) {
-        return v;
-    }
-    key
+    find(table(lang), key).or_else(|| find(EN, key)).or_else(|| find(EN_MORE, key)).unwrap_or(key)
 }
 
 #[cfg(test)]
@@ -109,6 +112,44 @@ mod tests {
     }
 
     #[test]
+    fn every_language_translates_every_string() {
+        for (code, table) in [("hi", HI), ("bn", BN), ("as", AS)] {
+            for (key, _) in EN.iter().chain(EN_MORE.iter()) {
+                let found = table.iter().find(|(k, _)| k == key);
+                assert!(found.is_some(), "{} is missing {}", code, key);
+                assert!(!found.unwrap().1.trim().is_empty(), "{} has an empty {}", code, key);
+            }
+            for (key, _) in table.iter() {
+                assert!(EN.iter().chain(EN_MORE.iter()).any(|(k, _)| k == key), "{} has an unknown key {}", code, key);
+            }
+        }
+    }
+
+    #[test]
+    fn translations_keep_placeholders_and_markup_out() {
+        for table in [HI, BN, AS] {
+            for (key, text) in table.iter() {
+                assert!(!text.contains('<') && !text.contains('{'), "{} must be plain text", key);
+                if key.ends_with(".desc") || key.starts_with("settings.") {
+                    continue;
+                }
+            }
+        }
+        // Names of products and protocols stay as they are.
+        assert!(tr("hi", "settings.https_only.desc").contains("https://"));
+        assert!(tr("bn", "settings.default_browser.button").contains("Axomai"));
+    }
+
+    #[test]
+    fn translated_languages_resolve() {
+        assert_eq!(tr("hi", "settings.title"), "सेटिंग्स");
+        assert_eq!(tr("bn", "nav.history"), "ইতিহাস");
+        assert_eq!(tr("as", "dl.cancel"), "বাতিল");
+        assert_eq!(tr("hi", "menu.exit"), "Axomai ब्राउज़र बंद करें");
+        assert_eq!(tr("en", "menu.exit"), "Exit Axomai Browser");
+    }
+
+    #[test]
     fn unknown_language_falls_back_to_english() {
         assert_eq!(tr("zz", "settings.title"), "Settings");
     }
@@ -120,7 +161,7 @@ mod tests {
 
     #[test]
     fn supported_languages() {
-        assert!(is_supported("en"));
+        assert!(is_supported("en") && is_supported("as") && is_supported("hi") && is_supported("bn"));
         assert!(!is_supported("xx"));
     }
 }

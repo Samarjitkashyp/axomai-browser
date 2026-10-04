@@ -16,6 +16,8 @@ pub mod ext_scripts;
 pub mod extensions;
 pub mod favicons;
 pub mod i18n;
+pub mod llm;
+pub mod i18n_data;
 pub mod omnibox;
 pub mod overlays;
 pub mod pages;
@@ -205,6 +207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
+    app.core.ai_llm = app.settings.ai_llm && app.ai_key().is_some();
     app.apply_privacy_settings();
     app.refresh_bar();
     app.restore_or_start(saved_tabs);

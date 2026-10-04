@@ -1,6 +1,7 @@
 //! History, bookmarks, downloads and extensions pages, built on the shared themed frame.
 
 use crate::extensions as ex;
+use crate::i18n::tr;
 use crate::storage::{Bookmark, DownloadEntry, HistoryEntry};
 use crate::types::Extension;
 use crate::ui_shell::{self, PageCtx};
@@ -20,6 +21,18 @@ pub fn format_bytes(b: i64) -> String {
     } else {
         format!("{:.2} GB", b / 1024.0 / 1024.0 / 1024.0)
     }
+}
+
+/// Replace fixed English labels in generated markup. Each entry is `(needle, English text inside it, key)`: the needle
+/// carries enough markup around the text that page content can never match it by accident.
+fn loc(lang: &str, mut html: String, pairs: &[(&str, &str, &'static str)]) -> String {
+    if lang == "en" {
+        return html;
+    }
+    for (needle, english, key) in pairs {
+        html = html.replace(needle, &needle.replace(english, tr(lang, key)));
+    }
+    html
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -83,7 +96,7 @@ pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
     if open {
         groups.push_str("</div></div>");
     } else {
-        groups.push_str("<div class=\"card\"><div class=\"empty\">No browsing history yet.</div></div>");
+        groups.push_str(&format!("<div class=\"card\"><div class=\"empty\">{}</div></div>", tr(ctx.lang, "history.empty")));
     }
     let body = format!(
         "{head}<div class=\"bar\"><input type=\"search\" id=\"q\" placeholder=\"Search history\" style=\"flex:1\">\
@@ -91,9 +104,18 @@ pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
          <button class=\"btn danger\" onclick=\"delrange()\">Delete</button></div>\
          <style>.fh{{display:flex;align-items:center;gap:10px;margin:18px 4px 8px;color:var(--heading)}}\
          select{{border:1px solid var(--border);border-radius:8px;padding:7px 10px;background:var(--surface);color:var(--text);font:inherit}}</style>{groups}",
-        head = ui_shell::heading("History", "Pages you have visited (the latest 1000)"),
+        head = ui_shell::heading(tr(ctx.lang, "history.title"), tr(ctx.lang, "history.sub")),
         groups = groups
     );
+    let body = loc(ctx.lang, body, &[
+        ("placeholder=\"Search history\"", "Search history", "history.search"),
+        ("onclick=\"delrange()\">Delete<", "Delete", "common.delete"),
+        (">Last hour</option>", "Last hour", "settings.clear.hour"),
+        (">Last 24 hours</option>", "Last 24 hours", "settings.clear.day"),
+        (">Last 7 days</option>", "Last 7 days", "settings.clear.week"),
+        (">Last 4 weeks</option>", "Last 4 weeks", "settings.clear.month"),
+        (">All time</option>", "All time", "settings.clear.all"),
+    ]);
     ui_shell::page(ctx, "history", "History", &body, HISTORY_JS)
 }
 
@@ -158,9 +180,15 @@ pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
          <button class=\"btn ghost\" onclick=\"go('bm-export')\">Export</button></div>\
          <style>.fh{{display:flex;align-items:center;gap:10px;margin:18px 4px 8px;color:var(--heading)}}.fh span{{color:var(--muted);font-size:12px;flex:1}}\
          select{{border:1px solid var(--border);border-radius:8px;padding:5px 8px;background:var(--surface);color:var(--text);font:inherit;max-width:150px}}</style>{groups}",
-        head = ui_shell::heading("Bookmarks", "Pages you saved, in folders"),
+        head = ui_shell::heading(tr(ctx.lang, "bookmarks.title"), tr(ctx.lang, "bookmarks.sub")),
         groups = groups
     );
+    let body = loc(ctx.lang, body, &[
+        ("placeholder=\"Search bookmarks\"", "Search bookmarks", "bookmarks.search"),
+        (">Import from Chrome<", "Import from Chrome", "bookmarks.import_chrome"),
+        (">Import file\u{2026}<", "Import file\u{2026}", "bookmarks.import_file"),
+        (">Export<", "Export", "bookmarks.export"),
+    ]);
     ui_shell::page(ctx, "bookmarks", "Bookmarks", &body, BOOKMARKS_JS)
 }
 
@@ -180,10 +208,10 @@ pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry], live: &Live) -
     for d in downloads {
         let running = d.status == "downloading" && live.contains_key(&d.id);
         let (class, label) = match d.status.as_str() {
-            "completed" => ("ok", "Completed"),
-            "downloading" if running => ("", "Downloading"),
-            "cancelled" => ("bad", "Cancelled"),
-            _ => ("bad", "Failed"),
+            "completed" => ("ok", tr(ctx.lang, "dl.completed")),
+            "downloading" if running => ("", tr(ctx.lang, "dl.downloading")),
+            "cancelled" => ("bad", tr(ctx.lang, "dl.cancelled")),
+            _ => ("bad", tr(ctx.lang, "dl.failed")),
         };
         let (middle, actions) = if running {
             let (got, total, paused) = live[&d.id];
@@ -197,7 +225,7 @@ pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry], live: &Live) -
                     "<button class=\"btn ghost\" onclick=\"go('dl-{}/{}')\">{}</button><button class=\"btn danger\" onclick=\"go('dl-cancel/{}')\">Cancel</button>",
                     if paused { "resume" } else { "pause" },
                     d.id,
-                    if paused { "Resume" } else { "Pause" },
+                    if paused { tr(ctx.lang, "dl.resume") } else { tr(ctx.lang, "dl.pause") },
                     d.id
                 ),
             )
@@ -237,13 +265,19 @@ pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry], live: &Live) -
         ));
     }
     if rows.is_empty() {
-        rows.push_str("<div class=\"empty\">No downloads yet.</div>");
+        rows.push_str(&format!("<div class=\"empty\">{}</div>", tr(ctx.lang, "downloads.empty")));
     }
     let body = format!(
         "{head}<div class=\"bar\"><span style=\"flex:1\"></span><button class=\"btn danger\" onclick=\"if(confirm('Clear the download list? Files stay on disk.'))go('clear-downloads')\">Clear list</button></div><div class=\"card\">{rows}</div>",
-        head = ui_shell::heading("Downloads", "Files you downloaded"),
+        head = ui_shell::heading(tr(ctx.lang, "downloads.title"), tr(ctx.lang, "downloads.sub")),
         rows = rows
     );
+    let body = loc(ctx.lang, body, &[
+        ("))go('clear-downloads')\">Clear list<", "Clear list", "downloads.clear"),
+        (">Cancel</button>", "Cancel", "dl.cancel"),
+        (">Open</button>", "Open", "dl.open"),
+        (">Show in folder</button>", "Show in folder", "dl.show"),
+    ]);
     ui_shell::page(ctx, "downloads", "Downloads", &body, DOWNLOADS_JS)
 }
 
@@ -278,10 +312,14 @@ pub fn passwords_page(ctx: &PageCtx, logins: &[(i64, String, String, String)], n
     }
     let body = format!(
         "{head}<div class=\"card\">{rows}</div>{never}",
-        head = ui_shell::heading("Passwords", "Encrypted with your Windows account. Filled in only on the site they were saved for."),
+        head = ui_shell::heading(tr(ctx.lang, "passwords.title"), tr(ctx.lang, "passwords.sub")),
         rows = rows,
         never = never_html
     );
+    let body = loc(ctx.lang, body, &[
+        (">Copy username<", "Copy username", "pw.copy_user"),
+        (">Copy password<", "Copy password", "pw.copy"),
+    ]);
     ui_shell::page(ctx, "passwords", "Passwords", &body, "")
 }
 
@@ -316,9 +354,12 @@ pub fn permissions_page(ctx: &PageCtx, rows: &[(i64, String, String, bool)]) -> 
     let body = format!(
         "{head}<div class=\"bar\" style=\"display:flex\"><span style=\"flex:1\"></span><button class=\"btn danger\" onclick=\"if(confirm('Forget every site permission?'))go('perm-clear/all')\">Reset all</button></div>\
          <style>.fh2{{margin:18px 4px 8px;color:var(--heading)}}select{{border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:var(--surface);color:var(--text);font:inherit}}</style>{list}",
-        head = ui_shell::heading("Site permissions", "What websites are allowed to use. Sites ask first; your answer is remembered here."),
+        head = ui_shell::heading(tr(ctx.lang, "permissions.title"), tr(ctx.lang, "permissions.sub")),
         list = list
     );
+    let body = loc(ctx.lang, body, &[
+        (">Reset all<", "Reset all", "permissions.reset"),
+    ]);
     ui_shell::page(ctx, "permissions", "Permissions", &body, "")
 }
 
@@ -359,7 +400,7 @@ pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
     }
     let body = format!(
         "{head}<div class=\"card\">{rows}</div>",
-        head = ui_shell::heading("Extensions", "Built-in tools. Switch them on or off here or from the puzzle icon in the toolbar."),
+        head = ui_shell::heading(tr(ctx.lang, "extensions.title"), tr(ctx.lang, "extensions.sub")),
         rows = rows
     );
     ui_shell::page(ctx, "extensions", "Extensions", &body, "")
