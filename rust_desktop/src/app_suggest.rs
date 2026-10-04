@@ -2,7 +2,7 @@
 
 use crate::app::App;
 use crate::overlays;
-use crate::rendering::{c, fit_text, render_text, text_width, w_of};
+use crate::rendering::{c, fit_text, render_text, text_width};
 use crate::storage::Bookmark;
 use crate::suggest::{self, Kind};
 use crate::toolbar::{rr_rect, toolbar_layout, Rect};
@@ -68,7 +68,7 @@ impl App {
             }
             return;
         }
-        let o = toolbar_layout(w_of(&self.gpu)).omnibox;
+        let o = toolbar_layout(self.window_size().0).omnibox;
         let rows = self.suggestion_rows();
         if let Some(wv) = self.webview.as_ref() {
             let _ = wv.evaluate_script(&overlays::suggest_popup(self.core.theme, &self.tabs[self.active].shared.token, o.x, o.w, &rows, self.sugg_sel));
@@ -125,7 +125,7 @@ impl App {
     /// Chips of the bar in order (oldest bookmark first): rectangle, label and bookmark index.
     pub fn bar_layout(&mut self) -> Vec<(Rect, String, usize)> {
         let y = CHROME_TOP + (BOOKMARK_BAR_H - 24.0) / 2.0;
-        let max_x = w_of(&self.gpu) - 12.0;
+        let max_x = self.window_size().0 - 12.0;
         let mut x = 12.0;
         let mut out = Vec::new();
         for i in (0..self.bar_marks.len()).rev() {
@@ -156,7 +156,7 @@ impl App {
             return quads;
         }
         let th = self.core.theme;
-        let w = w_of(&self.gpu);
+        let w = self.window_size().0;
         let rgb = |v: [u8; 3]| c(v[0], v[1], v[2], 255);
         quads.push(NativeGpuCompositor::solid_quad(0.0, CHROME_TOP, w, BOOKMARK_BAR_H, rgb(th.toolbar)));
         quads.push(NativeGpuCompositor::solid_quad(0.0, CHROME_TOP + BOOKMARK_BAR_H - 1.0, w, 1.0, c(th.primary[0], th.primary[1], th.primary[2], 51)));

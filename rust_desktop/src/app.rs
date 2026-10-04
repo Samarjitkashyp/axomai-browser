@@ -117,7 +117,8 @@ impl App {
     }
 
     pub fn window_size(&self) -> (f32, f32) {
-        (w_of(&self.gpu), h_of(&self.gpu))
+        let s = self.scale.max(0.5);
+        (w_of(&self.gpu) / s, h_of(&self.gpu) / s)
     }
 
     // ---------------------------------------------------------------- event routing
@@ -136,7 +137,18 @@ impl App {
                     self.exit = true;
                 }
                 WindowEvent::Resized(size) => self.on_resize(size.width, size.height),
-                WindowEvent::CursorMoved { position, .. } => self.on_cursor_moved(position.x as f32, position.y as f32),
+                WindowEvent::CursorMoved { position, .. } => {
+                    let s = self.scale.max(0.5);
+                    self.on_cursor_moved(position.x as f32 / s, position.y as f32 / s)
+                }
+                WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                    if std::env::var("AXOMAI_UI_SCALE").is_err() {
+                        self.scale = scale_factor as f32;
+                        crate::rendering::set_ui_scale(self.scale);
+                        self.redraw = true;
+                        self.fit_active_view();
+                    }
+                }
                 WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(state, button),
                 WindowEvent::ModifiersChanged(m) => self.mods = m,
                 WindowEvent::KeyboardInput { event, .. } => self.on_key(event),
@@ -171,11 +183,11 @@ impl App {
     /// Place the active web view under the toolbar, filling the rest of the window.
     pub fn fit_active_view(&self) {
         let (w, h) = self.window_size();
-        let top = self.chrome_top();
+        let (s, top) = (self.scale.max(0.5), self.chrome_top());
         if let Some(wv) = &self.webview {
             let _ = wv.set_bounds(wry::Rect {
-                position: wry::dpi::PhysicalPosition::new(SIDEBAR_W as i32, top as i32).into(),
-                size: wry::dpi::PhysicalSize::new((w - SIDEBAR_W).max(1.0) as u32, (h - top).max(1.0) as u32).into(),
+                position: wry::dpi::PhysicalPosition::new((SIDEBAR_W * s).round() as i32, (top * s).round() as i32).into(),
+                size: wry::dpi::PhysicalSize::new(((w - SIDEBAR_W) * s).max(1.0) as u32, ((h - top) * s).max(1.0) as u32).into(),
             });
         }
     }
@@ -451,6 +463,7 @@ impl App {
             self.gpu.upload_glyph_atlas(&self.compositor.glyph_atlas);
             self.compositor.glyph_atlas.dirty = false;
         }
+        crate::rendering::scale_quads(&mut quads, self.scale.max(0.5));
         match self.gpu.render_frame(&quads) {
             Ok(_) => {}
             Err(wgpu::SurfaceError::Lost) => {

@@ -6,7 +6,7 @@
 
 use crate::app::App;
 use crate::passwords::origin_of;
-use crate::rendering::{c, fit_text, render_text, render_text_centered, w_of};
+use crate::rendering::{c, fit_text, render_text, render_text_centered};
 use crate::tabs::TabKind;
 use crate::toolbar::{rr_rect, Rect};
 use crate::types::{BOOKMARK_BAR_H, CHROME_TOP};
@@ -193,7 +193,7 @@ impl App {
     // ---------------------------------------------------------------- the bar
 
     fn infobar_buttons(&self) -> (Rect, Rect, Rect) {
-        let w = w_of(&self.gpu);
+        let w = self.window_size().0;
         let y = self.infobar_y() + (INFOBAR_H - 28.0) / 2.0;
         let close = Rect::new(w - 40.0, y, 28.0, 28.0);
         let block = Rect::new(close.x - 8.0 - 76.0, y, 76.0, 28.0);
@@ -224,7 +224,7 @@ impl App {
             return quads;
         }
         let th = self.core.theme;
-        let w = w_of(&self.gpu);
+        let w = self.window_size().0;
         let y0 = self.infobar_y();
         let rgb = |v: [u8; 3]| c(v[0], v[1], v[2], 255);
         quads.push(NativeGpuCompositor::solid_quad(0.0, y0, w, INFOBAR_H, rgb(th.toolbar)));

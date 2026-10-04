@@ -1,4 +1,51 @@
+use axomai_engine::glyph_atlas::GlyphInfo;
 use axomai_engine::{GpuQuad, NativeGpuCompositor, WgpuRenderer};
+use std::cell::Cell;
+
+thread_local! {
+    static UI_SCALE: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// Display scale (1.0 = 100%, 1.5 = 150%). The browser's own chrome is laid out in logical units; text is
+/// rasterised at the real pixel size so it stays sharp, and every quad is scaled up just before drawing.
+pub fn set_ui_scale(s: f32) {
+    UI_SCALE.with(|c| c.set(s.clamp(0.75, 4.0)));
+}
+
+pub fn ui_scale() -> f32 {
+    UI_SCALE.with(|c| c.get())
+}
+
+/// A glyph rasterised for the current display scale but measured in logical units.
+fn glyph(compositor: &mut NativeGpuCompositor, ch: char, size: f32) -> GlyphInfo {
+    let s = ui_scale();
+    let g = compositor.glyph_atlas.rasterize(ch, size * s);
+    GlyphInfo { width: g.width / s, height: g.height / s, advance_width: g.advance_width / s, offset_x: g.offset_x / s, offset_y: g.offset_y / s, ..g }
+}
+
+/// Scale quads laid out in logical units to physical pixels.
+pub fn scale_quads(quads: &mut [GpuQuad], s: f32) {
+    if (s - 1.0).abs() < 0.001 {
+        return;
+    }
+    for q in quads {
+        for v in q.vertices.iter_mut() {
+            v.position[0] *= s;
+            v.position[1] *= s;
+        }
+        if let Some(b) = q.rect_bounds.as_mut() {
+            for v in b.iter_mut() {
+                *v *= s;
+            }
+        }
+        if let Some(c) = q.clip_rect.as_mut() {
+            for v in c.iter_mut() {
+                *v *= s;
+            }
+        }
+        q.corner_radius *= s;
+    }
+}
 
 pub fn w_of(r: &WgpuRenderer) -> f32 {
     r.surface_config.width as f32
@@ -38,7 +85,7 @@ pub fn render_text(
         if x > max_x {
             break;
         }
-        let g = compositor.glyph_atlas.rasterize(ch, size);
+        let g = glyph(compositor, ch, size);
         if g.width > 0.0 {
             quads.push(NativeGpuCompositor::text_quad(x + g.offset_x, y - g.offset_y - g.height, &g, color));
         }
@@ -61,7 +108,7 @@ pub fn render_text_centered(
 }
 
 pub fn text_width(compositor: &mut NativeGpuCompositor, text: &str, size: f32) -> f32 {
-    text.chars().map(|ch| compositor.glyph_atlas.rasterize(ch, size).advance_width).sum()
+    text.chars().map(|ch| glyph(compositor, ch, size).advance_width).sum()
 }
 
 /// `text` shortened with an ellipsis so that it fits in `max_w` pixels.
@@ -72,11 +119,11 @@ pub fn fit_text(compositor: &mut NativeGpuCompositor, text: &str, size: f32, max
     if text_width(compositor, text, size) <= max_w {
         return text.to_string();
     }
-    let ellipsis = compositor.glyph_atlas.rasterize('\u{2026}', size).advance_width;
+    let ellipsis = glyph(compositor, '\u{2026}', size).advance_width;
     let mut out = String::new();
     let mut w = 0.0;
     for ch in text.chars() {
-        let cw = compositor.glyph_atlas.rasterize(ch, size).advance_width;
+        let cw = glyph(compositor, ch, size).advance_width;
         if w + cw + ellipsis > max_w {
             break;
         }

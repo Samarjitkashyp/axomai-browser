@@ -71,7 +71,7 @@ impl App {
 
     fn anchor_for(&self, pick: impl Fn(&toolbar::ToolbarLayout) -> toolbar::Rect) -> f32 {
         let (w, _) = self.window_size();
-        actions::anchor_right(w, pick(&toolbar::toolbar_layout(w)).right(), self.scale)
+        actions::anchor_right(w, pick(&toolbar::toolbar_layout(w)).right(), 1.0)
     }
 
     // ------------------------------------------------------------------ page loading
@@ -174,11 +174,12 @@ impl App {
         let bg = if matches!(kind, TabKind::Web) { (255, 255, 255, 255) } else { (15, 23, 42, 255) };
         if self.webview.is_none() {
             let (w, h) = self.window_size();
+            let (w, h) = (w * self.scale.max(0.5), h * self.scale.max(0.5));
             let initial = match &content {
                 Content::Url(u) => Initial::Url(u),
                 Content::Html(h) => Initial::Html(h),
             };
-            self.webview = web::build_webview(&self.window, (w, h), self.chrome_top(), initial, &shared, bg);
+            self.webview = web::build_webview(&self.window, (w, h), self.chrome_top() * self.scale.max(0.5), initial, &shared, bg);
             if self.webview.is_some() {
                 self.apply_privacy_settings();
                 let doc = self.tabs[idx].doc.clone();

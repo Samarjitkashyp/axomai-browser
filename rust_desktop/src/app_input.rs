@@ -183,7 +183,7 @@ impl App {
 
     fn toolbar_click(&mut self, hit: Option<ToolbarHit>, tb: &ToolbarLayout) {
         let (w, _) = self.window_size();
-        let scale = self.scale;
+        let scale = 1.0;
         let anchor = |r: toolbar::Rect| actions::anchor_right(w, r.right(), scale);
         let shared = self.shared();
         // Clicking anything in the toolbar dismisses an open popup, as in other browsers. Buttons that open a
@@ -296,7 +296,7 @@ impl App {
         items.push(e("", "Close tabs to the right", format!("tab-close-right/{}", id), true));
         let shared = self.shared();
         if let Some(wv) = &self.webview {
-            let left = tab_x / self.scale.max(0.5);
+            let left = tab_x;
             let _ = wv.evaluate_script(&overlays::tab_menu_popup(self.core.theme, &shared.token, left, &items));
         }
     }

@@ -151,7 +151,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true }],
         _ => Vec::new(),
     };
-    let scale = window.scale_factor() as f32;
+    // AXOMAI_UI_SCALE exists so the layout can be checked at other display scales on a 100% screen.
+    let scale = std::env::var("AXOMAI_UI_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).filter(|v| (0.75..=4.0).contains(v)).unwrap_or(window.scale_factor() as f32);
+    rendering::set_ui_scale(scale);
 
     let mut app = App {
         window,

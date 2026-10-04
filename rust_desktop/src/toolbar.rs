@@ -2,7 +2,7 @@
 //! `toolbar_layout` / `tab_strip` are the single source of truth for geometry: the renderer draws from
 //! them and `main.rs` hit-tests against them, so what is drawn is what is clickable.
 
-use crate::rendering::{c, fit_text, render_text, render_text_centered};
+use crate::rendering::{c, fit_text, render_text, render_text_centered, text_width};
 use crate::theme::Theme;
 use crate::favicons::Favicons;
 use crate::types::{SIDEBAR_W, TAB_BAR_H, TOOLBAR_H};
@@ -329,10 +329,6 @@ fn rr_gradient(r: Rect, radius: f32, left: [f32; 4], right: [f32; 4]) -> GpuQuad
 
 fn icon_in(icon: &GlyphInfo, r: Rect, color: [f32; 4]) -> GpuQuad {
     NativeGpuCompositor::icon_quad(r.cx() - icon.width / 2.0, r.cy() - icon.height / 2.0, icon.width, icon, color)
-}
-
-fn text_width(compositor: &mut NativeGpuCompositor, text: &str, size: f32) -> f32 {
-    text.chars().map(|ch| compositor.glyph_atlas.rasterize(ch, size).advance_width).sum()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
