@@ -20,35 +20,54 @@ pub enum Initial<'a> {
     Html(&'a str),
 }
 
+/// Things a web view reports. Every event is tagged with the id of the tab (web view) that produced it.
 #[derive(Clone, Debug)]
 pub enum WebEvent {
     LoadStarted(String),
     LoadFinished(String),
     Title(String),
-    /// A page asked for a new window (`target=_blank`, `window.open`); we open it in the current view.
+    /// Top-level navigation to an ordinary web address (not an `axomai://` command).
+    Navigating(String),
+    /// A page asked for a new window (`target=_blank`, `window.open`); it opens in a new tab.
     OpenUrl(String),
     /// Result of a screenshot: Ok(path) or Err(message).
     Captured(Result<String, String>),
     /// Text / data read back from the page for a pending request: (kind, question, payload).
     PageData(String, String, String),
+    /// New favicon image (PNG/JPEG bytes) for the page.
+    Favicon(Vec<u8>),
+    /// The page started / stopped playing audio.
+    Audio(bool),
 }
 
-/// Live counters + switches read by the network hook.
+/// Live counters + switches read by the network hook. The switches and the lifetime total are shared by every
+/// tab; the per-page numbers belong to one tab.
 pub struct Shield {
-    pub adblock: AtomicBool,
-    pub privacy: AtomicBool,
+    pub adblock: Arc<AtomicBool>,
+    pub privacy: Arc<AtomicBool>,
+    pub total_blocked: Arc<AtomicU64>,
     pub page_blocked: AtomicU32,
-    pub total_blocked: AtomicU64,
     pub page_host: Mutex<String>,
 }
 
 impl Shield {
     pub fn new() -> Self {
         Shield {
-            adblock: AtomicBool::new(true),
-            privacy: AtomicBool::new(true),
+            adblock: Arc::new(AtomicBool::new(true)),
+            privacy: Arc::new(AtomicBool::new(true)),
+            total_blocked: Arc::new(AtomicU64::new(0)),
             page_blocked: AtomicU32::new(0),
-            total_blocked: AtomicU64::new(0),
+            page_host: Mutex::new(String::new()),
+        }
+    }
+
+    /// A shield for another tab: same switches and total, fresh per-page numbers.
+    pub fn for_tab(&self) -> Shield {
+        Shield {
+            adblock: self.adblock.clone(),
+            privacy: self.privacy.clone(),
+            total_blocked: self.total_blocked.clone(),
+            page_blocked: AtomicU32::new(0),
             page_host: Mutex::new(String::new()),
         }
     }
@@ -56,15 +75,18 @@ impl Shield {
 
 #[derive(Clone)]
 pub struct WebShared {
+    /// `axomai://` commands from popups and our own pages (shared by all tabs).
     pub nav: Arc<Mutex<Vec<String>>>,
-    pub events: Arc<Mutex<Vec<WebEvent>>>,
+    pub events: Arc<Mutex<Vec<(u64, WebEvent)>>>,
     pub downloads: Arc<Mutex<Vec<(String, String, bool)>>>,
     pub download_dir: PathBuf,
-    /// True while the top-level document is one of our own pages (data:, about:, file under `ui_prefix`).
+    /// True while this tab's top-level document is one of our own pages (data:, about:, file under `ui_prefix`).
     pub trusted: Arc<AtomicBool>,
     pub token: Arc<String>,
     pub ui_prefix: Arc<String>,
     pub shield: Arc<Shield>,
+    pub tab_id: u64,
+    pub private: bool,
 }
 
 impl WebShared {
@@ -83,21 +105,40 @@ impl WebShared {
             token: Arc::new(format!("{:032x}", mixed)),
             ui_prefix: Arc::new(file_url_prefix(ui_dir)),
             shield: Arc::new(Shield::new()),
+            tab_id: 0,
+            private: false,
+        }
+    }
+
+    /// The handle one tab's web view uses: shared queues and switches, but its own trust flag and page counters.
+    pub fn for_tab(&self, tab_id: u64, private: bool) -> WebShared {
+        WebShared {
+            trusted: Arc::new(AtomicBool::new(true)),
+            shield: Arc::new(self.shield.for_tab()),
+            tab_id,
+            private,
+            ..self.clone()
         }
     }
 
     pub fn push_event(&self, e: WebEvent) {
         if let Ok(mut q) = self.events.lock() {
-            q.push(e);
+            q.push((self.tab_id, e));
         }
     }
 
-    pub fn drain_events(&self) -> Vec<WebEvent> {
+    pub fn drain_events(&self) -> Vec<(u64, WebEvent)> {
         self.events.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default()
     }
 
     pub fn drain_nav(&self) -> Vec<String> {
         self.nav.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default()
+    }
+
+    pub fn push_command(&self, cmd: &str) {
+        if let Ok(mut q) = self.nav.lock() {
+            q.push(format!("axomai://{}", cmd));
+        }
     }
 }
 
@@ -150,6 +191,7 @@ pub fn build_webview(
     };
     let wv = builder
         .with_devtools(true)
+        .with_incognito(shared.private)
         .with_background_color(bg)
         .with_bounds(Rect {
             position: wry::dpi::PhysicalPosition::new(crate::types::SIDEBAR_W as i32, top as i32).into(),
@@ -172,8 +214,12 @@ pub fn build_webview(
                 }
             }
             if let Some(c) = cmd {
-                if let Ok(mut q) = nav_shared.nav.lock() {
-                    q.push(c);
+                if c.starts_with("axomai://") {
+                    if let Ok(mut q) = nav_shared.nav.lock() {
+                        q.push(c);
+                    }
+                } else {
+                    nav_shared.push_event(WebEvent::Navigating(c));
                 }
             }
             allow
@@ -183,9 +229,7 @@ pub fn build_webview(
             if url.starts_with("http://") || url.starts_with("https://") {
                 window_shared.push_event(WebEvent::OpenUrl(url));
             } else if let Some(target) = url.strip_prefix("view-source:") {
-                if let Ok(mut q) = window_shared.nav.lock() {
-                    q.push(format!("axomai://viewsource/{}", crate::viewsource::encode(target)));
-                }
+                window_shared.push_command(&format!("viewsource/{}", crate::viewsource::encode(target)));
             }
             false
         })
@@ -220,6 +264,9 @@ pub fn build_webview(
         com::install_message_bridge(&wv, shared.clone());
         com::install_accelerators(&wv, shared.clone());
         com::install_context_menu(&wv, shared.clone());
+        com::install_favicon(&wv, shared.clone());
+        com::install_audio(&wv, shared.clone());
+        com::install_focus(&wv, shared.clone());
     }
     Some(wv)
 }
@@ -230,7 +277,9 @@ pub mod com {
     use webview2_com::Microsoft::Web::WebView2::Win32::*;
     use webview2_com::{
         take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler,
-        AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, WebMessageReceivedEventHandler, WebResourceRequestedEventHandler,
+        AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, FaviconChangedEventHandler,
+        GetFaviconCompletedHandler, FocusChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
+        WebResourceRequestedEventHandler,
     };
     use windows::core::{w, Interface, HSTRING, PWSTR};
     use windows::Win32::Foundation::BOOL;
@@ -351,22 +400,31 @@ pub mod com {
                 args.VirtualKey(&mut vk)?;
                 let down = |code: i32| (GetKeyState(code) as u16 & 0x8000) != 0;
                 let (ctrl, shift, alt) = (down(0x11), down(0x10), down(0x12));
-                if !ctrl || shift || alt {
+                if alt {
                     return Ok(());
                 }
-                let command = match vk {
-                    0x55 => "viewsource-current", // U
-                    0x54 => "newtab",             // T
-                    0x57 => "closetab",           // W
-                    0x4C => "focus-url",          // L
-                    0x48 => "history",            // H
-                    0x4A => "downloads",          // J
-                    0x44 => "bookmark-toggle",    // D
+                let command: String = match (vk, ctrl, shift) {
+                    (0x7A, false, false) => "fullscreen".into(), // F11
+                    (0x55, true, false) => "viewsource-current".into(), // U
+                    (0x54, true, false) => "newtab".into(),             // T
+                    (0x54, true, true) => "reopen-tab".into(),          // Shift+T
+                    (0x57, true, false) => "closetab".into(),           // W
+                    (0x4C, true, false) => "focus-url".into(),          // L
+                    (0x48, true, false) => "history".into(),            // H
+                    (0x4A, true, false) => "downloads".into(),          // J
+                    (0x44, true, false) => "bookmark-toggle".into(),    // D
+                    (0x46, true, false) => "find".into(),               // F
+                    (0x50, true, false) => "print".into(),              // P
+                    (0x4E, true, false) => "new-window".into(),         // N
+                    (0x4E, true, true) => "new-incognito".into(),       // Shift+N
+                    (0x4F, true, true) => "bookmarks".into(),           // Shift+O
+                    (0x2E, true, true) => "clear-data-dialog".into(),   // Shift+Delete
+                    (0x09, true, false) | (0x22, true, false) => "tab-next".into(), // Tab / PageDown
+                    (0x09, true, true) | (0x21, true, false) => "tab-prev".into(),  // Shift+Tab / PageUp
+                    (0x31..=0x39, true, false) => format!("tab-index/{}", vk - 0x30),
                     _ => return Ok(()),
                 };
-                if let Ok(mut q) = shared.nav.lock() {
-                    q.push(format!("axomai://{}", command));
-                }
+                shared.push_command(&command);
                 args.SetHandled(true)?;
             }
             Ok(())
@@ -374,6 +432,113 @@ pub mod com {
         unsafe {
             let mut token = std::mem::zeroed();
             let _ = controller.add_AcceleratorKeyPressed(&handler, &mut token);
+        }
+    }
+
+    /// The page took keyboard focus (the user clicked into it): the address bar must stop capturing keys.
+    pub fn install_focus(wv: &WebView, shared: WebShared) {
+        let controller = wv.controller();
+        let handler = FocusChangedEventHandler::create(Box::new(move |_sender, _args| {
+            shared.push_command("page-focus");
+            Ok(())
+        }));
+        unsafe {
+            let mut token = std::mem::zeroed();
+            let _ = controller.add_GotFocus(&handler, &mut token);
+        }
+    }
+
+    /// Favicon changes: fetch the PNG for the new icon and report it.
+    pub fn install_favicon(wv: &WebView, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            let Ok(core15) = core.cast::<ICoreWebView2_15>() else { return };
+            let handler = FaviconChangedEventHandler::create(Box::new(move |sender, _args| {
+                let Some(sender) = sender else { return Ok(()) };
+                let Ok(c15) = sender.cast::<ICoreWebView2_15>() else { return Ok(()) };
+                let events = shared.clone();
+                let done = GetFaviconCompletedHandler::create(Box::new(move |res, stream| {
+                    if res.is_err() {
+                        return Ok(());
+                    }
+                    if let Some(stream) = stream {
+                        let mut bytes: Vec<u8> = Vec::new();
+                        let mut buf = vec![0u8; 16 * 1024];
+                        loop {
+                            let mut read = 0u32;
+                            let hr = stream.Read(buf.as_mut_ptr() as *mut std::ffi::c_void, buf.len() as u32, Some(&mut read));
+                            if hr.is_err() || read == 0 {
+                                break;
+                            }
+                            bytes.extend_from_slice(&buf[..read as usize]);
+                            if bytes.len() > 2 * 1024 * 1024 {
+                                break;
+                            }
+                        }
+                        if !bytes.is_empty() {
+                            events.push_event(WebEvent::Favicon(bytes));
+                        }
+                    }
+                    Ok(())
+                }));
+                let _ = c15.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &done);
+                Ok(())
+            }));
+            let mut token = std::mem::zeroed();
+            let _ = core15.add_FaviconChanged(&handler, &mut token);
+        }
+    }
+
+    /// "This tab is playing audio" indicator.
+    pub fn install_audio(wv: &WebView, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            let Ok(core8) = core.cast::<ICoreWebView2_8>() else { return };
+            let handler = IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _args| {
+                if let Some(sender) = sender {
+                    if let Ok(c8) = sender.cast::<ICoreWebView2_8>() {
+                        let mut playing = BOOL(0);
+                        if c8.IsDocumentPlayingAudio(&mut playing).is_ok() {
+                            shared.push_event(WebEvent::Audio(playing.as_bool()));
+                        }
+                    }
+                }
+                Ok(())
+            }));
+            let mut token = std::mem::zeroed();
+            let _ = core8.add_IsDocumentPlayingAudioChanged(&handler, &mut token);
+        }
+    }
+
+    pub fn set_muted(wv: &WebView, muted: bool) {
+        if let Some(core) = core(wv) {
+            unsafe {
+                if let Ok(c8) = core.cast::<ICoreWebView2_8>() {
+                    let _ = c8.SetIsMuted(muted);
+                }
+            }
+        }
+    }
+
+    /// Release the memory of a hidden tab while keeping its page state (scroll, forms, history).
+    pub fn suspend(wv: &WebView) {
+        if let Some(core) = core(wv) {
+            unsafe {
+                if let Ok(c3) = core.cast::<ICoreWebView2_3>() {
+                    let handler = TrySuspendCompletedHandler::create(Box::new(|_hr, _ok| Ok(())));
+                    let _ = c3.TrySuspend(&handler);
+                }
+            }
+        }
+    }
+
+    pub fn resume(wv: &WebView) {
+        if let Some(core) = core(wv) {
+            unsafe {
+                if let Ok(c3) = core.cast::<ICoreWebView2_3>() {
+                    let _ = c3.Resume();
+                }
+            }
         }
     }
 

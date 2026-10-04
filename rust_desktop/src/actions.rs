@@ -20,7 +20,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 pub struct Core {
     pub theme: &'static theme::Theme,
     pub profile_name: String,
-    pub doc_script: web::com::DocScript,
+    /// Bumped whenever an extension switch changes; a tab rebuilds its document-start script when it is behind.
+    pub ext_generation: u64,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -63,7 +64,7 @@ impl Core {
         Core {
             theme,
             profile_name,
-            doc_script: Default::default(),
+            ext_generation: 0,
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -82,13 +83,13 @@ impl Core {
     }
 
     /// Push the current extension switches into the network shield, the document-start script and the engine.
-    pub fn apply_extensions(&mut self, wv: Option<&WebView>, shared: &WebShared, exts: &[Extension]) {
+    pub fn apply_extensions(&mut self, wv: Option<&WebView>, doc: &web::com::DocScript, shared: &WebShared, exts: &[Extension]) {
         let adblock = exts[ex::ADBLOCK].enabled;
         let privacy = exts[ex::PRIVACY].enabled;
         shared.shield.adblock.store(adblock, Ordering::SeqCst);
         shared.shield.privacy.store(privacy, Ordering::SeqCst);
         if let Some(wv) = wv {
-            self.doc_script.set(wv, &ext_scripts::doc_start(adblock, privacy));
+            doc.set(wv, &ext_scripts::doc_start(adblock, privacy));
             web::com::set_memory_low(wv, exts[ex::BOOSTER].enabled);
         }
         if exts[ex::BOOSTER].enabled {
@@ -104,6 +105,7 @@ impl Core {
         &mut self,
         idx: usize,
         wv: Option<&WebView>,
+        doc: &web::com::DocScript,
         shared: &WebShared,
         exts: &mut [Extension],
         storage: Option<&BrowserStorage>,
@@ -111,8 +113,9 @@ impl Core {
         let Some(e) = exts.get_mut(idx) else { return };
         e.enabled = !e.enabled;
         let on = e.enabled;
+        self.ext_generation += 1;
         self.persist_extensions(storage, exts);
-        self.apply_extensions(wv, shared, exts);
+        self.apply_extensions(wv, doc, shared, exts);
         let Some(wv) = wv else { return };
         let remote_page = !shared.trusted.load(Ordering::SeqCst);
         match idx {

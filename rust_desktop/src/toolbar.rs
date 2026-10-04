@@ -2,9 +2,10 @@
 //! `toolbar_layout` / `tab_strip` are the single source of truth for geometry: the renderer draws from
 //! them and `main.rs` hit-tests against them, so what is drawn is what is clickable.
 
-use crate::rendering::{c, render_text, render_text_centered};
+use crate::rendering::{c, fit_text, render_text, render_text_centered};
 use crate::theme::Theme;
-use crate::types::{DesktopTab, SIDEBAR_W, TAB_BAR_H, TOOLBAR_H};
+use crate::favicons::Favicons;
+use crate::types::{SIDEBAR_W, TAB_BAR_H, TOOLBAR_H};
 use axomai_engine::glyph_atlas::GlyphInfo;
 use axomai_engine::{GpuQuad, NativeGpuCompositor};
 use resvg::{tiny_skia, usvg};
@@ -41,36 +42,73 @@ pub const BRAND_W: f32 = 168.0;
 pub const TAB_START_X: f32 = SIDEBAR_W + BRAND_W;
 pub const TAB_GAP: f32 = 5.0;
 pub const TAB_H: f32 = 36.0;
-const TAB_MIN_W: f32 = 130.0;
+const TAB_MIN_W: f32 = 44.0;
 const TAB_MAX_W: f32 = 220.0;
+pub const PINNED_W: f32 = 44.0;
+
+/// What the tab strip needs to draw one tab.
+#[derive(Clone, Debug, Default)]
+pub struct TabItem {
+    pub title: String,
+    pub pinned: bool,
+    pub private: bool,
+    pub favicon: Option<usize>,
+    pub audio: bool,
+    pub muted: bool,
+    pub loading: bool,
+    pub sleeping: bool,
+}
 
 pub struct TabStrip {
-    pub tab_w: f32,
+    pub rects: Vec<Rect>,
     pub plus: Rect,
 }
 
 impl TabStrip {
-    pub fn tab_x(&self, i: usize) -> f32 {
-        TAB_START_X + i as f32 * (self.tab_w + TAB_GAP)
-    }
     pub fn tab_rect(&self, i: usize) -> Rect {
-        Rect::new(self.tab_x(i), TAB_BAR_H - TAB_H, self.tab_w, TAB_H)
+        self.rects.get(i).copied().unwrap_or(Rect::new(TAB_START_X, TAB_BAR_H - TAB_H, 0.0, TAB_H))
     }
     pub fn close_rect(&self, i: usize) -> Rect {
         let t = self.tab_rect(i);
-        Rect::new(t.right() - 30.0, t.y, 30.0, t.h)
+        Rect::new(t.right() - 28.0, t.y, 28.0, t.h)
     }
-    pub fn end_x(&self, n: usize) -> f32 {
-        TAB_START_X + n as f32 * (self.tab_w + TAB_GAP)
+    /// Speaker / mute button, just left of the close button.
+    pub fn speaker_rect(&self, i: usize) -> Rect {
+        let t = self.tab_rect(i);
+        Rect::new(t.right() - 52.0, t.y, 24.0, t.h)
+    }
+    pub fn end_x(&self) -> f32 {
+        self.rects.last().map(|r| r.right()).unwrap_or(TAB_START_X)
+    }
+    pub fn index_at(&self, x: f32, y: f32) -> Option<usize> {
+        self.rects.iter().position(|r| r.contains(x, y))
     }
 }
 
-pub fn tab_strip(w: f32, n_tabs: usize) -> TabStrip {
-    let n = n_tabs.max(1) as f32;
-    let available = w - TAB_START_X - 60.0 - 40.0;
-    let tab_w = (available / n - TAB_GAP).clamp(TAB_MIN_W, TAB_MAX_W);
-    let end = TAB_START_X + n_tabs as f32 * (tab_w + TAB_GAP);
-    TabStrip { tab_w, plus: Rect::new(end, TAB_BAR_H - 3.0 - 30.0, 30.0, 30.0) }
+/// Whether a tab shows its close button (narrow tabs hide it; pinned tabs never have one).
+pub fn close_visible(item: &TabItem, r: &Rect, active: bool) -> bool {
+    !item.pinned && (if active { r.w >= 64.0 } else { r.w >= 96.0 })
+}
+
+/// Whether a tab shows the speaker / mute button.
+pub fn speaker_visible(item: &TabItem, r: &Rect) -> bool {
+    item.audio && !item.pinned && r.w >= 84.0
+}
+
+pub fn tab_strip(w: f32, items: &[TabItem]) -> TabStrip {
+    let pinned = items.iter().filter(|t| t.pinned).count();
+    let others = items.len() - pinned;
+    let reserved = 76.0; // the "+" button and a right margin
+    let available = w - TAB_START_X - reserved - pinned as f32 * (PINNED_W + TAB_GAP);
+    let tab_w = if others == 0 { TAB_MAX_W } else { (available / others as f32 - TAB_GAP).clamp(TAB_MIN_W, TAB_MAX_W) };
+    let mut x = TAB_START_X;
+    let mut rects = Vec::with_capacity(items.len());
+    for t in items {
+        let width = if t.pinned { PINNED_W } else { tab_w };
+        rects.push(Rect::new(x, TAB_BAR_H - TAB_H, width, TAB_H));
+        x += width + TAB_GAP;
+    }
+    TabStrip { rects, plus: Rect::new(x, TAB_BAR_H - 3.0 - 30.0, 30.0, 30.0) }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,6 +252,8 @@ pub struct ToolbarIcons {
     pub qr: GlyphInfo,
     pub close: GlyphInfo,
     pub plus: GlyphInfo,
+    pub speaker: GlyphInfo,
+    pub speaker_off: GlyphInfo,
 }
 
 fn stroke_svg(width: f32, body: &str) -> String {
@@ -261,6 +301,8 @@ pub fn load_icons(compositor: &mut NativeGpuCompositor) -> ToolbarIcons {
         qr: put(stroke_svg(2.0, r#"<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>"#), 16),
         close: put(stroke_svg(2.5, r#"<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>"#), 12),
         plus: put(stroke_svg(2.5, r#"<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>"#), 14),
+        speaker: put(stroke_svg(2.0, r#"<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>"#), 14),
+        speaker_off: put(stroke_svg(2.0, r#"<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>"#), 14),
     }
 }
 
@@ -324,7 +366,7 @@ pub fn build_toolbar_quads(
     address_text: &str,
     focused: bool,
     address_cursor: usize,
-    tabs: &[DesktopTab],
+    tabs: &[TabItem],
     active_tab_idx: usize,
     history_back: bool,
     history_fwd: bool,
@@ -360,30 +402,53 @@ pub fn build_toolbar_quads(
     let name_end = render_text(compositor, &mut quads, "Axomai", badge.right() + 8.0, 28.0, 14.0, heading, TAB_START_X);
     render_text(compositor, &mut quads, "Browser", name_end + 4.0, 28.0, 12.0, primary, TAB_START_X);
 
-    let strip = tab_strip(viewport_w, tabs.len());
+    let strip = tab_strip(viewport_w, tabs);
     for (i, t) in tabs.iter().enumerate() {
         let r = strip.tab_rect(i);
         let is_active = i == active_tab_idx;
         let title = if t.title.is_empty() { "New Tab" } else { &t.title };
+        let wide = r.w >= 110.0;
         let close = strip.close_rect(i);
-        let icon_box = Rect::new(r.x + 14.0, r.cy() - 7.5, 15.0, 15.0);
+        let show_close = close_visible(t, &r, is_active);
+        let show_speaker = speaker_visible(t, &r);
+        let icon_box = if t.pinned || !wide { Rect::new(r.cx() - 8.0, r.cy() - 8.0, 16.0, 16.0) } else { Rect::new(r.x + 13.0, r.cy() - 8.0, 16.0, 16.0) };
         let text_x = icon_box.right() + 8.0;
-        let text_max = close.x - 2.0;
+        let text_max = (if show_speaker { strip.speaker_rect(i).x } else if show_close { close.x } else { r.right() - 10.0 }) - 2.0;
+        let icon_alpha = if t.loading || t.sleeping { 0.55 } else { 1.0 };
+        let text_color = if is_active { heading } else if t.sleeping { c(th.muted[0], th.muted[1], th.muted[2], 150) } else { muted };
 
         if is_active {
             // Rounded top corners only: the quad runs past the titlebar and the toolbar paints over its foot.
             quads.push(rr(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 14.0, 12.0, c(th.primary[0], th.primary[1], th.primary[2], 90)));
             quads.push(rr(r.x, r.y, r.w, r.h + 13.0, 12.0, toolbar_bg));
-            quads.push(rr(r.x + 12.0, r.y, r.w - 24.0, 2.5, 1.25, primary));
-            quads.push(rr_rect(icon_box, 3.5, emerald));
-            render_text(compositor, &mut quads, "A", icon_box.x + 3.5, icon_box.y + 12.0, 10.5, white, icon_box.right());
-            render_text(compositor, &mut quads, title, text_x, r.cy() + 4.5, 12.5, heading, text_max);
-            quads.push(icon_in(&icons.close, close, muted));
-        } else {
-            quads.push(rr_rect(icon_box, 3.5, c(th.primary[0], th.primary[1], th.primary[2], 150)));
-            render_text(compositor, &mut quads, "A", icon_box.x + 3.5, icon_box.y + 12.0, 10.5, white, icon_box.right());
-            render_text(compositor, &mut quads, title, text_x, r.cy() + 4.5, 12.5, muted, text_max);
-            quads.push(icon_in(&icons.close, close, c(100, 116, 139, 160)));
+            quads.push(rr(r.x + 12.0_f32.min(r.w / 4.0), r.y, r.w - 2.0 * 12.0_f32.min(r.w / 4.0), 2.5, 1.25, if t.private { c(168, 85, 247, 255) } else { primary }));
+        } else if t.pinned {
+            quads.push(rr_rect(r, 10.0, c(th.primary[0], th.primary[1], th.primary[2], 28)));
+        }
+
+        // favicon, or the green "A" placeholder
+        match t.favicon {
+            Some(slot) => quads.push(Favicons::quad(slot, icon_box.x, icon_box.y, 16.0, icon_alpha)),
+            None => {
+                let base = if t.private { c(168, 85, 247, 255) } else if is_active { emerald } else { c(th.primary[0], th.primary[1], th.primary[2], 150) };
+                quads.push(rr_rect(Rect::new(icon_box.x + 0.5, icon_box.y + 0.5, 15.0, 15.0), 3.5, base));
+                render_text(compositor, &mut quads, if t.private { "P" } else { "A" }, icon_box.x + 4.0, icon_box.y + 12.5, 10.5, white, icon_box.right());
+            }
+        }
+        if t.pinned && t.audio {
+            // Pinned tabs have no room for a speaker button; a dot marks that this tab is playing sound.
+            quads.push(rr(r.right() - 11.0, r.y + 7.0, 6.0, 6.0, 3.0, accent));
+        }
+        if wide && !t.pinned {
+            let shown = fit_text(compositor, title, 12.5, text_max - text_x);
+            render_text(compositor, &mut quads, &shown, text_x, r.cy() + 4.5, 12.5, text_color, text_max);
+        }
+        if show_speaker {
+            let icon = if t.muted { &icons.speaker_off } else { &icons.speaker };
+            quads.push(icon_in(icon, strip.speaker_rect(i), if t.muted { muted } else { primary }));
+        }
+        if show_close {
+            quads.push(icon_in(&icons.close, close, if is_active { muted } else { c(100, 116, 139, 160) }));
         }
     }
     quads.push(icon_in(&icons.plus, strip.plus, muted));

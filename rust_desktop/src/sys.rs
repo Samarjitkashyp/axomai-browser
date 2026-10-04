@@ -199,3 +199,32 @@ pub fn clipboard_text() -> Option<String> {
 pub fn clipboard_text() -> Option<String> {
     None
 }
+
+/// Put plain text on the clipboard (Ctrl+C / Ctrl+X in the address bar).
+#[cfg(windows)]
+pub fn set_clipboard_text(text: &str) {
+    use windows::Win32::Foundation::{HANDLE, HGLOBAL};
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    const CF_UNICODETEXT: u32 = 13;
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return;
+        }
+        let _ = EmptyClipboard();
+        if let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2) {
+            let ptr = GlobalLock(mem) as *mut u16;
+            if !ptr.is_null() {
+                std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+                let _ = GlobalUnlock(mem);
+                let _ = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(mem.0)));
+            }
+            let _ = HGLOBAL(mem.0);
+        }
+        let _ = CloseClipboard();
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_clipboard_text(_text: &str) {}

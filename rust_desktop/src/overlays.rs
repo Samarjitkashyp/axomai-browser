@@ -121,6 +121,59 @@ finish(card);
     js
 }
 
+/// A context menu placed from the left edge of the page (used under a tab). Entries are
+/// `(emoji, label, command, danger)`; a label of "-" is a divider.
+pub fn tab_menu_popup(theme: &Theme, token: &str, left: f32, entries: &[(String, String, String, bool)]) -> String {
+    let data: Vec<_> = entries.iter().map(|(e, l, c, d)| json!({"e": e, "l": l, "c": c, "d": d})).collect();
+    let mut js = open(theme, token, "__ax_pop_tabmenu");
+    let css = serde_json::to_string(&format!("{}.card{{left:{:.0}px;width:250px}}", CARD_CSS, left.max(6.0))).unwrap_or_else(|_| "\"\"".into());
+    js.push_str(&format!(
+        r#"
+css({css});
+var card=el('div','card');
+{data}.forEach(function(m){{
+  if(m.l==='-'){{card.appendChild(el('div','div'));return}}
+  var r=el('button','row');r.appendChild(el('span','em',m.e));var tx=el('span','tx');var b=el('b','',m.l);if(m.d)b.style.color='#dc2626';tx.appendChild(b);r.appendChild(tx);
+  r.onclick=function(){{host.remove();go(m.c)}};card.appendChild(r);
+}});
+finish(card);
+}})();"#,
+        css = css,
+        data = serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())
+    ));
+    js
+}
+
+/// Find-in-page bar, living inside the page so the web view cannot cover it. Uses `window.find`.
+pub fn find_popup(theme: &Theme) -> String {
+    let mut js = String::from("(function(){");
+    js.push_str(&shell(theme, "__ax_pop_find"));
+    js.push_str(
+        r#"
+var card=document.createElement('div');card.className='bar';
+var inp=document.createElement('input');inp.placeholder='Find in page';inp.spellcheck=false;
+function clearSel(){try{window.getSelection().removeAllRanges()}catch(e){}}
+function run(back){var q=inp.value;if(!q){clearSel();info.textContent='';return}
+  var ok=window.find(q,false,back,true,false,false,false);info.textContent=ok?'':'No matches';info.style.color=ok?'':'#dc2626'}
+function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
+var info=document.createElement('span');info.className='info';
+inp.addEventListener('input',function(){clearSel();run(false)});
+inp.addEventListener('keydown',function(e){e.stopPropagation();
+  if(e.key==='Enter'){e.preventDefault();run(e.shiftKey)}
+  else if(e.key==='Escape'){e.preventDefault();clearSel();host.remove()}},true);
+card.appendChild(inp);card.appendChild(info);
+btn('↑','Previous (Shift+Enter)',function(){run(true)});
+btn('↓','Next (Enter)',function(){run(false)});
+btn('✕','Close (Esc)',function(){clearSel();host.remove()});
+css('.bar{position:fixed;top:8px;right:24px;display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px 8px;font-size:13px;color:var(--text)}'+
+'input{width:210px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:transparent;color:var(--heading);font:inherit;outline:none}input:focus{border-color:var(--primary)}'+
+'.info{font-size:11px;min-width:58px;color:var(--muted)}button{border:0;background:var(--hover);color:var(--heading);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px}button:hover{background:var(--primary-light)}');
+root.appendChild(card);document.documentElement.appendChild(host);inp.focus();inp.select();
+})();"#,
+    );
+    js
+}
+
 pub struct ShieldView {
     pub host: String,
     pub page_blocked: u32,
