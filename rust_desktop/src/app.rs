@@ -69,6 +69,8 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    pub groups: Vec<crate::tabgroups::TabGroup>,
+    pub next_group_id: u32,
     /// Atlas slot of each site's saved icon, and the hosts whose icon is being fetched.
     pub host_slots: std::collections::HashMap<String, usize>,
     pub icon_pending: std::collections::HashSet<String>,
@@ -123,6 +125,7 @@ impl App {
                 muted: t.muted,
                 loading: t.loading,
                 sleeping: t.suspended,
+                group_color: t.group.and_then(|gid| self.groups.iter().find(|g| g.id == gid)).map(|g| crate::tabgroups::GROUP_COLORS[g.color].2),
             })
             .collect()
     }

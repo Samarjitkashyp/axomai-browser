@@ -30,6 +30,7 @@ pub mod splitview;
 pub mod storage;
 pub mod suggest;
 pub mod sys;
+pub mod tabgroups;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
@@ -179,7 +180,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // What the first window opens, according to "On startup".
     let mut saved_tabs: Vec<storage::SavedTab> = match settings.startup {
         settings::Startup::Restore if !private_window => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
-        settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true }],
+        settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true, group: String::new() }],
         _ => Vec::new(),
     };
     if !urls.is_empty() {
@@ -188,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let first = saved_tabs.len() as i32;
         for (i, u) in urls.iter().enumerate() {
-            saved_tabs.push(storage::SavedTab { position: first + i as i32, url: u.clone(), title: String::new(), is_active: i + 1 == urls.len() });
+            saved_tabs.push(storage::SavedTab { position: first + i as i32, url: u.clone(), title: String::new(), is_active: i + 1 == urls.len(), group: String::new() });
         }
     }
     // AXOMAI_UI_SCALE exists so the layout can be checked at other display scales on a 100% screen.
@@ -241,6 +242,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        groups: Vec::new(),
+        next_group_id: 1,
         host_slots: Default::default(),
         icon_pending: Default::default(),
         news_cache: Default::default(),

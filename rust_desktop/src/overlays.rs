@@ -501,6 +501,74 @@ var h=document.getElementById('__ax_pop_pw');if(h)h.remove();
     )
 }
 
+const GROUP_PROMPT_JS: &str = r#"
+var d=__DATA__;var sel=3;
+css('.card input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;background:transparent;color:var(--heading);font:inherit;outline:none;margin:2px 0 10px}.card input:focus{border-color:var(--primary)}'+
+ '.sw2{display:flex;gap:8px;padding:2px 2px 12px}.sw2 button{width:30px;height:30px;border-radius:50%;border:3px solid transparent;cursor:pointer}.sw2 button.on{border-color:var(--heading)}'+
+ '.acts2{display:flex;gap:8px;justify-content:flex-end}');
+var card=el('div','card');card.style.padding='14px 16px';
+card.appendChild(el('b','','New tab group'));card.firstChild.style.cssText='display:block;margin-bottom:10px;color:var(--heading)';
+var inp=document.createElement('input');inp.placeholder='Group name (optional)';inp.maxLength=24;card.appendChild(inp);
+var sw=el('div','sw2');var btns=[];
+d.colors.forEach(function(c,i){var b=document.createElement('button');b.style.background='rgb('+c[1]+')';b.title=c[0];b.onclick=function(){sel=i;paint()};sw.appendChild(b);btns.push(b)});
+function paint(){btns.forEach(function(b,i){b.className=i===sel?'on':''})}paint();card.appendChild(sw);
+var acts=el('div','acts2');var cancel=el('button','btn ghost','Cancel');cancel.onclick=function(){host.remove()};var ok=el('button','btn','Create group');
+function create(){var n=inp.value.trim()||d.colors[sel][0];host.remove();go('tab-group-new/'+d.tab+'/'+sel+'/'+encodeURIComponent(n))}
+ok.onclick=create;acts.appendChild(cancel);acts.appendChild(ok);card.appendChild(acts);
+inp.addEventListener('keydown',function(e){e.stopPropagation();if(e.key==='Enter'){e.preventDefault();create()}else if(e.key==='Escape'){host.remove()}},true);
+finish(card);inp.focus();
+"#;
+
+const TAB_SEARCH_JS: &str = r#"
+var d=__DATA__;var sel=0,shown=[];
+css('.card{padding:10px}.card input{width:100%;border:1px solid var(--border);border-radius:12px;padding:11px 14px;background:transparent;color:var(--heading);font:inherit;font-size:14px;outline:none;margin-bottom:8px}.card input:focus{border-color:var(--primary)}'+
+ '.row.sel{background:var(--hover)}.row .em{background:var(--primary-light);color:var(--primary);border-radius:8px;font-weight:800;font-size:13px;width:28px;height:28px;display:flex;align-items:center;justify-content:center}'+
+ '.tag{font-size:10.5px;font-weight:700;border-radius:99px;padding:2px 8px;color:#fff;margin-left:6px}.lst{max-height:360px;overflow:auto}');
+var card=el('div','card');var inp=document.createElement('input');inp.placeholder='Search your open tabs';card.appendChild(inp);
+var list=el('div','lst');card.appendChild(list);
+function pick(r){host.remove();go('tab-go/'+r[0])}
+function render(){var q=inp.value.toLowerCase().trim();list.textContent='';
+ shown=d.filter(function(r){return (r[1]+' '+r[2]+' '+r[3]).toLowerCase().indexOf(q)>=0});if(sel>=shown.length)sel=0;
+ shown.forEach(function(r,i){var b=el('button','row'+(i===sel?' sel':''));b.appendChild(el('span','em',(r[1]||r[2]||'?').charAt(0).toUpperCase()));
+  var tx=el('span','tx');var t=el('b','',r[1]||r[2]);if(r[5])t.textContent+='  \u00b7 current';tx.appendChild(t);tx.appendChild(el('i','',r[2]));b.appendChild(tx);
+  if(r[3]){var g=el('span','tag',r[3]);g.style.background='rgb('+r[4]+')';b.appendChild(g)}
+  b.onclick=function(){pick(r)};list.appendChild(b)});
+ if(!shown.length)list.appendChild(el('div','sub','No tab matches'))}
+inp.addEventListener('input',function(){sel=0;render()});
+inp.addEventListener('keydown',function(e){e.stopPropagation();
+ if(e.key==='ArrowDown'){e.preventDefault();sel=Math.min(sel+1,shown.length-1);render()}
+ else if(e.key==='ArrowUp'){e.preventDefault();sel=Math.max(sel-1,0);render()}
+ else if(e.key==='Enter'){e.preventDefault();if(shown[sel])pick(shown[sel])}
+ else if(e.key==='Escape'){host.remove()}},true);
+render();finish(card);inp.focus();
+"#;
+
+/// Asks for a tab group's name and colour; creating it posts `tab-group-new/<tab>/<colour>/<name>`.
+pub fn group_prompt(theme: &Theme, token: &str, tab_id: u64) -> String {
+    let colors: Vec<_> = crate::tabgroups::GROUP_COLORS.iter().map(|(n, _, c)| json!([n, format!("{},{},{}", c[0], c[1], c[2])])).collect();
+    let data = json!({"tab": tab_id, "colors": colors});
+    let mut js = open(theme, token, "__ax_pop_group");
+    js.push_str(&css_wrap(".card{left:calc(50% - 150px);top:70px}", 300.0));
+    js.push_str(&GROUP_PROMPT_JS.replace("__DATA__", &data.to_string()));
+    js.push_str("})();");
+    js
+}
+
+/// Search box over the list of open tabs (Ctrl+Shift+A); choosing one posts `tab-go/<id>`.
+pub fn tab_search_popup(theme: &Theme, token: &str, rows: &[(u64, String, String, String, [u8; 3], bool)]) -> String {
+    let data: Vec<_> = rows.iter().map(|(id, t, u, g, c, a)| json!([id, truncate(t, 80), truncate(u, 90), g, format!("{},{},{}", c[0], c[1], c[2]), a])).collect();
+    let mut js = open(theme, token, "__ax_pop_tabsearch");
+    js.push_str(&css_wrap(".card{left:calc(50% - 270px);top:70px}", 540.0));
+    js.push_str(&TAB_SEARCH_JS.replace("__DATA__", &serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())));
+    js.push_str("})();");
+    js
+}
+
+/// `css(...)` call for a popup placed with its own `.card` rule.
+fn css_wrap(extra: &str, width: f32) -> String {
+    format!("\ncss({});\n", css_literal(extra, 6.0, width))
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()

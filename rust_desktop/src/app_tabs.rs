@@ -290,7 +290,7 @@ impl App {
                 .tabs
                 .iter()
                 .enumerate()
-                .map(|(i, t)| crate::storage::SavedTab { position: i as i32, url: t.url.clone(), title: t.title.clone(), is_active: i == self.active })
+                .map(|(i, t)| crate::storage::SavedTab { position: i as i32, url: t.url.clone(), title: t.title.clone(), is_active: i == self.active, group: self.tab_group_key(i) })
                 .collect();
             let _ = s.save_tabs(&saved);
         }
@@ -309,6 +309,7 @@ impl App {
                 if !s.title.is_empty() && t.kind == TabKind::Web {
                     t.title = s.title.clone();
                 }
+                t.group = self.restore_group(&s.group);
                 self.tabs.push(t);
                 if s.is_active {
                     self.active = self.tabs.len() - 1;

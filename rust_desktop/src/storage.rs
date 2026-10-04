@@ -35,6 +35,8 @@ pub struct SavedTab {
     pub url: String,
     pub title: String,
     pub is_active: bool,
+    /// `"<colour>|<name>"` of the tab's group, or empty.
+    pub group: String,
 }
 
 pub struct BrowserStorage {
@@ -53,6 +55,13 @@ impl BrowserStorage {
     }
 
     fn init_tables(&self) -> Result<(), rusqlite::Error> {
+        self.create_tables()?;
+        // Added later: the tab group of each saved tab (older databases get the column here).
+        let _ = self.conn.execute("ALTER TABLE tabs ADD COLUMN grp TEXT NOT NULL DEFAULT ''", []);
+        Ok(())
+    }
+
+    fn create_tables(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -474,17 +483,17 @@ impl BrowserStorage {
     pub fn save_tabs(&self, tabs: &[SavedTab]) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM tabs", [])?;
         let mut stmt = self.conn.prepare(
-            "INSERT INTO tabs (position, url, title, is_active) VALUES (?1, ?2, ?3, ?4)"
+            "INSERT INTO tabs (position, url, title, is_active, grp) VALUES (?1, ?2, ?3, ?4, ?5)"
         )?;
         for tab in tabs {
-            stmt.execute(params![tab.position, tab.url, tab.title, tab.is_active as i32])?;
+            stmt.execute(params![tab.position, tab.url, tab.title, tab.is_active as i32, tab.group])?;
         }
         Ok(())
     }
 
     pub fn get_tabs(&self) -> Result<Vec<SavedTab>, rusqlite::Error> {
         let mut stmt = self.conn.prepare(
-            "SELECT position, url, title, is_active FROM tabs ORDER BY position ASC"
+            "SELECT position, url, title, is_active, grp FROM tabs ORDER BY position ASC"
         )?;
         let entries = stmt.query_map([], |row| {
             Ok(SavedTab {
@@ -492,6 +501,7 @@ impl BrowserStorage {
                 url: row.get(1)?,
                 title: row.get(2)?,
                 is_active: row.get::<_, i32>(3)? != 0,
+                group: row.get(4)?,
             })
         })?.collect::<Result<Vec<_>, _>>()?;
         Ok(entries)
@@ -620,6 +630,20 @@ mod tests {
         st.set_favicon("a.test", b"icon-2").unwrap();
         assert_eq!(st.get_favicon("a.test").unwrap(), b"icon-2");
         assert_eq!(st.get_favicon("b.test"), None);
+    }
+
+    #[test]
+    fn saved_tabs_keep_their_group() {
+        let st = temp_storage();
+        let tabs = vec![
+            SavedTab { position: 0, url: "https://a.test".into(), title: "A".into(), is_active: false, group: "2|Work".into() },
+            SavedTab { position: 1, url: "https://b.test".into(), title: "B".into(), is_active: true, group: String::new() },
+        ];
+        st.save_tabs(&tabs).unwrap();
+        let back = st.get_tabs().unwrap();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].group, "2|Work");
+        assert_eq!(back[1].group, "");
     }
 
     #[test]

@@ -92,6 +92,8 @@ pub struct Tab {
     /// What the tab showed before a typed address, until the new page proves itself with a title (a download
     /// never does, so the tab goes back to this).
     pub prev_nav: Option<(TabKind, String, String)>,
+    /// Tab group (`App::groups`).
+    pub group: Option<u32>,
 }
 
 impl Tab {
@@ -119,6 +121,7 @@ impl Tab {
             source_html: None,
             zoom: 1.0,
             prev_nav: None,
+            group: None,
         }
     }
 }

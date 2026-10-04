@@ -506,6 +506,7 @@ pub mod com {
                     (0x46, true, false) => "find".into(),               // F
                     (0x50, true, false) => "print".into(),              // P
                     (0x4E, true, false) => "new-window".into(),         // N
+                    (0x41, true, true) => "tab-search".into(),          // Ctrl+Shift+A
                     (0x4E, true, true) => "new-incognito".into(),       // Shift+N
                     (0x4F, true, true) => "bookmarks".into(),           // Shift+O
                     (0x2E, true, true) => "clear-data-dialog".into(),   // Shift+Delete

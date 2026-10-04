@@ -330,6 +330,37 @@ impl App {
     pub fn command(&mut self, cmd: &str) {
         let shared = self.shared();
         // ---- tabs and windows
+        if cmd == "tab-search" {
+            self.open_tab_search();
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-go/") {
+            self.tab_search_go(id);
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-group-prompt/") {
+            self.open_group_prompt(id);
+            return;
+        }
+        if let Some(rest) = cmd.strip_prefix("tab-group-new/") {
+            let mut p = rest.splitn(3, '/');
+            if let (Some(id), Some(color), Some(name)) = (p.next().and_then(|v| v.parse::<u64>().ok()), p.next().and_then(|v| v.parse::<usize>().ok()), p.next()) {
+                self.tab_group_new(id, color, &url_decode(name));
+            }
+            return;
+        }
+        if let Some(rest) = cmd.strip_prefix("tab-group-add/") {
+            if let Some((id, gid)) = rest.split_once('/') {
+                if let (Ok(id), Ok(gid)) = (id.parse::<u64>(), gid.parse::<u32>()) {
+                    self.tab_group_add(id, gid);
+                }
+            }
+            return;
+        }
+        if let Some(id) = tab_arg(cmd, "tab-ungroup/") {
+            self.tab_ungroup(id);
+            return;
+        }
         if let Some(id) = tab_arg(cmd, "page-focus/") {
             self.on_pane_focus(id);
             self.command("page-focus");

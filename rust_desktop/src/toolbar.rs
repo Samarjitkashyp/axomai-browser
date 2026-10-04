@@ -57,6 +57,8 @@ pub struct TabItem {
     pub muted: bool,
     pub loading: bool,
     pub sleeping: bool,
+    /// Colour of the tab's group.
+    pub group_color: Option<[u8; 3]>,
 }
 
 pub struct TabStrip {
@@ -428,9 +430,13 @@ pub fn build_toolbar_quads(
             // Rounded top corners only: the quad runs past the titlebar and the toolbar paints over its foot.
             quads.push(rr(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 14.0, 12.0, c(th.primary[0], th.primary[1], th.primary[2], 90)));
             quads.push(rr(r.x, r.y, r.w, r.h + 13.0, 12.0, toolbar_bg));
-            quads.push(rr(r.x + 12.0_f32.min(r.w / 4.0), r.y, r.w - 2.0 * 12.0_f32.min(r.w / 4.0), 2.5, 1.25, if t.private { c(168, 85, 247, 255) } else { primary }));
+            quads.push(rr(r.x + 12.0_f32.min(r.w / 4.0), r.y, r.w - 2.0 * 12.0_f32.min(r.w / 4.0), 2.5, 1.25, if let Some(g) = t.group_color { c(g[0], g[1], g[2], 255) } else if t.private { c(168, 85, 247, 255) } else { primary }));
         } else if t.pinned {
             quads.push(rr_rect(r, 10.0, c(th.primary[0], th.primary[1], th.primary[2], 28)));
+        }
+        if let (Some(g), false) = (t.group_color, is_active) {
+            // A coloured bar marks a grouped tab that is not the selected one.
+            quads.push(rr(r.x + 8.0, r.y + 1.0, r.w - 16.0, 3.0, 1.5, c(g[0], g[1], g[2], 255)));
         }
 
         // favicon, or the green "A" placeholder
