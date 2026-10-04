@@ -182,6 +182,7 @@ impl App {
             };
             self.webview = web::build_webview(&self.window, (w, h), self.chrome_top() * self.scale.max(0.5), initial, &shared, bg);
             if self.webview.is_some() {
+                self.fit_active_view();
                 self.apply_privacy_settings();
                 let doc = self.tabs[idx].doc.clone();
                 self.core.apply_extensions(self.webview.as_ref(), &doc, &shared, &self.extensions);
@@ -323,6 +324,11 @@ impl App {
     pub fn command(&mut self, cmd: &str) {
         let shared = self.shared();
         // ---- tabs and windows
+        if let Some(id) = tab_arg(cmd, "page-focus/") {
+            self.on_pane_focus(id);
+            self.command("page-focus");
+            return;
+        }
         if let Some(id) = tab_arg(cmd, "tab-reload/") {
             if let Some(i) = self.idx_of_id(id) {
                 if i == self.active {
@@ -383,6 +389,7 @@ impl App {
             "new-window" => spawn_window(false),
             "new-incognito" => spawn_window(true),
             "focus-url" => self.focus_address(),
+            "split-view" => self.toggle_split(),
             "page-focus" => {
                 // Giving the web view focus ourselves (tab switch) echoes back as a focus event; only a real click counts.
                 if self.addr_focused && self.addr_focus_at.elapsed() > std::time::Duration::from_millis(600) {

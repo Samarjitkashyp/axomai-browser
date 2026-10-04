@@ -69,6 +69,8 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    /// Split view: (left tab id, right tab id).
+    pub split: Option<(u64, u64)>,
     /// Last time this window told other launches it is running, and last check for addresses they left.
     pub last_beat: Instant,
     pub last_handoff_poll: Instant,
@@ -187,12 +189,15 @@ impl App {
     pub fn fit_active_view(&self) {
         let (w, h) = self.window_size();
         let (s, top) = (self.scale.max(0.5), self.chrome_top());
+        let _ = w;
+        let (x, width) = self.pane_of(self.tabs[self.active].id);
         if let Some(wv) = &self.webview {
             let _ = wv.set_bounds(wry::Rect {
-                position: wry::dpi::PhysicalPosition::new((SIDEBAR_W * s).round() as i32, (top * s).round() as i32).into(),
-                size: wry::dpi::PhysicalSize::new(((w - SIDEBAR_W) * s).max(1.0) as u32, ((h - top) * s).max(1.0) as u32).into(),
+                position: wry::dpi::PhysicalPosition::new((x * s).round() as i32, (top * s).round() as i32).into(),
+                size: wry::dpi::PhysicalSize::new((width * s).max(1.0) as u32, ((h - top) * s).max(1.0) as u32).into(),
             });
         }
+        self.fit_partner();
     }
 
     // ------------------------------------------------------------------- per-frame work
@@ -391,8 +396,9 @@ impl App {
     fn sleep_idle_tabs(&mut self) {
         let Some(limit) = self.settings.sleep_after() else { return };
         let now = Instant::now();
+        let split = self.split;
         for (i, t) in self.tabs.iter_mut().enumerate() {
-            if i == self.active || t.suspended || t.audio {
+            if i == self.active || t.suspended || t.audio || split.is_some_and(|(l, r)| t.id == l || t.id == r) {
                 continue;
             }
             if let Some(v) = &t.view {
@@ -442,6 +448,7 @@ impl App {
 
         quads.extend(self.bar_quads());
         quads.extend(self.infobar_quads());
+        quads.extend(self.split_quads());
         if self.fullscreen {
             // Full screen: the page owns the whole window.
             quads.clear();

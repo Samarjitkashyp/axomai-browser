@@ -25,6 +25,7 @@ pub mod pages;
 pub mod rendering;
 pub mod settings;
 pub mod settings_page;
+pub mod splitview;
 pub mod storage;
 pub mod suggest;
 pub mod sys;
@@ -227,6 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        split: None,
         last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
         last_handoff_poll: std::time::Instant::now(),
         html_fullscreen: false,

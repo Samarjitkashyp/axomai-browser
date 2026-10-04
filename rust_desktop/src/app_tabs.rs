@@ -54,6 +54,15 @@ impl App {
         self.focus_address();
     }
 
+    /// Like `stash_active_view`, but the view stays on screen (it is the other pane of a split view).
+    fn stash_active_view_visible(&mut self) {
+        if let Some(wv) = self.webview.take() {
+            let t = &mut self.tabs[self.active];
+            t.last_active = Instant::now();
+            t.view = Some(wv);
+        }
+    }
+
     fn stash_active_view(&mut self) {
         if let Some(wv) = self.webview.take() {
             let _ = wv.set_visible(false);
@@ -98,6 +107,21 @@ impl App {
         if idx >= self.tabs.len() || idx == self.active {
             return;
         }
+        let new_id = self.tabs[idx].id;
+        match self.split {
+            // Moving focus between the two panes: nothing is hidden.
+            Some((l, r)) if new_id == l || new_id == r => {
+                self.stash_active_view_visible();
+                self.active = idx;
+                self.unstash_view();
+                self.fit_partner();
+                self.after_activation();
+                return;
+            }
+            // Any other tab ends the split.
+            Some(_) => self.end_split(),
+            None => {}
+        }
         self.stash_active_view();
         self.active = idx;
         self.unstash_view();
@@ -127,6 +151,9 @@ impl App {
             return;
         }
         let closing_id = self.tabs[idx].id;
+        if self.split.is_some_and(|(l, r)| l == closing_id || r == closing_id) {
+            self.end_split();
+        }
         self.drop_permissions_for_tab(closing_id);
         let t = &self.tabs[idx];
         if !(t.kind == TabKind::Home) && !t.private {

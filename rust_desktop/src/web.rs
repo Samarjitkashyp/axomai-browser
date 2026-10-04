@@ -529,7 +529,7 @@ pub mod com {
     pub fn install_focus(wv: &WebView, shared: WebShared) {
         let controller = wv.controller();
         let handler = FocusChangedEventHandler::create(Box::new(move |_sender, _args| {
-            shared.push_command("page-focus");
+            shared.push_command(&format!("page-focus/{}", shared.tab_id));
             Ok(())
         }));
         unsafe {
