@@ -452,6 +452,7 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "shot-edit" => self.open_screenshot_editor(),
             "site-settings" => self.open_site_settings(),
             "site-clear-data" => self.site_clear_data(),
             "tts-toggle" => self.tts_toggle(1.0),

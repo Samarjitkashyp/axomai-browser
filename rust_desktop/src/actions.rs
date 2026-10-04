@@ -498,7 +498,7 @@ impl Core {
         match result {
             Ok(path) => {
                 let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                self.toast(wv, &format!("📸 Saved {}", name), Some(("Show in folder", &shared.token, "open-folder")), shared);
+                self.toast(wv, &format!("📸 Saved {}", name), Some(("Edit", &shared.token, "shot-edit")), shared);
             }
             Err(e) => self.toast(wv, &format!("Screenshot failed: {}", e), None, shared),
         }

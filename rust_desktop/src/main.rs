@@ -9,6 +9,7 @@ pub mod site_tweaks;
 pub mod pagetools;
 pub mod portability;
 pub mod sessions;
+pub mod shotedit;
 pub mod sitesettings;
 pub mod tts;
 pub mod shortcuts;
