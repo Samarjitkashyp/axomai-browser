@@ -88,7 +88,12 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         ),
     );
     let engines: Vec<(String, String)> = SearchEngine::all().iter().map(|e| (e.name().to_string(), e.name().to_string())).collect();
-    let search = row(t("settings.search"), t("settings.search.desc"), &select("search_engine", &engines, v.engine.name()));
+    let cities: Vec<(String, String)> = crate::settings::CITIES.iter().map(|(k, n)| (k.to_string(), n.to_string())).collect();
+    let search = format!(
+        "{}{}",
+        row(t("settings.search"), t("settings.search.desc"), &select("search_engine", &engines, v.engine.name())),
+        row(t("settings.weather"), t("settings.weather.desc"), &select("weather_city", &cities, &s.weather_city)),
+    );
 
     // ---- privacy
     let tracking_opts = vec![
@@ -258,6 +263,7 @@ mod tests {
                 "sleep_minutes" => "5",
                 "tracking" => "strict",
                 "language" => "en",
+                "weather_city" => "guwahati",
                 "download_dir" => "C:\\x",
                 _ => "1",
             };

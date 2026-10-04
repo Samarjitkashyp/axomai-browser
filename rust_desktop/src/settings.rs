@@ -57,6 +57,17 @@ impl Tracking {
     }
 }
 
+/// Cities the home page can show the weather for: (key, name).
+pub const CITIES: &[(&str, &str)] = &[
+    ("jorhat", "Jorhat"),
+    ("guwahati", "Guwahati"),
+    ("dibrugarh", "Dibrugarh"),
+    ("silchar", "Silchar"),
+    ("tezpur", "Tezpur"),
+    ("tinsukia", "Tinsukia"),
+    ("nagaon", "Nagaon"),
+];
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub startup: Startup,
@@ -75,6 +86,8 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Key of the city whose weather the home page shows.
+    pub weather_city: String,
     /// UI language code ("en", "as", "hi", ...).
     pub language: String,
 }
@@ -92,6 +105,7 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            weather_city: "jorhat".into(),
             language: "en".into(),
         }
     }
@@ -143,6 +157,9 @@ impl Settings {
         if let Some(v) = get("tracking").and_then(|v| Tracking::parse(&v)) {
             s.tracking = v;
         }
+        if let Some(v) = get("weather_city").filter(|v| CITIES.iter().any(|(k, _)| k == v)) {
+            s.weather_city = v;
+        }
         if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
             s.password_manager = v;
         }
@@ -183,6 +200,7 @@ impl Settings {
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
+            "weather_city" => CITIES.iter().any(|(k, _)| *k == value).then(|| self.weather_city = value.to_string()).is_some(),
             "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),
             "language" => {
                 if crate::i18n::is_supported(value) {

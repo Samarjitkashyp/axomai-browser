@@ -14,7 +14,7 @@ html,body{
   height:100%;overflow-x:hidden;overflow-y:auto;
   font-family:'Plus Jakarta Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   -webkit-user-select:none;user-select:none;
-  background:#f0fdf4;
+  background:var(--bg-1);
 }
 .new-tab-content{position:relative;min-height:100vh;display:flex;flex-direction:column}
 
@@ -37,7 +37,7 @@ html,body{
 .hero-greeting-box{color:#fff}
 .greeting-assamese{
   font-family:'Noto Sans Bengali','Plus Jakarta Sans',sans-serif;
-  font-size:15px;font-weight:700;color:#a7f3d0;
+  font-size:15px;font-weight:700;color:var(--acc-soft);
   margin-bottom:4px;letter-spacing:0.3px;
 }
 .live-clock{font-size:48px;font-weight:800;color:#fff;line-height:1.1;text-shadow:0 2px 12px rgba(0,0,0,0.4)}
@@ -49,8 +49,8 @@ html,body{
   border:1px solid rgba(255,255,255,0.25)!important;
   color:#fff;min-width:180px;
 }
-.weather-location{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#a7f3d0;margin-bottom:8px}
-.weather-location svg{fill:#a7f3d0}
+.weather-location{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--acc-soft);margin-bottom:8px}
+.weather-location svg{fill:var(--acc-soft)}
 .weather-info{display:flex;align-items:center;gap:12px}
 .weather-temp-details{display:flex;flex-direction:column}
 .weather-temp-details .temp{font-size:28px;font-weight:800;line-height:1}
@@ -86,14 +86,14 @@ html,body{
 }
 .search-box-pill:focus-within{
   background:#fff!important;
-  border-color:#10b981!important;
-  box-shadow:0 0 0 4px rgba(16,185,129,0.3),0 8px 32px rgba(0,0,0,0.3);
+  border-color:var(--acc)!important;
+  box-shadow:0 0 0 4px rgba(var(--acc-rgb),0.3),0 8px 32px rgba(0,0,0,0.3);
   transform:translateY(-2px);
 }
 .search-engine-selector{
   display:flex;align-items:center;gap:4px;
   padding:4px 8px;border-radius:8px;cursor:pointer;
-  font-size:16px;color:#64748b;
+  font-size:16px;color:var(--t-muted);
   transition:background 0.2s;
 }
 .search-engine-selector:hover{background:rgba(0,0,0,0.05)}
@@ -109,14 +109,14 @@ html,body{
 }
 .search-mic-btn{
   width:36px;height:36px;border-radius:50%;
-  background:transparent;color:#64748b;
+  background:transparent;color:var(--t-muted);
 }
-.search-mic-btn:hover{background:rgba(0,0,0,0.05);color:#10b981}
+.search-mic-btn:hover{background:rgba(0,0,0,0.05);color:var(--acc)}
 .search-submit-btn{
   width:40px;height:40px;border-radius:50%;
-  background:#10b981;color:#fff;margin-left:4px;
+  background:var(--acc);color:#fff;margin-left:4px;
 }
-.search-submit-btn:hover{background:#059669;transform:scale(1.05)}
+.search-submit-btn:hover{background:var(--acc-2);transform:scale(1.05)}
 
 .shortcuts-row{
   display:flex;gap:20px;justify-content:center;
@@ -136,7 +136,7 @@ html,body{
   font-size:22px;
 }
 .shortcut-item:hover .shortcut-icon{box-shadow:0 10px 30px rgba(0,0,0,0.35)}
-.sc-assam{background:linear-gradient(135deg,#10b981,#059669)}
+.sc-assam{background:linear-gradient(135deg,var(--acc),var(--acc-2))}
 .sc-yt{background:#1a1a1a}
 .sc-google{background:#ffffff;border:1px solid #e5e7eb}
 .sc-github{background:#24292f}
@@ -150,31 +150,31 @@ html,body{
 .bottom-dashboard-grid{
   display:grid;grid-template-columns:1.1fr 0.9fr;gap:20px;
   padding:24px 32px 32px;
-  background:linear-gradient(180deg,#f0fdf4 0%,#ecfdf5 100%);
+  background:linear-gradient(180deg,var(--bg-1) 0%,var(--bg-2) 100%);
 }
 @media(max-width:900px){.bottom-dashboard-grid{grid-template-columns:1fr}}
 
 .card{border-radius:20px;padding:22px;overflow:hidden}
-.news-card{background:rgba(255,255,255,0.88)!important;border:1px solid rgba(16,185,129,0.15)!important}
-.quick-tools-card{background:rgba(255,255,255,0.88)!important;border:1px solid rgba(16,185,129,0.15)!important}
+.news-card{background:var(--card)!important;border:1px solid rgba(var(--acc-rgb),0.15)!important}
+.quick-tools-card{background:var(--card)!important;border:1px solid rgba(var(--acc-rgb),0.15)!important}
 
 .card-header-tabs{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .card-tabs{display:flex;gap:6px;flex-wrap:wrap}
 .card-tab{
   padding:7px 14px;border-radius:9999px;border:none;
   font-size:13px;font-weight:600;cursor:pointer;
-  background:rgba(16,185,129,0.08);color:#166534;
+  background:rgba(var(--acc-rgb),0.08);color:var(--t-sub);
   transition:all 0.2s;font-family:inherit;
 }
-.card-tab:hover{background:rgba(16,185,129,0.15)}
-.card-tab.active{background:#10b981;color:#fff}
+.card-tab:hover{background:rgba(var(--acc-rgb),0.15)}
+.card-tab.active{background:var(--acc);color:#fff}
 .card-refresh-btn{
   width:32px;height:32px;border-radius:50%;border:none;
-  background:rgba(16,185,129,0.08);cursor:pointer;
+  background:rgba(var(--acc-rgb),0.08);cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  color:#166534;transition:all 0.2s;
+  color:var(--t-sub);transition:all 0.2s;
 }
-.card-refresh-btn:hover{background:rgba(16,185,129,0.2);transform:rotate(90deg)}
+.card-refresh-btn:hover{background:rgba(var(--acc-rgb),0.2);transform:rotate(90deg)}
 
 .news-content-layout{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:700px){.news-content-layout{grid-template-columns:1fr}}
@@ -192,43 +192,43 @@ html,body{
   font-size:11px;font-weight:700;color:#fff;
   text-transform:uppercase;letter-spacing:0.5px;
 }
-.badge-green{background:rgba(16,185,129,0.9)}
+.badge-green{background:rgba(var(--acc-rgb),0.9)}
 .badge-gold{background:rgba(245,158,11,0.9)}
 .badge-blue{background:rgba(59,130,246,0.9)}
 .badge-purple{background:rgba(139,92,246,0.9)}
-.featured-title{font-size:16px;font-weight:700;color:#022c22;line-height:1.4;margin-bottom:8px}
-.news-footer-meta{display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b}
-.news-dot{color:rgba(16,185,129,0.3)}
+.featured-title{font-size:16px;font-weight:700;color:var(--t-head);line-height:1.4;margin-bottom:8px}
+.news-footer-meta{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t-muted)}
+.news-dot{color:rgba(var(--acc-rgb),0.3)}
 .stacked-articles{display:flex;flex-direction:column;gap:14px}
 .sub-article{display:flex;gap:12px;cursor:pointer;transition:transform 0.15s;align-items:flex-start}
 .sub-article:hover{transform:translateX(4px)}
 .sub-img-wrap{width:80px;height:60px;border-radius:10px;overflow:hidden;flex-shrink:0}
 .sub-img-wrap img{width:100%;height:100%;object-fit:cover}
 .sub-info{flex:1;min-width:0}
-.sub-title{font-size:13px;font-weight:600;color:#022c22;line-height:1.4;margin-top:4px}
-.news-time{font-size:11px;color:#64748b}
+.sub-title{font-size:13px;font-weight:600;color:var(--t-head);line-height:1.4;margin-top:4px}
+.news-time{font-size:11px;color:var(--t-muted)}
 
 .card-header-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .card-title-group{display:flex;align-items:center;gap:8px}
-.card-heading{font-size:17px;font-weight:700;color:#022c22}
+.card-heading{font-size:17px;font-weight:700;color:var(--t-head)}
 .tools-tag{
-  font-size:11px;font-weight:700;color:#10b981;
+  font-size:11px;font-weight:700;color:var(--acc);
   padding:4px 10px;border-radius:9999px;
-  background:rgba(16,185,129,0.1);
+  background:rgba(var(--acc-rgb),0.1);
 }
 .tools-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
 .tool-tile{
   display:flex;flex-direction:column;align-items:center;gap:10px;
   padding:18px 10px;border-radius:16px;cursor:pointer;
-  background:rgba(16,185,129,0.04);
-  border:1px solid rgba(16,185,129,0.1);
+  background:rgba(var(--acc-rgb),0.04);
+  border:1px solid rgba(var(--acc-rgb),0.1);
   transition:all 0.2s;
 }
 .tool-tile:hover{
-  background:rgba(16,185,129,0.08);
-  border-color:rgba(16,185,129,0.25);
+  background:rgba(var(--acc-rgb),0.08);
+  border-color:rgba(var(--acc-rgb),0.25);
   transform:translateY(-3px);
-  box-shadow:0 8px 20px rgba(16,185,129,0.12);
+  box-shadow:0 8px 20px rgba(var(--acc-rgb),0.12);
 }
 .tool-icon-box{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center}
 .bg-red-soft{background:#fee2e2}
@@ -237,23 +237,32 @@ html,body{
 .bg-green-soft{background:#dcfce7}
 .bg-purple-soft{background:#f3e8ff}
 .bg-indigo-soft{background:#e0e7ff}
-.tool-label{font-size:12px;font-weight:600;color:#064e3b;text-align:center}
+.tool-label{font-size:12px;font-weight:600;color:var(--t-text);text-align:center}
 
 .shield-hub-box{
-  background:linear-gradient(135deg,#ecfdf5,#d1fae5);
+  background:var(--card-2);
   border-radius:16px;padding:16px 20px;
-  border:1px solid rgba(16,185,129,0.2);
+  border:1px solid rgba(var(--acc-rgb),0.2);
 }
 .shield-hub-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.shield-hub-title{font-size:14px;font-weight:700;color:#064e3b}
+.shield-hub-title{font-size:14px;font-weight:700;color:var(--t-text)}
 .shield-hub-badge{
-  font-size:11px;font-weight:700;color:#10b981;
+  font-size:11px;font-weight:700;color:var(--acc);
   padding:3px 10px;border-radius:9999px;
-  background:rgba(16,185,129,0.15);
+  background:rgba(var(--acc-rgb),0.15);
 }
 .shield-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center}
-.metric-num{font-size:22px;font-weight:800;color:#059669;display:block}
-.metric-desc{font-size:11px;color:#166534;font-weight:500}
+.metric-num{font-size:22px;font-weight:800;color:var(--acc-2);display:block}
+.metric-desc{font-size:11px;color:var(--t-sub);font-weight:500}
+
+:root{--acc:#10b981;--acc-2:#059669;--acc-rgb:16,185,129;--acc-soft:#a7f3d0;--bg-1:#f0fdf4;--bg-2:#ecfdf5;--card:rgba(255,255,255,0.88);--card-2:linear-gradient(135deg,#ecfdf5,#d1fae5);--t-head:#022c22;--t-text:#064e3b;--t-sub:#166534;--t-muted:#64748b}
+html[data-theme=kaziranga]{--acc:#15803d;--acc-2:#166534;--acc-rgb:21,128,61;--acc-soft:#bbf7d0;--bg-1:#f0fdf4;--bg-2:#e8f5ec;--card-2:linear-gradient(135deg,#e8f5ec,#d1e7d8);--t-head:#052e16;--t-text:#14532d;--t-sub:#166534}
+html[data-theme=brahmaputra]{--acc:#0284c7;--acc-2:#0369a1;--acc-rgb:2,132,199;--acc-soft:#bae6fd;--bg-1:#f0f9ff;--bg-2:#e0f2fe;--card-2:linear-gradient(135deg,#e0f2fe,#bae6fd);--t-head:#082f49;--t-text:#0c4a6e;--t-sub:#075985}
+html[data-theme=bihu-crimson]{--acc:#dc2626;--acc-2:#b91c1c;--acc-rgb:220,38,38;--acc-soft:#fecaca;--bg-1:#fef2f2;--bg-2:#fee2e2;--card-2:linear-gradient(135deg,#fee2e2,#fecaca);--t-head:#450a0a;--t-text:#7f1d1d;--t-sub:#991b1b}
+html[data-theme=cyber-dark]{--acc:#10b981;--acc-2:#34d399;--acc-rgb:16,185,129;--acc-soft:#6ee7b7;--bg-1:#0b1220;--bg-2:#0f172a;--card:rgba(15,23,42,0.88);--card-2:linear-gradient(135deg,#0f2a2a,#12333a);--t-head:#ffffff;--t-text:#e2e8f0;--t-sub:#94a3b8;--t-muted:#94a3b8}
+.search-mic-btn.listening{color:#ef4444!important;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.45}}
+.tool-tile{cursor:pointer}
 </style>
 </head>
 <body>
@@ -273,16 +282,13 @@ html,body{
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
             <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
           </svg>
-          <span>Jorhat Tea Estate</span>
+          <span id="wxCity">Jorhat</span>
         </div>
         <div class="weather-info">
-          <svg viewBox="0 0 24 24" width="24" height="24" fill="#f59e0b">
-            <circle cx="12" cy="12" r="5"/>
-            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="#f59e0b" stroke-width="2"/>
-          </svg>
+          <span id="wxIcon" style="font-size:26px;line-height:1">&#9728;&#65039;</span>
           <div class="weather-temp-details">
-            <span class="temp">26&deg;C</span>
-            <span class="condition">Misty Morning</span>
+            <span class="temp" id="wxTemp">--&deg;C</span>
+            <span class="condition" id="wxCond">Loading weather&hellip;</span>
           </div>
         </div>
       </div>
@@ -382,55 +388,9 @@ html,body{
           <button class="card-tab" data-cat="wildlife">&#129430; Wildlife</button>
           <button class="card-tab" data-cat="coding">&#128187; Rust &amp; Dev</button>
         </div>
-        <button class="card-refresh-btn" title="Refresh">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-        </button>
+        
       </div>
-      <div class="news-content-layout">
-        <div class="featured-article" data-url="https://tourism.assam.gov.in">
-          <div class="featured-img-wrap">
-            <img src="assets/images/kaziranga.jpg" alt="Kaziranga National Park" />
-            <span class="news-badge badge-green">Assam Tourism</span>
-          </div>
-          <h3 class="featured-title">Kaziranga National Park records historic visitor influx this season</h3>
-          <div class="news-footer-meta">
-            <span class="news-source">Assam Tribune</span>
-            <span class="news-dot">&bull;</span>
-            <span class="news-time">3 hours ago</span>
-            <span class="news-dot">&bull;</span>
-            <span class="news-read">4 min read</span>
-          </div>
-        </div>
-        <div class="stacked-articles">
-          <div class="sub-article" data-url="https://tourism.assam.gov.in">
-            <div class="sub-img-wrap"><img src="assets/images/tea_garden_bg.jpg" alt="Tea" /></div>
-            <div class="sub-info">
-              <span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">Tea Heritage</span>
-              <h4 class="sub-title">Bespoke Tea Tourism in Upper Assam gains global acclaim</h4>
-              <span class="news-time">5 hours ago</span>
-            </div>
-          </div>
-          <div class="sub-article" data-url="https://tourism.assam.gov.in">
-            <div class="sub-img-wrap"><img src="assets/images/rhino.jpg" alt="Rhino" /></div>
-            <div class="sub-info">
-              <span class="news-badge badge-blue" style="position:static;display:inline-block;margin-bottom:4px">Conservation</span>
-              <h4 class="sub-title">Greater One-Horned Rhino population shows steady rise in Assam</h4>
-              <span class="news-time">8 hours ago</span>
-            </div>
-          </div>
-          <div class="sub-article" data-url="https://tourism.assam.gov.in">
-            <div class="sub-img-wrap"><img src="assets/images/bihu.jpg" alt="Bihu" /></div>
-            <div class="sub-info">
-              <span class="news-badge badge-purple" style="position:static;display:inline-block;margin-bottom:4px">Culture</span>
-              <h4 class="sub-title">Rongali Bihu cultural celebrations showcase Assam's vibrant soul</h4>
-              <span class="news-time">1 day ago</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <div class="news-content-layout" id="newsLayout"></div>
     </div>
 
     <!-- Smart Tools Card -->
@@ -443,61 +403,51 @@ html,body{
         <span class="tools-tag">Instant Browser Utility</span>
       </div>
       <div class="tools-grid">
-        <div class="tool-tile">
-          <div class="tool-icon-box bg-red-soft">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="#ef4444"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-          </div>
-          <span class="tool-label">Word to PDF</span>
-        </div>
-        <div class="tool-tile">
-          <div class="tool-icon-box bg-blue-soft">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="#3b82f6"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-          </div>
-          <span class="tool-label">PDF Merger</span>
-        </div>
-        <div class="tool-tile">
+        <div class="tool-tile" id="toolCompress" title="Shrink a photo in your browser; nothing is uploaded">
           <div class="tool-icon-box bg-orange-soft">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#f97316"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
           </div>
           <span class="tool-label">Image Compress</span>
         </div>
-        <div class="tool-tile">
+        <div class="tool-tile" id="toolQr" title="Make a QR code for an address">
           <div class="tool-icon-box bg-indigo-soft">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="#6366f1"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><rect x="18" y="18" width="3" height="3"/></svg>
           </div>
           <span class="tool-label">QR Generator</span>
         </div>
-        <div class="tool-tile">
+        <div class="tool-tile" data-url="https://translate.google.com/?sl=en&amp;tl=as&amp;op=translate" title="Opens Google Translate (English to Assamese)">
           <div class="tool-icon-box bg-green-soft">
-            <span style="font-weight:700;font-size:16px;color:#10b981;">&#2437;&#2488;&#2478;</span>
+            <span style="font-weight:700;font-size:16px;color:var(--acc);">&#2437;&#2488;&#2478;</span>
           </div>
           <span class="tool-label">&#2437;&#2488;&#2478;&#2496;&#2479;&#2492;&#2494; Translator</span>
         </div>
-        <div class="tool-tile">
+        <div class="tool-tile" id="toolAi" title="Open the Axomai AI panel">
           <div class="tool-icon-box bg-purple-soft">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="#8b5cf6"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="#8b5cf6"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-.94 2.06L16 18l2.06.94L19 21l.94-2.06L22 18l-2.06-.94L19 15z"/></svg>
           </div>
-          <span class="tool-label">AI Note Summarizer</span>
+          <span class="tool-label">AI Assistant</span>
+        </div>
+        <div class="tool-tile" data-url="axomai://bookmarks">
+          <div class="tool-icon-box bg-blue-soft"><span style="font-size:20px">&#11088;</span></div>
+          <span class="tool-label">Bookmarks</span>
+        </div>
+        <div class="tool-tile" data-url="axomai://downloads">
+          <div class="tool-icon-box bg-red-soft"><span style="font-size:20px">&#11015;&#65039;</span></div>
+          <span class="tool-label">Downloads</span>
         </div>
       </div>
+
+      <input type="file" id="compressInput" accept="image/*" style="display:none">
 
       <div class="shield-hub-box">
         <div class="shield-hub-header">
           <span class="shield-hub-title">&#128737; Axomai Shield Status</span>
-          <span class="shield-hub-badge">Active &amp; Guarding</span>
+          <span class="shield-hub-badge" id="shieldBadge">Active</span>
         </div>
         <div class="shield-metrics">
           <div class="metric-item">
-            <span class="metric-num">128</span>
-            <span class="metric-desc">Ads Blocked</span>
-          </div>
-          <div class="metric-item">
-            <span class="metric-num">342</span>
-            <span class="metric-desc">Trackers Stopped</span>
-          </div>
-          <div class="metric-item">
-            <span class="metric-num">42 MB</span>
-            <span class="metric-desc">Bandwidth Saved</span>
+            <span class="metric-num" id="shieldTotal">0</span>
+            <span class="metric-desc">Ads &amp; trackers blocked, all time</span>
           </div>
         </div>
       </div>
@@ -563,6 +513,102 @@ html,body{
       this.classList.add('active');
     });
   });
+})();
+</script>
+<script>
+(function(){
+  var q=new URLSearchParams(location.search);
+  // ---- theme (the browser passes the active heritage theme)
+  var th=q.get('theme');
+  if(th&&/^[a-z-]{1,24}$/.test(th)) document.documentElement.setAttribute('data-theme',th);
+
+  // ---- shield total (real number from the browser)
+  var total=parseInt(q.get('shield')||'0',10)||0;
+  var st=document.getElementById('shieldTotal'); if(st) st.textContent=total.toLocaleString();
+  var sb=document.getElementById('shieldBadge'); if(sb&&q.get('shieldon')==='0') sb.textContent='Paused';
+
+  // ---- weather (open-meteo, no account needed)
+  var CITIES={jorhat:[26.75,94.22,'Jorhat'],guwahati:[26.14,91.74,'Guwahati'],dibrugarh:[27.47,94.91,'Dibrugarh'],silchar:[24.83,92.78,'Silchar'],tezpur:[26.65,92.79,'Tezpur'],tinsukia:[27.49,95.36,'Tinsukia'],nagaon:[26.35,92.68,'Nagaon']};
+  var city=CITIES[q.get('city')]||CITIES.jorhat;
+  var WMO=function(c){
+    if(c===0)return['Clear sky','\u2600\uFE0F'];if(c<=2)return['Partly cloudy','\u26C5'];if(c===3)return['Overcast','\u2601\uFE0F'];
+    if(c===45||c===48)return['Foggy','\uD83C\uDF2B\uFE0F'];if(c>=51&&c<=57)return['Drizzle','\uD83C\uDF26\uFE0F'];
+    if(c>=61&&c<=67)return['Rain','\uD83C\uDF27\uFE0F'];if(c>=71&&c<=77)return['Snow','\u2744\uFE0F'];
+    if(c>=80&&c<=82)return['Rain showers','\uD83C\uDF26\uFE0F'];if(c>=95)return['Thunderstorm','\u26C8\uFE0F'];return['Cloudy','\u2601\uFE0F']};
+  document.getElementById('wxCity').textContent=city[2];
+  function weather(){
+    fetch('https://api.open-meteo.com/v1/forecast?latitude='+city[0]+'&longitude='+city[1]+'&current=temperature_2m,weather_code,is_day&timezone=auto')
+      .then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){
+        var c=j.current,w=WMO(c.weather_code);
+        document.getElementById('wxTemp').innerHTML=Math.round(c.temperature_2m)+'&deg;C';
+        document.getElementById('wxCond').textContent=w[0];
+        document.getElementById('wxIcon').textContent=(c.is_day===0&&c.weather_code<=2)?'\uD83C\uDF19':w[1];
+      }).catch(function(){document.getElementById('wxCond').textContent='Weather unavailable (offline?)'});
+  }
+  weather(); setInterval(weather,30*60*1000);
+
+  // ---- voice search
+  var input=document.getElementById('heroSearchInput'),mic=document.querySelector('.search-mic-btn'),ph=input?input.placeholder:'';
+  function note(t){if(!input)return;input.placeholder=t;setTimeout(function(){input.placeholder=ph},3500)}
+  if(mic) mic.addEventListener('click',function(){
+    var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){note('Voice search is not available in this browser build');return}
+    var r=new SR();r.lang='en-IN';r.interimResults=false;r.maxAlternatives=1;
+    mic.classList.add('listening');input.placeholder='Listening\u2026';
+    r.onresult=function(e){input.value=e.results[0][0].transcript;input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'}))};
+    r.onerror=function(e){note(e.error==='no-speech'?'I did not hear anything':e.error==='audio-capture'?'No microphone was found':'Voice search is not supported by the web engine on this PC ('+e.error+')')};
+    r.onend=function(){mic.classList.remove('listening');if(input.placeholder==='Listening\u2026')input.placeholder=ph};
+    try{r.start()}catch(x){mic.classList.remove('listening');note('Voice search could not start')}
+  });
+
+  // ---- explore cards (curated links, no made-up headlines)
+  var EXPLORE={
+    assam:[{t:'Kaziranga National Park',d:'World Heritage Site and home of the one-horned rhinoceros',u:'https://en.wikipedia.org/wiki/Kaziranga_National_Park',img:'assets/images/kaziranga.jpg',b:'Wildlife'},
+      {t:'Assam tea',d:'The story of the world\u2019s largest tea-growing region',u:'https://en.wikipedia.org/wiki/Assam_tea',img:'assets/images/tea_garden_bg.jpg',b:'Tea heritage'},
+      {t:'Indian rhinoceros',d:'Conservation of the greater one-horned rhino',u:'https://en.wikipedia.org/wiki/Indian_rhinoceros',img:'assets/images/rhino.jpg',b:'Conservation'},
+      {t:'Bihu',d:'Assam\u2019s festivals of music, dance and harvest',u:'https://en.wikipedia.org/wiki/Bihu',img:'assets/images/bihu.jpg',b:'Culture'}],
+    tech:[{t:'Hugging Face',d:'Open models, datasets and Spaces',u:'https://huggingface.co',e:'\uD83E\uDD17',b:'AI'},
+      {t:'arXiv: Artificial Intelligence',d:'The latest research papers',u:'https://arxiv.org/list/cs.AI/recent',e:'\uD83D\uDCC4',b:'Research'},
+      {t:'Hacker News',d:'Discussion of technology and startups',u:'https://news.ycombinator.com',e:'\uD83D\uDCF0',b:'Tech'},
+      {t:'Anthropic',d:'Makers of Claude',u:'https://www.anthropic.com',e:'\u2728',b:'AI'}],
+    wildlife:[{t:'Kaziranga National Park',d:'Rhinos, tigers and elephants on the Brahmaputra plain',u:'https://en.wikipedia.org/wiki/Kaziranga_National_Park',img:'assets/images/kaziranga.jpg',b:'Park'},
+      {t:'Manas National Park',d:'Tiger reserve in the Himalayan foothills',u:'https://en.wikipedia.org/wiki/Manas_National_Park',e:'\uD83D\uDC05',b:'Park'},
+      {t:'Dibru-Saikhowa National Park',d:'Home of the feral horses and many river birds',u:'https://en.wikipedia.org/wiki/Dibru-Saikhowa_National_Park',e:'\uD83D\uDC0E',b:'Park'},
+      {t:'Pobitora Wildlife Sanctuary',d:'Highest density of rhinos in the world',u:'https://en.wikipedia.org/wiki/Pobitora_Wildlife_Sanctuary',e:'\uD83E\uDD8F',b:'Sanctuary'}],
+    coding:[{t:'The Rust Programming Language',d:'Reliable and efficient software',u:'https://www.rust-lang.org',e:'\uD83E\uDD80',b:'Rust'},
+      {t:'docs.rs',d:'Documentation for every crate',u:'https://docs.rs',e:'\uD83D\uDCDA',b:'Docs'},
+      {t:'crates.io',d:'The Rust package registry',u:'https://crates.io',e:'\uD83D\uDCE6',b:'Packages'},
+      {t:'This Week in Rust',d:'A weekly summary of what is new',u:'https://this-week-in-rust.org',e:'\uD83D\uDCC5',b:'Newsletter'}]
+  };
+  function esc(x){return String(x).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+  function art(a,big){
+    var pic=a.img?'<img src="'+a.img+'" alt="">':'<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:'+(big?54:28)+'px;background:var(--card-2)">'+a.e+'</div>';
+    if(big)return '<div class="featured-article" data-url="'+esc(a.u)+'"><div class="featured-img-wrap">'+pic+'<span class="news-badge badge-green">'+esc(a.b)+'</span></div><h3 class="featured-title">'+esc(a.t)+'</h3><div class="news-footer-meta"><span class="news-source">'+esc(a.d)+'</span></div></div>';
+    return '<div class="sub-article" data-url="'+esc(a.u)+'"><div class="sub-img-wrap">'+pic+'</div><div class="sub-info"><span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">'+esc(a.b)+'</span><h4 class="sub-title">'+esc(a.t)+'</h4><span class="news-time">'+esc(a.d)+'</span></div></div>';
+  }
+  function show(cat){
+    var list=EXPLORE[cat]||EXPLORE.assam;
+    document.getElementById('newsLayout').innerHTML=art(list[0],true)+'<div class="stacked-articles">'+list.slice(1).map(function(a){return art(a,false)}).join('')+'</div>';
+    document.querySelectorAll('#newsLayout [data-url]').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){location.href=this.dataset.url})});
+  }
+  document.querySelectorAll('.card-tab').forEach(function(t){t.addEventListener('click',function(){show(this.dataset.cat)})});
+  show('assam');
+
+  // ---- tools
+  document.querySelectorAll('.tool-tile[data-url]').forEach(function(el){el.addEventListener('click',function(){location.href=this.dataset.url})});
+  var ai=document.getElementById('toolAi');if(ai)ai.addEventListener('click',function(){location.href='axomai://open-ai'});
+  var qr=document.getElementById('toolQr');if(qr)qr.addEventListener('click',function(){
+    var u=prompt('Web address for the QR code (https://...)');if(!u)return;u=u.trim();
+    if(!/^https?:\/\//i.test(u))u='https://'+u;location.href='axomai://qr-for/'+encodeURIComponent(u)});
+  var ci=document.getElementById('compressInput'),ct=document.getElementById('toolCompress');
+  if(ct&&ci){ct.addEventListener('click',function(){ci.click()});
+    ci.addEventListener('change',function(){var f=ci.files[0];if(!f)return;var img=new Image(),url=URL.createObjectURL(f);
+      img.onload=function(){var max=2000,sc=Math.min(1,max/Math.max(img.width,img.height)),c=document.createElement('canvas');
+        c.width=Math.round(img.width*sc);c.height=Math.round(img.height*sc);c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+        c.toBlob(function(b){var a=document.createElement('a');a.href=URL.createObjectURL(b);
+          a.download=f.name.replace(/\.[^.]+$/,'')+'-compressed.jpg';document.body.appendChild(a);a.click();a.remove();
+          note('Saved '+Math.round(b.size/1024)+' KB (was '+Math.round(f.size/1024)+' KB)')},'image/jpeg',0.72);URL.revokeObjectURL(url)};
+      img.onerror=function(){note('That file is not an image I can read')};img.src=url;ci.value=''})}
 })();
 </script>
 </body>

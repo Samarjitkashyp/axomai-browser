@@ -37,6 +37,8 @@ const EN: &[(&str, &str)] = &[
     ("settings.tracking.basic", "Basic"),
     ("settings.tracking.balanced", "Balanced"),
     ("settings.tracking.strict", "Strict"),
+    ("settings.weather", "Weather city"),
+    ("settings.weather.desc", "The place whose weather the New Tab page shows."),
     ("settings.passwords", "Offer to save passwords"),
     ("settings.passwords.desc", "Saved logins are encrypted with your Windows account and only filled in on the same site."),
     ("settings.passwords.manage", "Manage"),

@@ -76,8 +76,18 @@ impl App {
 
     // ------------------------------------------------------------------ page loading
 
+    /// The New Tab page, told which theme, weather city and Shield total to show.
     pub fn home_page_url(&self) -> String {
-        self.ui_file("home.html")
+        let blocked = self.hub.shield.total_blocked.load(std::sync::atomic::Ordering::Relaxed);
+        let on = self.hub.shield.adblock.load(std::sync::atomic::Ordering::Relaxed) || self.hub.shield.privacy.load(std::sync::atomic::Ordering::Relaxed);
+        format!(
+            "{}?theme={}&city={}&shield={}&shieldon={}",
+            self.ui_file("home.html"),
+            self.core.theme.id,
+            self.settings.weather_city,
+            blocked,
+            on as u8
+        )
     }
 
     fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
@@ -454,6 +464,11 @@ impl App {
             "add-bookmark" => self.toggle_bookmark_now(),
             "settings-reset" => self.reset_settings(),
             "https-back" => self.https_back(),
+            "open-ai" => {
+                let right = self.anchor_for(|l| l.ai);
+                let title = self.tabs[self.active].title.clone();
+                self.core.open_ai(self.webview.as_ref(), &shared, right, &title);
+            }
             "bm-import-chrome" => self.import_chrome_bookmarks(),
             "bm-import-file" => self.pick_bookmark_file(),
             "bm-export" => self.export_bookmarks(),
@@ -534,6 +549,9 @@ impl App {
             self.bookmarks_changed();
         } else if let Some((action, arg)) = cmd.strip_prefix("perm-").and_then(|r| r.split_once('/')) {
             self.permission_command(action, &url_decode(arg));
+        } else if let Some(url) = cmd.strip_prefix("qr-for/") {
+            let right = self.anchor_for(|l| l.qr);
+            self.core.open_qr(self.webview.as_ref(), &shared, right, &url_decode(url));
         } else if let Some(url) = cmd.strip_prefix("https-continue/") {
             self.https_continue(&url_decode(url));
         } else if let Some((action, arg)) = cmd.strip_prefix("pw-").and_then(|r| r.split_once('/')) {
@@ -558,7 +576,7 @@ impl App {
 impl App {
     /// Re-render the active tab if it is one of Axomai's own pages (after a theme / language / data change).
     pub fn refresh_internal_page(&mut self) {
-        if matches!(self.tabs[self.active].kind, TabKind::Extensions | TabKind::Settings | TabKind::Page(_)) {
+        if matches!(self.tabs[self.active].kind, TabKind::Home | TabKind::Extensions | TabKind::Settings | TabKind::Page(_)) {
             self.load_active_page();
         }
     }
@@ -603,7 +621,7 @@ impl App {
                     self.hub.set_download_dir(dir);
                     self.refresh_internal_page();
                 }
-                "language" => self.refresh_internal_page(),
+                "language" | "weather_city" => self.refresh_internal_page(),
                 "https_only" | "tracking" => self.apply_privacy_settings(),
                 "gpc" => {
                     self.apply_privacy_settings();
@@ -628,7 +646,7 @@ impl App {
     pub fn reset_settings(&mut self) {
         if let Some(s) = &self.storage {
             for key in [
-                "startup", "restore_session", "home_url", "password_manager", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
+                "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
                 "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
