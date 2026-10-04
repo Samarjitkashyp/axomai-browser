@@ -436,6 +436,68 @@ pub fn suggest_popup(theme: &Theme, token: &str, left: f32, width: f32, rows: &[
     )
 }
 
+const PW_PROMPT_JS: &str = r#"
+var d=__DATA__;
+function send(a){try{window.chrome.webview.postMessage({ax:'pw',k:'confirm',a:a})}catch(e){}host.remove()}
+var bar=document.createElement('div');bar.className='bar';
+var tx=document.createElement('div');tx.className='tx';var b=document.createElement('b');b.textContent=d[0];var i=document.createElement('i');i.textContent='\u{1F511} '+d[1];tx.appendChild(b);tx.appendChild(i);bar.appendChild(tx);
+function btn(t,cls,a){var e=document.createElement('button');e.textContent=t;e.className=cls;e.onclick=function(){send(a)};bar.appendChild(e)}
+btn(d[2],'p','save');btn('Never','g','never');btn('Not now','g','no');
+css('.bar{position:fixed;top:10px;right:24px;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:12px 14px;color:var(--text);font-size:13px;max-width:min(560px,92vw)}'+
+'.tx{display:flex;flex-direction:column;margin-right:8px;min-width:0}.tx b{color:var(--heading);font-size:13.5px}.tx i{font-style:normal;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
+'button{border:0;border-radius:10px;padding:8px 14px;font:600 12.5px inherit;font-family:inherit;cursor:pointer}.p{background:var(--primary);color:#fff}.g{background:var(--hover);color:var(--heading)}');
+root.appendChild(bar);document.documentElement.appendChild(host);
+"#;
+
+const PW_OFFER_JS: &str = r#"
+var d=__DATA__;
+var card=document.createElement('div');card.className='card';
+var hd=document.createElement('div');hd.className='hd';hd.textContent='\u{1F511} Saved passwords for '+d.host;card.appendChild(hd);
+d.users.forEach(function(u,i){var r=document.createElement('div');r.className='row';r.textContent=u;
+ r.addEventListener('mousedown',function(e){e.preventDefault();e.stopPropagation();try{window.chrome.webview.postMessage({ax:'pw',k:'fill',i:i})}catch(x){}host.remove()});card.appendChild(r)});
+css('.card{position:fixed;left:'+Math.max(6,Math.min(d.x,innerWidth-Math.max(240,d.w)-12))+'px;top:'+(d.y+4)+'px;min-width:'+Math.max(240,d.w)+'px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px;color:var(--text);font-size:13px}'+
+'.hd{padding:6px 10px;font-size:11.5px;color:var(--muted)}.row{padding:9px 10px;border-radius:8px;cursor:pointer;color:var(--heading);font-weight:600}.row:hover{background:var(--hover)}');
+root.appendChild(card);document.documentElement.appendChild(host);
+document.addEventListener('mousedown',function m(e){if(!e.composedPath().includes(host)){host.remove();document.removeEventListener('mousedown',m,true)}},true);
+document.addEventListener('keydown',function k(e){if(e.key==='Escape'){host.remove();document.removeEventListener('keydown',k,true)}},true);
+"#;
+
+/// "Save password?" bar. Its buttons post `{ax:'pw',k:'confirm',a}`; the browser decides what that means.
+pub fn pw_prompt(theme: &Theme, host: &str, user: &str, update: bool) -> String {
+    let title = if update { format!("Update password for {}?", host) } else { format!("Save password for {}?", host) };
+    let shown_user = if user.is_empty() { "(no username)" } else { user };
+    let data = json!([title, shown_user, if update { "Update" } else { "Save" }]);
+    format!("(function(){{{}{}}})();", shell(theme, "__ax_pop_pwsave"), PW_PROMPT_JS.replace("__DATA__", &data.to_string()))
+}
+
+/// Dropdown of saved usernames under a login field; choosing one posts `{ax:'pw',k:'fill',i}`.
+pub fn pw_offer(theme: &Theme, host: &str, x: f64, y: f64, w: f64, users: &[String]) -> String {
+    let data = json!({"host": host, "x": x, "y": y, "w": w, "users": users});
+    format!(
+        "(function(){{var __o=document.getElementById('__ax_pop_pw');if(__o)__o.remove();{}{}}})();",
+        shell(theme, "__ax_pop_pw"),
+        PW_OFFER_JS.replace("__DATA__", &data.to_string())
+    )
+}
+
+/// Put a login into the page's form: the visible password field, and the visible text field before it.
+pub fn pw_fill(user: &str, pass: &str) -> String {
+    format!(
+        r#"(function(u,p){{
+function shown(e){{return !!(e.offsetWidth||e.offsetHeight||e.getClientRects().length)}}
+var pf=Array.prototype.filter.call(document.querySelectorAll('input[type=password]'),shown)[0];if(!pf)return;
+var scope=pf.form||document,all=scope.querySelectorAll('input:not([type]),input[type=text],input[type=email],input[type=tel]'),uf=null;
+for(var i=0;i<all.length;i++){{if(shown(all[i])&&(all[i].compareDocumentPosition(pf)&4))uf=all[i]}}
+var set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+function put(el,v){{set.call(el,v);el.dispatchEvent(new Event('input',{{bubbles:true}}));el.dispatchEvent(new Event('change',{{bubbles:true}}))}}
+if(uf&&u)put(uf,u);put(pf,p);
+var h=document.getElementById('__ax_pop_pw');if(h)h.remove();
+}})({},{});"#,
+        serde_json::to_string(user).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(pass).unwrap_or_else(|_| "\"\"".into())
+    )
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()

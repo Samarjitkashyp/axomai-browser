@@ -115,6 +115,10 @@ impl App {
                 let entries = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default();
                 pages::bookmarks_page(&ctx, &entries)
             }
+            TabKind::Page("passwords") => {
+                let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
+                pages::passwords_page(&ctx, &logins, &never)
+            }
             TabKind::Page("downloads") => {
                 let entries = self.storage.as_ref().and_then(|s| s.get_downloads(200).ok()).unwrap_or_default();
                 pages::downloads_page(&ctx, &entries, &self.live_downloads())
@@ -503,6 +507,8 @@ impl App {
                 let _ = s.delete_folder(&url_decode(folder), crate::bookmarks_io::DEFAULT_FOLDER);
             }
             self.bookmarks_changed();
+        } else if let Some((action, arg)) = cmd.strip_prefix("pw-").and_then(|r| r.split_once('/')) {
+            self.password_command(action, &url_decode(arg));
         } else if let Some((action, id)) = cmd.strip_prefix("dl-").and_then(|r| r.split_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
             self.download_command(action, id);
         } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
@@ -574,6 +580,10 @@ impl App {
                     self.refresh_internal_page();
                 }
                 "language" => self.refresh_internal_page(),
+                "password_manager" => {
+                    self.core.set_passwords(self.settings.password_manager);
+                    self.sync_extensions_for_active();
+                }
                 "bookmark_bar" => {
                     self.refresh_bar();
                     self.fit_active_view();
@@ -588,13 +598,14 @@ impl App {
     pub fn reset_settings(&mut self) {
         if let Some(s) = &self.storage {
             for key in [
-                "startup", "restore_session", "home_url", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
+                "startup", "restore_session", "home_url", "password_manager", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
                 "https_only", "tracking", "gpc", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }
         }
         self.settings = crate::settings::Settings::default();
+        self.core.set_passwords(true);
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);
         // Switch every extension back on through the normal path so the web views follow.

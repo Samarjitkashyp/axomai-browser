@@ -22,6 +22,8 @@ pub struct Core {
     pub profile_name: String,
     /// Bumped whenever an extension switch changes; a tab rebuilds its document-start script when it is behind.
     pub ext_generation: u64,
+    /// Whether web pages get the password-manager script.
+    pub passwords: bool,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -65,6 +67,7 @@ impl Core {
             theme,
             profile_name,
             ext_generation: 0,
+            passwords: true,
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -89,7 +92,12 @@ impl Core {
         shared.shield.adblock.store(adblock, Ordering::SeqCst);
         shared.shield.privacy.store(privacy, Ordering::SeqCst);
         if let Some(wv) = wv {
-            doc.set(wv, &ext_scripts::doc_start(adblock, privacy));
+            let mut script = ext_scripts::doc_start(adblock, privacy);
+            if self.passwords {
+                script.push('\n');
+                script.push_str(crate::passwords::PAGE_SCRIPT);
+            }
+            doc.set(wv, &script);
             web::com::set_memory_low(wv, exts[ex::BOOSTER].enabled);
         }
         if exts[ex::BOOSTER].enabled {
@@ -98,6 +106,14 @@ impl Core {
             }
         } else {
             self.booster_next = None;
+        }
+    }
+
+    /// The password manager was switched on or off: every tab rebuilds its document-start script.
+    pub fn set_passwords(&mut self, on: bool) {
+        if self.passwords != on {
+            self.passwords = on;
+            self.ext_generation += 1;
         }
     }
 

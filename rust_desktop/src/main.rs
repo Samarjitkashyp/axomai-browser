@@ -6,6 +6,8 @@ pub mod app_input;
 pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
+pub mod passwords;
+pub mod secret;
 pub mod bookmarks_io;
 pub mod app_bookmarks;
 pub mod downloads;
@@ -188,10 +190,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bar_marks: Vec::new(),
         dls: Vec::new(),
         dl_push_at: std::time::Instant::now(),
+        pw_pending: None,
+        pw_offer: None,
         safe: false,
         proxy,
         _instance: instance,
     };
+    app.core.passwords = app.settings.password_manager;
     app.refresh_bar();
     app.restore_or_start(saved_tabs);
 

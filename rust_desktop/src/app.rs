@@ -63,6 +63,8 @@ pub struct App {
     /// Downloads that are running (or waiting for a "Save as" answer).
     pub dls: Vec<crate::downloads::DlState>,
     pub dl_push_at: Instant,
+    pub pw_pending: Option<crate::passwords::PwPending>,
+    pub pw_offer: Option<crate::passwords::PwOffer>,
 
     pub mouse: (f32, f32),
     pub left_down: bool,
@@ -180,6 +182,7 @@ impl App {
             self.hide_suggestions();
         }
         self.push_download_progress();
+        self.show_pending_prompt();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();
         self.sync_with_page();
@@ -223,7 +226,9 @@ impl App {
             match ev {
                 WebEvent::Navigating(url) => self.on_navigating(idx, &url),
                 WebEvent::Download(d) => self.on_download_event(idx, d),
+                WebEvent::PageMsg(source, json) => self.on_page_message(idx, &source, &json),
                 WebEvent::LoadStarted(url) => {
+                    self.password_page_changed(tab_id);
                     if url.starts_with("http://") || url.starts_with("https://") {
                         self.tabs[idx].loading = true;
                         if idx == self.active {

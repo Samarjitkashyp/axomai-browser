@@ -247,6 +247,44 @@ pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry], live: &Live) -
     ui_shell::page(ctx, "downloads", "Downloads", &body, DOWNLOADS_JS)
 }
 
+pub fn passwords_page(ctx: &PageCtx, logins: &[(i64, String, String, String)], never: &[String]) -> String {
+    let mut rows = String::new();
+    for (id, origin, user, updated) in logins {
+        let shown_user = if user.is_empty() { "(no username)" } else { user.as_str() };
+        rows.push_str(&format!(
+            "<div class=\"item\" style=\"cursor:default\"><div class=\"ic\">\u{1F511}</div><div class=\"t\"><b>{origin}</b><span>{user} \u{00B7} \u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}</span></div><div class=\"m\">{updated}</div>\
+             <button class=\"btn ghost\" onclick=\"go('pw-copy-user/{id}')\">Copy username</button>\
+             <button class=\"btn ghost\" onclick=\"go('pw-copy/{id}')\">Copy password</button>\
+             <button class=\"x\" title=\"Delete\" onclick=\"if(confirm('Delete this saved password?'))go('pw-delete/{id}')\">\u{2715}</button></div>",
+            origin = escape(origin),
+            user = escape(shown_user),
+            updated = escape(updated),
+            id = id
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str("<div class=\"empty\">No saved passwords. When you sign in to a site, the browser offers to save the login.</div>");
+    }
+    let mut never_html = String::new();
+    if !never.is_empty() {
+        never_html.push_str("<h2>Never saved</h2><div class=\"card\">");
+        for o in never {
+            never_html.push_str(&format!(
+                "<div class=\"item\" style=\"cursor:default\"><div class=\"t\"><b>{o}</b></div><button class=\"btn ghost\" data-o=\"{o}\" onclick=\"go('pw-never-remove/'+encodeURIComponent(this.dataset.o))\">Offer again</button></div>",
+                o = escape(o)
+            ));
+        }
+        never_html.push_str("</div>");
+    }
+    let body = format!(
+        "{head}<div class=\"card\">{rows}</div>{never}",
+        head = ui_shell::heading("Passwords", "Encrypted with your Windows account. Filled in only on the site they were saved for."),
+        rows = rows,
+        never = never_html
+    );
+    ui_shell::page(ctx, "passwords", "Passwords", &body, "")
+}
+
 pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
     let mut rows = String::new();
     for (i, e) in extensions.iter().enumerate() {
@@ -339,6 +377,14 @@ mod tests {
         let d = DownloadEntry { id: 9, url: "u".into(), filename: "f".into(), filepath: "p".into(), size_bytes: 10, status: "completed".into(), started_at: String::new() };
         let html = downloads_page(&ctx(), &[d], &Live::new());
         assert!(html.contains("go('dl-open/9')") && html.contains("go('dl-show/9')"));
+    }
+
+    #[test]
+    fn passwords_page_never_shows_the_password() {
+        let html = passwords_page(&ctx(), &[(3, "https://a.test".into(), "me<b>".into(), "2026-10-04 10:00:00".into())], &["https://n.test".into()]);
+        assert!(html.contains("go('pw-copy/3')") && html.contains("me&lt;b&gt;"));
+        assert!(html.contains("Never saved") && html.contains("https://n.test"));
+        assert!(passwords_page(&ctx(), &[], &[]).contains("No saved passwords"));
     }
 
     #[test]

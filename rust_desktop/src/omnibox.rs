@@ -10,6 +10,7 @@ const INTERNAL: &[(&str, &str)] = &[
     ("history", "history"),
     ("bookmarks", "bookmarks"),
     ("downloads", "downloads"),
+    ("passwords", "passwords"),
     ("about", "about"),
 ];
 

@@ -76,6 +76,15 @@ impl BrowserStorage {
                 status TEXT NOT NULL DEFAULT 'pending',
                 started_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+            CREATE TABLE IF NOT EXISTS passwords (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                origin TEXT NOT NULL,
+                username TEXT NOT NULL DEFAULT '',
+                secret BLOB NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(origin, username)
+            );
+            CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -285,6 +294,61 @@ impl BrowserStorage {
         Ok(entries)
     }
 
+    /// Insert or replace the saved login for (origin, username). `secret` is already encrypted.
+    pub fn save_password(&self, origin: &str, username: &str, secret: &[u8]) -> Result<i64, rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO passwords (origin, username, secret) VALUES (?1, ?2, ?3)
+             ON CONFLICT(origin, username) DO UPDATE SET secret = excluded.secret, updated_at = datetime('now')",
+            params![origin, username, secret],
+        )?;
+        self.conn.query_row("SELECT id FROM passwords WHERE origin = ?1 AND username = ?2", params![origin, username], |r| r.get(0))
+    }
+
+    /// `(id, username)` of the logins saved for exactly this origin.
+    pub fn credentials_for(&self, origin: &str) -> Vec<(i64, String)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, username FROM passwords WHERE origin = ?1 ORDER BY updated_at DESC, id DESC") else { return Vec::new() };
+        stmt.query_map(params![origin], |r| Ok((r.get(0)?, r.get(1)?))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn password_secret(&self, id: i64) -> Option<Vec<u8>> {
+        self.conn.query_row("SELECT secret FROM passwords WHERE id = ?1", params![id], |r| r.get(0)).ok()
+    }
+
+    /// `(origin, username)` of a saved login.
+    pub fn password_row(&self, id: i64) -> Option<(String, String)> {
+        self.conn.query_row("SELECT origin, username FROM passwords WHERE id = ?1", params![id], |r| Ok((r.get(0)?, r.get(1)?))).ok()
+    }
+
+    /// `(id, origin, username, updated)` of every saved login, grouped by site.
+    pub fn list_passwords(&self) -> Vec<(i64, String, String, String)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, origin, username, datetime(updated_at, 'localtime') FROM passwords ORDER BY origin, username") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn delete_password(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM passwords WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn pw_never_has(&self, origin: &str) -> bool {
+        self.conn.query_row("SELECT 1 FROM pw_never WHERE origin = ?1", params![origin], |_| Ok(())).is_ok()
+    }
+
+    pub fn pw_never_add(&self, origin: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("INSERT OR IGNORE INTO pw_never (origin) VALUES (?1)", params![origin])?;
+        Ok(())
+    }
+
+    pub fn pw_never_remove(&self, origin: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM pw_never WHERE origin = ?1", params![origin])?;
+        Ok(())
+    }
+
+    pub fn pw_never_list(&self) -> Vec<String> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT origin FROM pw_never ORDER BY origin") else { return Vec::new() };
+        stmt.query_map([], |r| r.get(0)).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
     pub fn get_download(&self, id: i64) -> Option<DownloadEntry> {
         self.conn
             .query_row("SELECT id, url, filename, filepath, size_bytes, status, started_at FROM downloads WHERE id = ?1", params![id], |row| {
@@ -429,6 +493,33 @@ mod tests {
         assert_eq!(st.import_bookmarks(&items), 1, "existing addresses are skipped");
         st.delete_folder("Imp", "Unsorted").unwrap();
         assert!(st.get_bookmarks().unwrap().iter().all(|b| b.folder != "Imp"));
+    }
+
+    #[test]
+    fn passwords_are_per_origin_and_replaced_not_duplicated() {
+        let st = temp_storage();
+        let a = st.save_password("https://a.test", "me", b"one").unwrap();
+        let again = st.save_password("https://a.test", "me", b"two").unwrap();
+        assert_eq!(a, again, "same login keeps its row");
+        st.save_password("https://b.test", "me", b"x").unwrap();
+        assert_eq!(st.credentials_for("https://a.test").len(), 1);
+        assert_eq!(st.credentials_for("https://a.test:8443").len(), 0, "a different port is a different site");
+        assert_eq!(st.password_secret(a).unwrap(), b"two");
+        st.delete_password(a).unwrap();
+        assert!(st.password_secret(a).is_none());
+        assert_eq!(st.list_passwords().len(), 1);
+    }
+
+    #[test]
+    fn never_list_round_trips() {
+        let st = temp_storage();
+        assert!(!st.pw_never_has("https://a.test"));
+        st.pw_never_add("https://a.test").unwrap();
+        st.pw_never_add("https://a.test").unwrap();
+        assert!(st.pw_never_has("https://a.test"));
+        assert_eq!(st.pw_never_list(), vec!["https://a.test".to_string()]);
+        st.pw_never_remove("https://a.test").unwrap();
+        assert!(!st.pw_never_has("https://a.test"));
     }
 
     #[test]

@@ -117,11 +117,12 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         escape(t("settings.clear.button")),
     );
     let privacy = format!(
-        "{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}",
         row(t("settings.adblock"), t("settings.adblock.desc"), &switch(&format!("data-ext=\"{}\"", ex::ADBLOCK), v.extensions[ex::ADBLOCK].enabled)),
         row(t("settings.privacy_guard"), t("settings.privacy_guard.desc"), &switch(&format!("data-ext=\"{}\"", ex::PRIVACY), v.extensions[ex::PRIVACY].enabled)),
         row(t("settings.https_only"), t("settings.https_only.desc"), &switch("data-set=\"https_only\"", s.https_only)),
         row(t("settings.tracking"), t("settings.tracking.desc"), &select("tracking", &tracking_opts, s.tracking.key())),
+        row(t("settings.passwords"), t("settings.passwords.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('passwords')\">{}</button> {}", escape(t("settings.passwords.manage")), switch("data-set=\"password_manager\"", s.password_manager))),
         row(t("settings.gpc"), t("settings.gpc.desc"), &switch("data-set=\"gpc\"", s.gpc)),
         row(
             t("settings.permissions"),

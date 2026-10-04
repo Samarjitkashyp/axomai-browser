@@ -73,6 +73,8 @@ pub struct Settings {
     pub tracking: Tracking,
     /// Send the "Global Privacy Control" signal.
     pub gpc: bool,
+    /// Offer to save and fill passwords.
+    pub password_manager: bool,
     /// UI language code ("en", "as", "hi", ...).
     pub language: String,
 }
@@ -89,6 +91,7 @@ impl Default for Settings {
             https_only: false,
             tracking: Tracking::Balanced,
             gpc: true,
+            password_manager: true,
             language: "en".into(),
         }
     }
@@ -140,6 +143,9 @@ impl Settings {
         if let Some(v) = get("tracking").and_then(|v| Tracking::parse(&v)) {
             s.tracking = v;
         }
+        if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
+            s.password_manager = v;
+        }
         if let Some(v) = get("gpc").and_then(|v| truthy(&v)) {
             s.gpc = v;
         }
@@ -177,6 +183,7 @@ impl Settings {
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
+            "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),
             "language" => {
                 if crate::i18n::is_supported(value) {
                     self.language = value.to_string();

@@ -64,6 +64,8 @@ pub enum WebEvent {
     Audio(bool),
     /// Progress of a file download started by this tab.
     Download(DlEvent),
+    /// A JSON message posted by a web page: (address of the sending document, raw JSON).
+    PageMsg(String, String),
 }
 
 /// Live counters + switches read by the network hook. The switches and the lifetime total are shared by every
@@ -283,6 +285,7 @@ pub fn build_webview(
         com::install_audio(&wv, shared.clone());
         com::install_focus(&wv, shared.clone());
         com::install_downloads(&wv, shared.clone());
+        com::disable_builtin_autofill(&wv);
     }
     Some(wv)
 }
@@ -349,6 +352,16 @@ pub mod com {
             let mut raw = PWSTR::null();
             let body = unsafe {
                 if args.TryGetWebMessageAsString(&mut raw).is_err() {
+                    // Not a string: a structured message from a page (the password manager). The sender's address
+                    // comes from the web view, never from the message itself.
+                    let mut json = PWSTR::null();
+                    let mut source = PWSTR::null();
+                    if args.WebMessageAsJson(&mut json).is_ok() && args.Source(&mut source).is_ok() {
+                        let (json, source) = (take_pwstr(json), take_pwstr(source));
+                        if json.len() <= 16 * 1024 {
+                            shared.push_event(WebEvent::PageMsg(source, json));
+                        }
+                    }
                     return Ok(());
                 }
                 take_pwstr(raw)
@@ -483,6 +496,20 @@ pub mod com {
                 }
             }
         });
+    }
+
+    /// Axomai has its own password manager (encrypted, per-site); WebView2's built-in "Saved info" would keep a
+    /// second, unrelated copy of what was typed into forms.
+    pub fn disable_builtin_autofill(wv: &WebView) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            if let Ok(settings) = core.Settings() {
+                if let Ok(s4) = settings.cast::<ICoreWebView2Settings4>() {
+                    let _ = s4.SetIsGeneralAutofillEnabled(false);
+                    let _ = s4.SetIsPasswordAutosaveEnabled(false);
+                }
+            }
+        }
     }
 
     /// Takes over every download of this web view: saves into the download folder under a free name, hides the
@@ -855,6 +882,8 @@ pub mod com {
     }
 
     pub fn download_control(_id: u64, _action: &str) {}
+
+    pub fn disable_builtin_autofill(_wv: &WebView) {}
 
     pub fn can_go(_wv: &WebView) -> (bool, bool) {
         (false, false)
