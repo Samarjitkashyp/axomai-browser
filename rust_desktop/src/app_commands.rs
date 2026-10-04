@@ -119,6 +119,10 @@ impl App {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
                 pages::passwords_page(&ctx, &logins, &never)
             }
+            TabKind::Page("permissions") => {
+                let rows = self.storage.as_ref().map(|s| s.list_permissions()).unwrap_or_default();
+                pages::permissions_page(&ctx, &rows)
+            }
             TabKind::Page("downloads") => {
                 let entries = self.storage.as_ref().and_then(|s| s.get_downloads(200).ok()).unwrap_or_default();
                 pages::downloads_page(&ctx, &entries, &self.live_downloads())
@@ -165,6 +169,7 @@ impl App {
             };
             self.webview = web::build_webview(&self.window, (w, h), self.chrome_top(), initial, &shared, bg);
             if self.webview.is_some() {
+                self.apply_privacy_settings();
                 let doc = self.tabs[idx].doc.clone();
                 self.core.apply_extensions(self.webview.as_ref(), &doc, &shared, &self.extensions);
                 self.tabs[idx].ext_gen = self.core.ext_generation;
@@ -222,6 +227,7 @@ impl App {
             "bookmarks" => TabKind::Page("bookmarks"),
             "downloads" => TabKind::Page("downloads"),
             "passwords" => TabKind::Page("passwords"),
+            "permissions" => TabKind::Page("permissions"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -393,7 +399,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" => {
                 self.open_internal(cmd)
             }
 
@@ -429,6 +435,7 @@ impl App {
             }
             "add-bookmark" => self.toggle_bookmark_now(),
             "settings-reset" => self.reset_settings(),
+            "https-back" => self.https_back(),
             "bm-import-chrome" => self.import_chrome_bookmarks(),
             "bm-import-file" => self.pick_bookmark_file(),
             "bm-export" => self.export_bookmarks(),
@@ -507,6 +514,10 @@ impl App {
                 let _ = s.delete_folder(&url_decode(folder), crate::bookmarks_io::DEFAULT_FOLDER);
             }
             self.bookmarks_changed();
+        } else if let Some((action, arg)) = cmd.strip_prefix("perm-").and_then(|r| r.split_once('/')) {
+            self.permission_command(action, &url_decode(arg));
+        } else if let Some(url) = cmd.strip_prefix("https-continue/") {
+            self.https_continue(&url_decode(url));
         } else if let Some((action, arg)) = cmd.strip_prefix("pw-").and_then(|r| r.split_once('/')) {
             self.password_command(action, &url_decode(arg));
         } else if let Some((action, id)) = cmd.strip_prefix("dl-").and_then(|r| r.split_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
@@ -580,6 +591,12 @@ impl App {
                     self.refresh_internal_page();
                 }
                 "language" => self.refresh_internal_page(),
+                "https_only" | "tracking" => self.apply_privacy_settings(),
+                "gpc" => {
+                    self.apply_privacy_settings();
+                    self.core.set_gpc(self.settings.gpc);
+                    self.sync_extensions_for_active();
+                }
                 "password_manager" => {
                     self.core.set_passwords(self.settings.password_manager);
                     self.sync_extensions_for_active();
@@ -606,6 +623,8 @@ impl App {
         }
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
+        self.core.set_gpc(true);
+        self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;
         self.core.set_theme("tea-garden", None);
         // Switch every extension back on through the normal path so the web views follow.
@@ -661,6 +680,83 @@ impl App {
             self.core.toast(wv, "Browsing data cleared", None, &shared);
         }
         self.refresh_internal_page();
+    }
+}
+
+impl App {
+    /// Push the privacy switches to every tab (shared flags) and the tracking level to the web engine profile.
+    pub fn apply_privacy_settings(&self) {
+        let shield = &self.hub.shield;
+        shield.https_only.store(self.settings.https_only, std::sync::atomic::Ordering::SeqCst);
+        shield.gpc.store(self.settings.gpc, std::sync::atomic::Ordering::SeqCst);
+        if let Some(wv) = &self.webview {
+            web::com::set_tracking_level(wv, self.settings.tracking.key());
+        }
+    }
+
+    /// HTTPS-only mode cancelled an http:// navigation in tab `idx`; go to the https:// address instead.
+    pub fn on_https_upgrade(&mut self, idx: usize, https: &str) {
+        let t = &mut self.tabs[idx];
+        t.kind = TabKind::Web;
+        t.url = https.to_string();
+        t.title = crate::blocklist::host_of(https);
+        if let Some(wv) = self.view_of(idx) {
+            let _ = wv.load_url(https);
+        }
+        self.redraw = true;
+    }
+
+    /// The https:// version did not load: show a warning page that offers the http:// original.
+    pub fn on_https_failed(&mut self, idx: usize, http_url: &str) {
+        let shared = self.tabs[idx].shared.clone();
+        let host = crate::blocklist::host_of(http_url);
+        let html = pages::https_warning_page(&self.page_ctx(&shared), &host, http_url);
+        let t = &mut self.tabs[idx];
+        t.url = http_url.to_string();
+        t.title = "Connection not secure".to_string();
+        // The engine shows its own error page right after reporting the failure; ours replaces it a moment later.
+        self.https_warn.push((self.tabs[idx].id, html, std::time::Instant::now()));
+        self.redraw = true;
+    }
+
+    /// Put the warning page in place once the engine's error page has appeared.
+    pub fn show_https_warnings(&mut self) {
+        if self.https_warn.iter().all(|(_, _, at)| at.elapsed() < std::time::Duration::from_millis(350)) {
+            return;
+        }
+        let due: Vec<(u64, String, std::time::Instant)> = std::mem::take(&mut self.https_warn);
+        for (tab_id, html, at) in due {
+            if at.elapsed() < std::time::Duration::from_millis(350) {
+                self.https_warn.push((tab_id, html, at));
+            } else if let Some(idx) = self.idx_of_id(tab_id) {
+                if let Some(wv) = self.view_of(idx) {
+                    let _ = wv.load_html(&html);
+                }
+                // The address bar must not keep claiming the https:// address that failed.
+                let t = &mut self.tabs[idx];
+                if let Some(rest) = t.url.strip_prefix("https") {
+                    t.url = format!("http{}", rest);
+                }
+            }
+        }
+    }
+
+    /// "Continue to the site (not secure)": remember the host for this session and open the http:// address.
+    pub fn https_continue(&mut self, http_url: &str) {
+        if !http_url.starts_with("http://") {
+            return;
+        }
+        if let Ok(mut ex) = self.hub.shield.https_exempt.lock() {
+            ex.insert(crate::blocklist::host_of(http_url).to_ascii_lowercase());
+        }
+        self.navigate_active(http_url);
+    }
+
+    pub fn https_back(&mut self) {
+        match &self.webview {
+            Some(wv) if self.core.can_back => web::com::go_back(wv),
+            _ => self.open_internal("home"),
+        }
     }
 }
 

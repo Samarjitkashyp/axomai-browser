@@ -7,6 +7,7 @@ pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
 pub mod passwords;
+pub mod permissions;
 pub mod secret;
 pub mod bookmarks_io;
 pub mod app_bookmarks;
@@ -192,11 +193,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dl_push_at: std::time::Instant::now(),
         pw_pending: None,
         pw_offer: None,
+        perm_queue: Vec::new(),
+        perm_session: Default::default(),
+        infobar_on: false,
+        https_warn: Vec::new(),
         safe: false,
         proxy,
         _instance: instance,
     };
     app.core.passwords = app.settings.password_manager;
+    app.core.gpc = app.settings.gpc;
+    app.apply_privacy_settings();
     app.refresh_bar();
     app.restore_or_start(saved_tabs);
 

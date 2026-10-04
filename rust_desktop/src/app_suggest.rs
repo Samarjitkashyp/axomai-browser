@@ -12,15 +12,6 @@ use axomai_engine::{GpuQuad, NativeGpuCompositor};
 const MAX_SUGGESTIONS: usize = 6;
 
 impl App {
-    /// Top edge of the web view: the tab strip, the toolbar and, when shown, the bookmarks bar.
-    pub fn chrome_top(&self) -> f32 {
-        if self.settings.bookmark_bar {
-            CHROME_TOP + BOOKMARK_BAR_H
-        } else {
-            CHROME_TOP
-        }
-    }
-
     // ------------------------------------------------------------------ suggestions
 
     /// Recompute the dropdown for the text being typed and show it (or hide it when nothing matches).

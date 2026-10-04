@@ -24,6 +24,8 @@ pub struct Core {
     pub ext_generation: u64,
     /// Whether web pages get the password-manager script.
     pub passwords: bool,
+    /// Whether pages see `navigator.globalPrivacyControl`.
+    pub gpc: bool,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -68,6 +70,7 @@ impl Core {
             profile_name,
             ext_generation: 0,
             passwords: true,
+            gpc: true,
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -93,6 +96,10 @@ impl Core {
         shared.shield.privacy.store(privacy, Ordering::SeqCst);
         if let Some(wv) = wv {
             let mut script = ext_scripts::doc_start(adblock, privacy);
+            if self.gpc {
+                script.push('\n');
+                script.push_str("try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true})}catch(e){}");
+            }
             if self.passwords {
                 script.push('\n');
                 script.push_str(crate::passwords::PAGE_SCRIPT);
@@ -110,6 +117,13 @@ impl Core {
     }
 
     /// The password manager was switched on or off: every tab rebuilds its document-start script.
+    pub fn set_gpc(&mut self, on: bool) {
+        if self.gpc != on {
+            self.gpc = on;
+            self.ext_generation += 1;
+        }
+    }
+
     pub fn set_passwords(&mut self, on: bool) {
         if self.passwords != on {
             self.passwords = on;

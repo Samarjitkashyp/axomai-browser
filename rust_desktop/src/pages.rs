@@ -285,6 +285,57 @@ pub fn passwords_page(ctx: &PageCtx, logins: &[(i64, String, String, String)], n
     ui_shell::page(ctx, "passwords", "Passwords", &body, "")
 }
 
+pub fn permissions_page(ctx: &PageCtx, rows: &[(i64, String, String, bool)]) -> String {
+    let mut list = String::new();
+    let mut last = "";
+    for (id, origin, kind, allow) in rows {
+        if origin != last {
+            if !last.is_empty() {
+                list.push_str("</div>");
+            }
+            list.push_str(&format!("<div class=\"fh2\"><b>{}</b></div><div class=\"card\">", escape(origin)));
+            last = origin;
+        }
+        let name = crate::permissions::label(kind).1;
+        list.push_str(&format!(
+            "<div class=\"item\" style=\"cursor:default\"><div class=\"t\"><b>{name}</b></div>\
+             <select onchange=\"go('perm-set/{id}/'+this.value)\"><option value=\"allow\"{a}>Allow</option><option value=\"block\"{b}>Block</option></select>\
+             <button class=\"x\" title=\"Reset (ask again)\" onclick=\"go('perm-delete/{id}')\">\u{2715}</button></div>",
+            name = escape(name),
+            id = id,
+            a = if *allow { " selected" } else { "" },
+            b = if *allow { "" } else { " selected" },
+        ));
+    }
+    if !last.is_empty() {
+        list.push_str("</div>");
+    }
+    if list.is_empty() {
+        list.push_str("<div class=\"card\"><div class=\"empty\">No site has been given or refused a permission yet. When a page asks to use your camera, microphone or location, a bar appears under the toolbar.</div></div>");
+    }
+    let body = format!(
+        "{head}<div class=\"bar\" style=\"display:flex\"><span style=\"flex:1\"></span><button class=\"btn danger\" onclick=\"if(confirm('Forget every site permission?'))go('perm-clear/all')\">Reset all</button></div>\
+         <style>.fh2{{margin:18px 4px 8px;color:var(--heading)}}select{{border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:var(--surface);color:var(--text);font:inherit}}</style>{list}",
+        head = ui_shell::heading("Site permissions", "What websites are allowed to use. Sites ask first; your answer is remembered here."),
+        list = list
+    );
+    ui_shell::page(ctx, "permissions", "Permissions", &body, "")
+}
+
+/// Shown instead of a site that has no https:// version while "Always use secure connections" is on.
+pub fn https_warning_page(ctx: &PageCtx, host: &str, http_url: &str) -> String {
+    let body = format!(
+        "{head}<div class=\"card\" style=\"padding:22px 24px\"><p>Axomai tried to open <b>{host}</b> with a secure connection, but it could not. \
+         If you continue, anything you send to or receive from this site (including passwords) can be read by others on the network.</p>\
+         <p style=\"margin-top:16px;display:flex;gap:10px\"><button class=\"btn\" onclick=\"go('https-back')\">Go back</button>\
+         <button class=\"btn ghost\" data-url=\"{url}\" onclick=\"go('https-continue/'+encodeURIComponent(this.dataset.url))\">Continue to the site (not secure)</button></p></div>",
+        head = ui_shell::heading("Connection not secure", "This site does not support a private connection."),
+        host = escape(host),
+        url = escape(http_url)
+    );
+    ui_shell::page(ctx, "", "Connection not secure", &body, "")
+}
+
 pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
     let mut rows = String::new();
     for (i, e) in extensions.iter().enumerate() {
@@ -385,6 +436,22 @@ mod tests {
         assert!(html.contains("go('pw-copy/3')") && html.contains("me&lt;b&gt;"));
         assert!(html.contains("Never saved") && html.contains("https://n.test"));
         assert!(passwords_page(&ctx(), &[], &[]).contains("No saved passwords"));
+    }
+
+    #[test]
+    fn permissions_page_groups_by_site() {
+        let rows = vec![(1, "https://a.test".to_string(), "camera".to_string(), true), (2, "https://a.test".to_string(), "location".to_string(), false), (3, "https://b.test".to_string(), "microphone".to_string(), true)];
+        let html = permissions_page(&ctx(), &rows);
+        assert_eq!(html.matches("fh2").count(), 3, "two sites (plus the style rule)");
+        assert!(html.contains("go('perm-set/2/'") && html.contains("Camera") && html.contains("Location"));
+        assert!(permissions_page(&ctx(), &[]).contains("No site has been given"));
+    }
+
+    #[test]
+    fn https_warning_names_the_site_and_escapes_it() {
+        let html = https_warning_page(&ctx(), "ex<b>.com", "http://ex.com/?a=\"1\"");
+        assert!(html.contains("ex&lt;b&gt;.com") && html.contains("https-continue/") && html.contains("https-back"));
+        assert!(!html.contains("a=\"1\"\" onclick"));
     }
 
     #[test]

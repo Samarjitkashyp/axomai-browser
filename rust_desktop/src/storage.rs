@@ -85,6 +85,14 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS site_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                origin TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                allow INTEGER NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(origin, kind)
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -330,6 +338,40 @@ impl BrowserStorage {
         Ok(())
     }
 
+    pub fn get_permission(&self, origin: &str, kind: &str) -> Option<bool> {
+        self.conn.query_row("SELECT allow FROM site_permissions WHERE origin = ?1 AND kind = ?2", params![origin, kind], |r| r.get::<_, i64>(0)).ok().map(|v| v != 0)
+    }
+
+    pub fn set_permission(&self, origin: &str, kind: &str, allow: bool) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO site_permissions (origin, kind, allow) VALUES (?1, ?2, ?3)
+             ON CONFLICT(origin, kind) DO UPDATE SET allow = excluded.allow, updated_at = datetime('now')",
+            params![origin, kind, allow as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_permission_by_id(&self, id: i64, allow: bool) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE site_permissions SET allow = ?1, updated_at = datetime('now') WHERE id = ?2", params![allow as i64, id])?;
+        Ok(())
+    }
+
+    /// `(id, origin, kind, allow)` for every remembered decision.
+    pub fn list_permissions(&self) -> Vec<(i64, String, String, bool)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT id, origin, kind, allow FROM site_permissions ORDER BY origin, kind") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn delete_permission(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM site_permissions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn clear_permissions(&self) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM site_permissions", [])?;
+        Ok(())
+    }
+
     pub fn pw_never_has(&self, origin: &str) -> bool {
         self.conn.query_row("SELECT 1 FROM pw_never WHERE origin = ?1", params![origin], |_| Ok(())).is_ok()
     }
@@ -508,6 +550,26 @@ mod tests {
         st.delete_password(a).unwrap();
         assert!(st.password_secret(a).is_none());
         assert_eq!(st.list_passwords().len(), 1);
+    }
+
+    #[test]
+    fn permissions_are_remembered_per_site_and_kind() {
+        let st = temp_storage();
+        assert_eq!(st.get_permission("https://a.test", "camera"), None);
+        st.set_permission("https://a.test", "camera", true).unwrap();
+        st.set_permission("https://a.test", "microphone", false).unwrap();
+        assert_eq!(st.get_permission("https://a.test", "camera"), Some(true));
+        assert_eq!(st.get_permission("https://a.test", "microphone"), Some(false));
+        assert_eq!(st.get_permission("https://b.test", "camera"), None);
+        st.set_permission("https://a.test", "camera", false).unwrap();
+        assert_eq!(st.get_permission("https://a.test", "camera"), Some(false));
+        let all = st.list_permissions();
+        assert_eq!(all.len(), 2);
+        st.set_permission_by_id(all[0].0, true).unwrap();
+        st.delete_permission(all[1].0).unwrap();
+        assert_eq!(st.list_permissions().len(), 1);
+        st.clear_permissions().unwrap();
+        assert!(st.list_permissions().is_empty());
     }
 
     #[test]

@@ -66,6 +66,12 @@ pub enum WebEvent {
     Download(DlEvent),
     /// A JSON message posted by a web page: (address of the sending document, raw JSON).
     PageMsg(String, String),
+    /// A page wants a permission: (request id, address of the page, permission name).
+    PermissionAsk { id: u64, uri: String, name: String },
+    /// HTTPS-only mode cancelled this http:// navigation; load this https:// address instead.
+    Upgrade(String),
+    /// The https:// address we upgraded to did not load; this is the original http:// address.
+    UpgradeFailed(String),
 }
 
 /// Live counters + switches read by the network hook. The switches and the lifetime total are shared by every
@@ -76,6 +82,12 @@ pub struct Shield {
     pub total_blocked: Arc<AtomicU64>,
     pub page_blocked: AtomicU32,
     pub page_host: Mutex<String>,
+    /// Switches shared by every tab.
+    pub https_only: Arc<AtomicBool>,
+    pub gpc: Arc<AtomicBool>,
+    /// Hosts the user chose to open over plain http for this session, and https addresses we upgraded to.
+    pub https_exempt: Arc<Mutex<std::collections::HashSet<String>>>,
+    pub upgraded: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl Shield {
@@ -86,6 +98,10 @@ impl Shield {
             total_blocked: Arc::new(AtomicU64::new(0)),
             page_blocked: AtomicU32::new(0),
             page_host: Mutex::new(String::new()),
+            https_only: Arc::new(AtomicBool::new(false)),
+            gpc: Arc::new(AtomicBool::new(true)),
+            https_exempt: Default::default(),
+            upgraded: Default::default(),
         }
     }
 
@@ -97,6 +113,10 @@ impl Shield {
             total_blocked: self.total_blocked.clone(),
             page_blocked: AtomicU32::new(0),
             page_host: Mutex::new(String::new()),
+            https_only: self.https_only.clone(),
+            gpc: self.gpc.clone(),
+            https_exempt: self.https_exempt.clone(),
+            upgraded: self.upgraded.clone(),
         }
     }
 }
@@ -189,6 +209,11 @@ pub fn is_internal_url(url: &str, ui_prefix: &str) -> bool {
     l.starts_with("data:") || l.starts_with("about:") || (l.starts_with("file:") && l.starts_with(ui_prefix))
 }
 
+/// An address in the form used to compare "the page we asked for" with "the page that failed".
+pub fn norm_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
 /// Decide what the navigation handler does with a URL.
 /// Returns (allow_navigation, command_to_enqueue).
 pub fn route_navigation(url: &str, token: &str, trusted_now: bool, ui_prefix: &str) -> (bool, Option<String>, Option<bool>) {
@@ -236,6 +261,16 @@ pub fn build_webview(
             .into(),
         })
         .with_navigation_handler(move |url: String| {
+            if nav_shared.shield.https_only.load(Ordering::Relaxed) && url.get(..7).map_or(false, |p| p.eq_ignore_ascii_case("http://")) {
+                let exempt = nav_shared.shield.https_exempt.lock().map(|e| e.clone()).unwrap_or_default();
+                if let Some(https) = crate::permissions::upgrade_target(&url, &exempt) {
+                    if let Ok(mut up) = nav_shared.shield.upgraded.lock() {
+                        up.insert(norm_url(&https));
+                    }
+                    nav_shared.push_event(WebEvent::Upgrade(https));
+                    return false;
+                }
+            }
             let trusted_now = nav_shared.trusted.load(Ordering::SeqCst);
             let (allow, cmd, new_trust) = route_navigation(&url, &nav_shared.token, trusted_now, &nav_shared.ui_prefix);
             if let Some(t) = new_trust {
@@ -286,6 +321,8 @@ pub fn build_webview(
         com::install_focus(&wv, shared.clone());
         com::install_downloads(&wv, shared.clone());
         com::disable_builtin_autofill(&wv);
+        com::install_permissions(&wv, shared.clone());
+        com::install_nav_failure(&wv, shared.clone());
     }
     Some(wv)
 }
@@ -299,6 +336,7 @@ pub mod com {
         AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, FaviconChangedEventHandler,
         GetFaviconCompletedHandler, FocusChangedEventHandler, ClearBrowsingDataCompletedHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
         WebResourceRequestedEventHandler, BytesReceivedChangedEventHandler, DownloadStartingEventHandler, StateChangedEventHandler,
+        NavigationCompletedEventHandler, PermissionRequestedEventHandler,
     };
     use windows::core::{w, Interface, HSTRING, PWSTR};
     use windows::Win32::Foundation::BOOL;
@@ -320,6 +358,11 @@ pub mod com {
                 let mut uri = PWSTR::null();
                 request.Uri(&mut uri)?;
                 let url = take_pwstr(uri);
+                if shield.gpc.load(Ordering::Relaxed) {
+                    if let Ok(headers) = request.Headers() {
+                        let _ = headers.SetHeader(w!("Sec-GPC"), w!("1"));
+                    }
+                }
                 let page_host = shield.page_host.lock().map(|h| h.clone()).unwrap_or_default();
                 if let Some(kind) = blocklist::classify(&url, &page_host) {
                     let enabled = match kind {
@@ -496,6 +539,114 @@ pub mod com {
                 }
             }
         });
+    }
+
+    thread_local! {
+        /// Permission questions that are waiting for the user (WebView2 objects stay on the UI thread).
+        static PERMS: std::cell::RefCell<std::collections::HashMap<u64, (ICoreWebView2PermissionRequestedEventArgs, ICoreWebView2Deferral)>> = Default::default();
+    }
+    static NEXT_PERM: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+    fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
+        let table: [(COREWEBVIEW2_PERMISSION_KIND, &str); 12] = [
+            (COREWEBVIEW2_PERMISSION_KIND_CAMERA, "camera"),
+            (COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, "microphone"),
+            (COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION, "location"),
+            (COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS, "notifications"),
+            (COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS, "sensors"),
+            (COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ, "clipboard"),
+            (COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS, "downloads"),
+            (COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE, "files"),
+            (COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY, "autoplay"),
+            (COREWEBVIEW2_PERMISSION_KIND_LOCAL_FONTS, "fonts"),
+            (COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES, "midi"),
+            (COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT, "windows"),
+        ];
+        table.iter().find(|(k, _)| *k == kind).map(|(_, n)| *n).unwrap_or("other")
+    }
+
+    /// Finish a permission question: the page gets its answer.
+    pub fn permission_answer(id: u64, allow: bool) {
+        PERMS.with(|m| {
+            if let Some((args, deferral)) = m.borrow_mut().remove(&id) {
+                unsafe {
+                    let _ = args.SetState(if allow { COREWEBVIEW2_PERMISSION_STATE_ALLOW } else { COREWEBVIEW2_PERMISSION_STATE_DENY });
+                    let _ = deferral.Complete();
+                }
+            }
+        });
+    }
+
+    /// Every permission request is held (deferred) and reported; the browser decides, usually after asking the user.
+    pub fn install_permissions(wv: &WebView, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        let handler = PermissionRequestedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else { return Ok(()) };
+            unsafe {
+                let mut uri = PWSTR::null();
+                args.Uri(&mut uri)?;
+                let uri = take_pwstr(uri);
+                let mut kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+                args.PermissionKind(&mut kind)?;
+                let deferral = args.GetDeferral()?;
+                let id = NEXT_PERM.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                PERMS.with(|m| m.borrow_mut().insert(id, (args.clone(), deferral)));
+                shared.push_event(WebEvent::PermissionAsk { id, uri, name: permission_name(kind).to_string() });
+            }
+            Ok(())
+        }));
+        unsafe {
+            let mut token = std::mem::zeroed();
+            let _ = core.add_PermissionRequested(&handler, &mut token);
+        }
+    }
+
+    /// Report a failed load of an address we upgraded to https, so the user can be offered the http original.
+    pub fn install_nav_failure(wv: &WebView, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        let handler = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+            let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+            unsafe {
+                let mut ok = BOOL(0);
+                args.IsSuccess(&mut ok)?;
+                if ok.as_bool() {
+                    return Ok(());
+                }
+                let mut status = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+                args.WebErrorStatus(&mut status)?;
+                if status == COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED {
+                    return Ok(());
+                }
+                let mut src = PWSTR::null();
+                sender.Source(&mut src)?;
+                let url = take_pwstr(src);
+                let was_upgrade = shared.shield.upgraded.lock().map(|mut up| up.remove(&norm_url(&url))).unwrap_or(false);
+                if was_upgrade && url.len() > 5 {
+                    shared.push_event(WebEvent::UpgradeFailed(format!("http{}", &url[5..])));
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            let mut token = std::mem::zeroed();
+            let _ = core.add_NavigationCompleted(&handler, &mut token);
+        }
+    }
+
+    /// Tracking prevention level of the whole profile: "basic", "balanced" or "strict".
+    pub fn set_tracking_level(wv: &WebView, level: &str) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            let Ok(c13) = core.cast::<ICoreWebView2_13>() else { return };
+            let Ok(profile) = c13.Profile() else { return };
+            let Ok(p3) = profile.cast::<ICoreWebView2Profile3>() else { return };
+            let l = match level {
+                "basic" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BASIC,
+                "strict" => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
+                _ => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED,
+            };
+            let _ = p3.SetPreferredTrackingPreventionLevel(l);
+        }
     }
 
     /// Axomai has its own password manager (encrypted, per-site); WebView2's built-in "Saved info" would keep a
@@ -884,6 +1035,8 @@ pub mod com {
     pub fn download_control(_id: u64, _action: &str) {}
 
     pub fn disable_builtin_autofill(_wv: &WebView) {}
+    pub fn permission_answer(_id: u64, _allow: bool) {}
+    pub fn set_tracking_level(_wv: &WebView, _level: &str) {}
 
     pub fn can_go(_wv: &WebView) -> (bool, bool) {
         (false, false)

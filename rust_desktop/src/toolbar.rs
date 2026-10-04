@@ -30,7 +30,7 @@ impl Rect {
     pub fn right(&self) -> f32 {
         self.x + self.w
     }
-    fn cx(&self) -> f32 {
+    pub fn cx(&self) -> f32 {
         self.x + self.w / 2.0
     }
     pub fn cy(&self) -> f32 {

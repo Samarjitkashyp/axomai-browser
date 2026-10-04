@@ -97,6 +97,8 @@ impl App {
                 self.left_down = true;
                 if y < CHROME_TOP {
                     self.chrome_click(x, y);
+                } else if self.infobar_click(x, y) {
+                    // handled by the permission bar
                 } else if self.settings.bookmark_bar && y < CHROME_TOP + BOOKMARK_BAR_H {
                     self.core.close_popups(self.webview.as_ref());
                     self.addr_focused = false;

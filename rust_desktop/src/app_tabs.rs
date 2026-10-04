@@ -126,6 +126,8 @@ impl App {
         if idx >= self.tabs.len() {
             return;
         }
+        let closing_id = self.tabs[idx].id;
+        self.drop_permissions_for_tab(closing_id);
         let t = &self.tabs[idx];
         if !(t.kind == TabKind::Home) && !t.private {
             self.closed.push(ClosedTab { address: t.url.clone(), pinned: t.pinned });

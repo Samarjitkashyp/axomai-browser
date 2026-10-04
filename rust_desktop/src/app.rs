@@ -65,6 +65,12 @@ pub struct App {
     pub dl_push_at: Instant,
     pub pw_pending: Option<crate::passwords::PwPending>,
     pub pw_offer: Option<crate::passwords::PwOffer>,
+    /// Permission questions waiting for an answer, a private window's decisions, and whether the bar is showing.
+    pub perm_queue: Vec<crate::permissions::PermAsk>,
+    pub perm_session: std::collections::HashMap<(String, String), bool>,
+    pub infobar_on: bool,
+    /// Warning pages waiting to replace the engine's error page: (tab id, html, since).
+    pub https_warn: Vec<(u64, String, Instant)>,
 
     pub mouse: (f32, f32),
     pub left_down: bool,
@@ -183,6 +189,8 @@ impl App {
         }
         self.push_download_progress();
         self.show_pending_prompt();
+        self.sync_infobar();
+        self.show_https_warnings();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();
         self.sync_with_page();
@@ -227,6 +235,9 @@ impl App {
                 WebEvent::Navigating(url) => self.on_navigating(idx, &url),
                 WebEvent::Download(d) => self.on_download_event(idx, d),
                 WebEvent::PageMsg(source, json) => self.on_page_message(idx, &source, &json),
+                WebEvent::PermissionAsk { id, uri, name } => self.on_permission_ask(idx, id, &uri, &name),
+                WebEvent::Upgrade(url) => self.on_https_upgrade(idx, &url),
+                WebEvent::UpgradeFailed(url) => self.on_https_failed(idx, &url),
                 WebEvent::LoadStarted(url) => {
                     self.password_page_changed(tab_id);
                     if url.starts_with("http://") || url.starts_with("https://") {
@@ -408,6 +419,7 @@ impl App {
         );
 
         quads.extend(self.bar_quads());
+        quads.extend(self.infobar_quads());
         if self.tabs[idx].loading {
             // Eases toward 90% and stays there until the page reports that it has finished loading.
             self.loading_progress += (0.9 - self.loading_progress) * 0.04;
