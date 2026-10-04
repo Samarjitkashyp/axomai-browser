@@ -76,6 +76,9 @@ pub struct App {
     pub icon_pending: std::collections::HashSet<String>,
     /// Sites that are always muted (blocked sites live in the shield).
     pub muted_sites: std::collections::HashSet<String>,
+    /// The Windows voice process that is reading a page aloud.
+    pub tts: Option<std::process::Child>,
+    pub tts_rate: f32,
     /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
     pub news_cache: std::collections::HashMap<String, (Instant, String)>,
     pub news_pending: std::collections::HashSet<String>,
@@ -229,6 +232,7 @@ impl App {
         self.show_pending_prompt();
         self.sync_infobar();
         self.show_https_warnings();
+        self.tts_poll();
         self.serve_other_launches();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();

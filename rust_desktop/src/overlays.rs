@@ -8,7 +8,7 @@ use crate::ext_scripts::shell;
 use crate::theme::{Theme, THEMES};
 use serde_json::json;
 
-fn open(theme: &Theme, token: &str, id: &str) -> String {
+pub(crate) fn open(theme: &Theme, token: &str, id: &str) -> String {
     format!(
         "(function(){{var TOKEN='{}';function go(c){{try{{window.chrome.webview.postMessage(TOKEN+'/'+c)}}catch(x){{location.href='axomai://'+TOKEN+'/'+c}}}}\n{}\n\
          function el(t,c,x){{var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}}\n\
@@ -602,7 +602,7 @@ pub fn tab_search_popup(theme: &Theme, token: &str, rows: &[(u64, String, String
 }
 
 /// `css(...)` call for a popup placed with its own `.card` rule.
-fn css_wrap(extra: &str, width: f32) -> String {
+pub(crate) fn css_wrap(extra: &str, width: f32) -> String {
     format!("\ncss({});\n", css_literal(extra, 6.0, width))
 }
 

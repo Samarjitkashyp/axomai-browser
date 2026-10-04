@@ -134,6 +134,10 @@ pub const EN_MORE: Table = &[
     ("data.restore", "Restore from a backup"),
     ("data.restore.desc", "Adds the contents of an Axomai backup file to what you have now. Nothing is deleted."),
     ("data.restore.button", "Choose file…"),
+    ("menu.translate", "Translate page…"),
+    ("menu.pip", "Picture in picture"),
+    ("menu.devpanel", "Developer panel"),
+    ("menu.tts", "Read aloud"),
 ];
 
 pub const HI: Table = &[
@@ -333,6 +337,10 @@ pub const HI: Table = &[
     ("data.restore", "बैकअप से पुनर्स्थापित करें"),
     ("data.restore.desc", "Axomai बैकअप फ़ाइल की सामग्री को आपके मौजूदा डेटा में जोड़ता है। कुछ नहीं हटता।"),
     ("data.restore.button", "फ़ाइल चुनें…"),
+    ("menu.translate", "पेज अनुवाद करें…"),
+    ("menu.pip", "पिक्चर इन पिक्चर"),
+    ("menu.devpanel", "डेवलपर पैनल"),
+    ("menu.tts", "ज़ोर से पढ़ें"),
 ];
 
 pub const BN: Table = &[
@@ -532,6 +540,10 @@ pub const BN: Table = &[
     ("data.restore", "ব্যাকআপ থেকে পুনরুদ্ধার"),
     ("data.restore.desc", "Axomai ব্যাকআপ ফাইলের বিষয়বস্তু আপনার বর্তমান ডেটার সাথে যোগ করে। কিছু মোছা হয় না।"),
     ("data.restore.button", "ফাইল বাছুন…"),
+    ("menu.translate", "পৃষ্ঠা অনুবাদ করুন…"),
+    ("menu.pip", "পিকচার ইন পিকচার"),
+    ("menu.devpanel", "ডেভেলপার প্যানেল"),
+    ("menu.tts", "জোরে পড়ুন"),
 ];
 
 pub const AS: Table = &[
@@ -731,4 +743,8 @@ pub const AS: Table = &[
     ("data.restore", "বেকআপৰ পৰা পুনৰুদ্ধাৰ"),
     ("data.restore.desc", "Axomai বেকআপ ফাইলৰ বিষয়বস্তু আপোনাৰ বৰ্তমান তথ্যৰ সৈতে যোগ কৰে। একো মচা নহয়।"),
     ("data.restore.button", "ফাইল বাছক…"),
+    ("menu.translate", "পৃষ্ঠা অনুবাদ কৰক…"),
+    ("menu.pip", "ছবি-ভিতৰত-ছবি"),
+    ("menu.devpanel", "ডেভেলপাৰ পেনেল"),
+    ("menu.tts", "জোৰেৰে পঢ়ক"),
 ];

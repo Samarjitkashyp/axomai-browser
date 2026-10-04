@@ -323,6 +323,8 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "tts-text" {
+            self.tts_text(payload);
         } else if kind == "backup-file" {
             self.backup_import(payload);
         } else if kind == "passwords-file" {
@@ -447,6 +449,15 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "tts-toggle" => self.tts_toggle(1.0),
+            "tts-stop" => self.tts_stop(),
+            "pip" => self.toggle_pip(),
+            "devpanel" => self.open_dev_panel(),
+            "devtools" => {
+                if let Some(wv) = &self.webview {
+                    wv.open_devtools();
+                }
+            }
             "backup-export" => self.backup_export(),
             "backup-import" => self.pick_backup_file(),
             "pw-export" => self.passwords_export(),
@@ -671,6 +682,10 @@ impl App {
             self.session_open(id);
         } else if let Some(id) = cmd.strip_prefix("session-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.session_delete(id);
+        } else if let Some(r) = cmd.strip_prefix("tts-toggle/") {
+            self.tts_toggle(r.parse().unwrap_or(1.0));
+        } else if let Some(key) = cmd.strip_prefix("emu/") {
+            self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {

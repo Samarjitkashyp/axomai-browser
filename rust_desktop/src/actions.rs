@@ -187,7 +187,7 @@ impl Core {
             ex::ADBLOCK | ex::PRIVACY => self.open_shield(Some(wv), shared, exts, right),
             ex::READER => {
                 if remote {
-                    let _ = wv.evaluate_script(&ext_scripts::reader(self.theme));
+                    let _ = wv.evaluate_script(&ext_scripts::reader(self.theme, &shared.token));
                 } else {
                     self.toast(wv, "Open an article page to use Reader Mode", None, shared);
                 }
@@ -595,6 +595,10 @@ pub fn menu_key(cmd: &str) -> &'static str {
         "note-new" => "menu.note-new",
         "readinglist" => "menu.readinglist",
         "notes" => "menu.notes",
+        "ext-run/2" => "menu.translate",
+        "pip" => "menu.pip",
+        "tts-toggle" => "menu.tts",
+        "devpanel" => "menu.devpanel",
         "sessions" => "menu.sessions",
         "session-prompt" => "menu.session-prompt",
         "print" => "menu.print",
@@ -625,6 +629,10 @@ pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "🔇", label: "Mute / unmute this site", cmd: "site-mute", danger: false },
     overlays::MenuEntry { emoji: "⛔", label: "Block this site", cmd: "site-block-current", danger: true },
     overlays::MenuEntry { emoji: "💾", label: "Save tabs as a session…", cmd: "session-prompt", danger: false },
+    overlays::MenuEntry { emoji: "🌐", label: "Translate page…", cmd: "ext-run/2", danger: false },
+    overlays::MenuEntry { emoji: "🔊", label: "Read aloud", cmd: "tts-toggle", danger: false },
+    overlays::MenuEntry { emoji: "🖼️", label: "Picture in picture", cmd: "pip", danger: false },
+    overlays::MenuEntry { emoji: "🛠️", label: "Developer panel", cmd: "devpanel", danger: false },
     overlays::MenuEntry { emoji: "🔎", label: "Search tabs", cmd: "tab-search", danger: false },
     overlays::MenuEntry { emoji: "◫", label: "Split view", cmd: "split-view", danger: false },
     overlays::MenuEntry { emoji: "🎨", label: "Heritage Themes", cmd: "theme-menu", danger: false },

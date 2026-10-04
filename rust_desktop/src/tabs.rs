@@ -88,6 +88,8 @@ pub struct Tab {
     pub muted: bool,
     /// Muted because its site is on the muted list (undone when the tab leaves that site).
     pub site_muted: bool,
+    /// Key of the developer-panel profile this tab pretends to be (`default` = none).
+    pub emu: &'static str,
     pub loading: bool,
     pub suspended: bool,
     pub last_active: Instant,
@@ -123,6 +125,7 @@ impl Tab {
             audio: false,
             muted: false,
             site_muted: false,
+            emu: "default",
             loading: false,
             suspended: false,
             last_active: Instant::now(),

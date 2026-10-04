@@ -1032,6 +1032,15 @@ pub mod com {
         }
     }
 
+    /// Fire-and-forget DevTools-protocol call.
+    pub fn cdp(wv: &WebView, method: &str, params: &str) {
+        let Some(core) = core(wv) else { return };
+        let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_res, _json| Ok(())));
+        unsafe {
+            let _ = core.CallDevToolsProtocolMethod(&HSTRING::from(method), &HSTRING::from(params), &handler);
+        }
+    }
+
     pub fn set_memory_low(wv: &WebView, low: bool) {
         use wry::MemoryUsageLevel;
         let _ = wv.set_memory_usage_level(if low { MemoryUsageLevel::Low } else { MemoryUsageLevel::Normal });
