@@ -85,6 +85,7 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS site_zoom (origin TEXT PRIMARY KEY, factor REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS site_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 origin TEXT NOT NULL,
@@ -338,6 +339,20 @@ impl BrowserStorage {
         Ok(())
     }
 
+    pub fn get_site_zoom(&self, origin: &str) -> Option<f64> {
+        self.conn.query_row("SELECT factor FROM site_zoom WHERE origin = ?1", params![origin], |r| r.get(0)).ok()
+    }
+
+    /// Remember a site's zoom; 100% means "default", so that row is simply removed.
+    pub fn set_site_zoom(&self, origin: &str, factor: f64) -> Result<(), rusqlite::Error> {
+        if (factor - 1.0).abs() < 0.001 {
+            self.conn.execute("DELETE FROM site_zoom WHERE origin = ?1", params![origin])?;
+        } else {
+            self.conn.execute("INSERT OR REPLACE INTO site_zoom (origin, factor) VALUES (?1, ?2)", params![origin, factor])?;
+        }
+        Ok(())
+    }
+
     pub fn get_permission(&self, origin: &str, kind: &str) -> Option<bool> {
         self.conn.query_row("SELECT allow FROM site_permissions WHERE origin = ?1 AND kind = ?2", params![origin, kind], |r| r.get::<_, i64>(0)).ok().map(|v| v != 0)
     }
@@ -570,6 +585,16 @@ mod tests {
         assert_eq!(st.list_permissions().len(), 1);
         st.clear_permissions().unwrap();
         assert!(st.list_permissions().is_empty());
+    }
+
+    #[test]
+    fn site_zoom_is_remembered_and_default_is_forgotten() {
+        let st = temp_storage();
+        assert_eq!(st.get_site_zoom("https://a.test"), None);
+        st.set_site_zoom("https://a.test", 1.5).unwrap();
+        assert_eq!(st.get_site_zoom("https://a.test"), Some(1.5));
+        st.set_site_zoom("https://a.test", 1.0).unwrap();
+        assert_eq!(st.get_site_zoom("https://a.test"), None);
     }
 
     #[test]

@@ -569,6 +569,8 @@ pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "🧩", label: "Extensions", cmd: "extensions", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
     overlays::MenuEntry { emoji: "🎨", label: "Heritage Themes", cmd: "theme-menu", danger: false },
+    overlays::MenuEntry { emoji: "🖨️", label: "Print…", cmd: "print", danger: false },
+    overlays::MenuEntry { emoji: "📄", label: "Save page as PDF", cmd: "save-pdf", danger: false },
     overlays::MenuEntry { emoji: "🧹", label: "Clear RAM & Cache", cmd: "clear-ram", danger: false },
     overlays::MenuEntry { emoji: "⚙️", label: "Settings", cmd: "settings", danger: false },
     overlays::MenuEntry { emoji: "ℹ️", label: "About Axomai", cmd: "about", danger: false },

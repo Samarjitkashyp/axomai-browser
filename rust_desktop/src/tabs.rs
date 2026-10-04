@@ -87,6 +87,8 @@ pub struct Tab {
     pub ext_gen: u64,
     /// For view-source tabs: the finished viewer page once the source has been fetched.
     pub source_html: Option<String>,
+    /// Page zoom (1.0 = 100%).
+    pub zoom: f64,
 }
 
 impl Tab {
@@ -112,6 +114,7 @@ impl Tab {
             last_active: Instant::now(),
             ext_gen: u64::MAX,
             source_html: None,
+            zoom: 1.0,
         }
     }
 }

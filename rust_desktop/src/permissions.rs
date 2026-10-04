@@ -85,6 +85,9 @@ impl App {
 
     /// Top edge of the web view: tab strip, toolbar, bookmarks bar and the permission bar when shown.
     pub fn chrome_top(&self) -> f32 {
+        if self.fullscreen {
+            return 0.0;
+        }
         self.infobar_y() + if self.infobar_on { INFOBAR_H } else { 0.0 }
     }
 
@@ -94,7 +97,7 @@ impl App {
 
     /// Show or hide the permission bar when the question for the active tab appears or goes away.
     pub fn sync_infobar(&mut self) {
-        let want = self.perm_active().is_some();
+        let want = self.perm_active().is_some() && !self.fullscreen;
         if want != self.infobar_on {
             self.infobar_on = want;
             self.fit_active_view();

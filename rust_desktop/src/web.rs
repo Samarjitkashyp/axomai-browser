@@ -72,6 +72,10 @@ pub enum WebEvent {
     Upgrade(String),
     /// The https:// address we upgraded to did not load; this is the original http:// address.
     UpgradeFailed(String),
+    /// The page zoom changed (factor, 1.0 = 100%).
+    Zoom(f64),
+    /// A page entered (true) or left (false) its own full-screen mode.
+    HtmlFullscreen(bool),
 }
 
 /// Live counters + switches read by the network hook. The switches and the lifetime total are shared by every
@@ -323,6 +327,7 @@ pub fn build_webview(
         com::disable_builtin_autofill(&wv);
         com::install_permissions(&wv, shared.clone());
         com::install_nav_failure(&wv, shared.clone());
+        com::install_zoom_and_fullscreen(&wv, shared.clone());
     }
     Some(wv)
 }
@@ -336,7 +341,8 @@ pub mod com {
         AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, FaviconChangedEventHandler,
         GetFaviconCompletedHandler, FocusChangedEventHandler, ClearBrowsingDataCompletedHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
         WebResourceRequestedEventHandler, BytesReceivedChangedEventHandler, DownloadStartingEventHandler, StateChangedEventHandler,
-        NavigationCompletedEventHandler, PermissionRequestedEventHandler,
+        NavigationCompletedEventHandler, PermissionRequestedEventHandler, ZoomFactorChangedEventHandler,
+        ContainsFullScreenElementChangedEventHandler, PrintToPdfCompletedHandler,
     };
     use windows::core::{w, Interface, HSTRING, PWSTR};
     use windows::Win32::Foundation::BOOL;
@@ -472,10 +478,22 @@ pub mod com {
                 args.VirtualKey(&mut vk)?;
                 let down = |code: i32| (GetKeyState(code) as u16 & 0x8000) != 0;
                 let (ctrl, shift, alt) = (down(0x11), down(0x10), down(0x12));
-                if alt {
-                    return Ok(());
-                }
-                let command: String = match (vk, ctrl, shift) {
+                let command: String = if alt {
+                    match (vk, ctrl) {
+                        (0x25, false) => "back".into(),      // Alt+Left
+                        (0x27, false) => "forward".into(),   // Alt+Right
+                        (0x24, false) => "home".into(),      // Alt+Home
+                        (0x44, false) => "focus-url".into(), // Alt+D
+                        _ => return Ok(()),
+                    }
+                } else { match (vk, ctrl, shift) {
+                    (0xBB, true, _) | (0x6B, true, _) => "zoom-in".into(),    // Ctrl + / Ctrl =
+                    (0xBD, true, false) | (0x6D, true, false) => "zoom-out".into(), // Ctrl -
+                    (0x30, true, false) | (0x60, true, false) => "zoom-reset".into(), // Ctrl 0
+                    (0x74, false, false) | (0x52, true, false) => "reload".into(),   // F5 / Ctrl+R
+                    (0x74, true, _) | (0x52, true, true) => "reload-hard".into(),    // Ctrl+F5 / Ctrl+Shift+R
+                    (0x4B, true, false) | (0x45, true, false) | (0x75, false, false) => "focus-url".into(), // Ctrl+K / Ctrl+E / F6
+                    (0x42, true, true) => "bookmark-bar-toggle".into(), // Ctrl+Shift+B
                     (0x7A, false, false) => "fullscreen".into(), // F11
                     (0x55, true, false) => "viewsource-current".into(), // U
                     (0x54, true, false) => "newtab".into(),             // T
@@ -495,7 +513,7 @@ pub mod com {
                     (0x09, true, true) | (0x21, true, false) => "tab-prev".into(),  // Shift+Tab / PageUp
                     (0x31..=0x39, true, false) => format!("tab-index/{}", vk - 0x30),
                     _ => return Ok(()),
-                };
+                } };
                 shared.push_command(&command);
                 args.SetHandled(true)?;
             }
@@ -630,6 +648,64 @@ pub mod com {
         unsafe {
             let mut token = std::mem::zeroed();
             let _ = core.add_NavigationCompleted(&handler, &mut token);
+        }
+    }
+
+    pub fn set_zoom(wv: &WebView, factor: f64) {
+        unsafe {
+            let _ = wv.controller().SetZoomFactor(factor);
+        }
+    }
+
+    /// Report zoom changes (wheel, keys, our own) and a page's own full-screen requests.
+    pub fn install_zoom_and_fullscreen(wv: &WebView, shared: WebShared) {
+        let controller = wv.controller();
+        let zoom_shared = shared.clone();
+        let zoom = ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+            if let Some(c) = sender {
+                let mut z = 1.0f64;
+                unsafe {
+                    if c.ZoomFactor(&mut z).is_ok() {
+                        zoom_shared.push_event(WebEvent::Zoom(z));
+                    }
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            let mut token = std::mem::zeroed();
+            let _ = controller.add_ZoomFactorChanged(&zoom, &mut token);
+        }
+        let Some(core) = core(wv) else { return };
+        let fs = ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+            if let Some(c) = sender {
+                let mut on = BOOL(0);
+                unsafe {
+                    if c.ContainsFullScreenElement(&mut on).is_ok() {
+                        shared.push_event(WebEvent::HtmlFullscreen(on.as_bool()));
+                    }
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            let mut token = std::mem::zeroed();
+            let _ = core.add_ContainsFullScreenElementChanged(&fs, &mut token);
+        }
+    }
+
+    /// Write the page to a PDF file; the result comes back as page data `("pdf", path, "1" | "0")`.
+    pub fn print_to_pdf(wv: &WebView, path: &std::path::Path, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            let Ok(c7) = core.cast::<ICoreWebView2_7>() else { return };
+            let shown = path.to_string_lossy().to_string();
+            let handler = PrintToPdfCompletedHandler::create(Box::new(move |result, ok| {
+                let good = result.is_ok() && ok;
+                shared.push_event(WebEvent::PageData("pdf".into(), shown.clone(), if good { "1".into() } else { "0".into() }));
+                Ok(())
+            }));
+            let _ = c7.PrintToPdf(&HSTRING::from(path.to_string_lossy().as_ref()), None, &handler);
         }
     }
 
@@ -1036,6 +1112,8 @@ pub mod com {
 
     pub fn disable_builtin_autofill(_wv: &WebView) {}
     pub fn permission_answer(_id: u64, _allow: bool) {}
+    pub fn set_zoom(_wv: &WebView, _factor: f64) {}
+    pub fn print_to_pdf(_wv: &WebView, _path: &std::path::Path, _shared: WebShared) {}
     pub fn set_tracking_level(_wv: &WebView, _level: &str) {}
 
     pub fn can_go(_wv: &WebView) -> (bool, bool) {

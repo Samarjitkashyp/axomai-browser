@@ -142,6 +142,8 @@ pub struct ToolbarLayout {
     pub text_x: f32,
     pub text_max_x: f32,
     pub bookmark: Rect,
+    /// Zoom indicator, only drawn (and clickable) when the page is not at 100%.
+    pub zoom: Rect,
     pub reader: Rect,
     pub qr: Rect,
     pub shield: Rect,
@@ -208,6 +210,7 @@ pub fn toolbar_layout(w: f32) -> ToolbarLayout {
     let qr = Rect::new(omnibox.right() - 12.0 - 28.0, omnibox.cy() - 14.0, 28.0, 28.0);
     let reader = Rect::new(qr.x - 2.0 - 28.0, qr.y, 28.0, 28.0);
     let bookmark = Rect::new(reader.x - 2.0 - 28.0, qr.y, 28.0, 28.0);
+    let zoom = Rect::new(bookmark.x - 6.0 - 52.0, omnibox.cy() - 11.0, 52.0, 22.0);
     let text_max_x = bookmark.x - 8.0;
 
     let mut ax = omnibox.right() + 12.0;
@@ -226,7 +229,7 @@ pub fn toolbar_layout(w: f32) -> ToolbarLayout {
 
     ToolbarLayout {
         back, forward, reload, home, omnibox, secure_badge, engine_icon, text_x, text_max_x,
-        bookmark, reader, qr, shield, extensions, downloads, theme, ai, profile, menu,
+        bookmark, zoom, reader, qr, shield, extensions, downloads, theme, ai, profile, menu,
     }
 }
 
@@ -360,6 +363,8 @@ pub struct ChromeState<'a> {
     pub avatar: &'a str,
     /// A private (incognito) window.
     pub private: bool,
+    /// Zoom percentage to show in the address bar (`None` at 100%).
+    pub zoom: Option<u32>,
 }
 
 pub fn build_toolbar_quads(
@@ -528,6 +533,10 @@ pub fn build_toolbar_quads(
         }
     }
 
+    if let Some(pct) = st.zoom {
+        quads.push(rr_rect(l.zoom, 11.0, primary_light));
+        render_text_centered(compositor, &mut quads, &format!("{}%", pct), l.zoom.cx(), l.zoom.cy() + 4.0, 11.5, primary);
+    }
     if st.bookmarked {
         quads.push(icon_in(&icons.star_filled, l.bookmark, accent));
     } else {

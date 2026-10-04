@@ -15,10 +15,21 @@ use tao::window::CursorIcon;
 
 /// Browser shortcut for a key pressed together with Ctrl (or a lone F-key), as the command it triggers.
 /// The same command names are produced by the web view's accelerator hook (`web::com::install_accelerators`).
-pub fn shortcut_command(key: &Key, ctrl: bool, shift: bool) -> Option<String> {
+pub fn shortcut_command(key: &Key, ctrl: bool, shift: bool, alt: bool) -> Option<String> {
+    if alt {
+        return match key {
+            Key::ArrowLeft if !ctrl => Some("back".into()),
+            Key::ArrowRight if !ctrl => Some("forward".into()),
+            Key::Home if !ctrl => Some("home".into()),
+            Key::Character(ch) if !ctrl && ch.eq_ignore_ascii_case("d") => Some("focus-url".into()),
+            _ => None,
+        };
+    }
     if !ctrl {
         return match key {
             Key::F11 => Some("fullscreen".into()),
+            Key::F5 => Some("reload".into()),
+            Key::F6 => Some("focus-url".into()),
             _ => None,
         };
     }
@@ -26,6 +37,7 @@ pub fn shortcut_command(key: &Key, ctrl: bool, shift: bool) -> Option<String> {
         Key::Tab => (if shift { "tab-prev" } else { "tab-next" }).into(),
         Key::PageDown => "tab-next".into(),
         Key::PageUp => "tab-prev".into(),
+        Key::F5 => "reload-hard".into(),
         Key::Delete if shift => "clear-data-dialog".into(),
         Key::Character(ch) => {
             let c = ch.chars().next()?.to_ascii_lowercase();
@@ -41,6 +53,12 @@ pub fn shortcut_command(key: &Key, ctrl: bool, shift: bool) -> Option<String> {
                 ('f', false) => "find".into(),
                 ('p', false) => "print".into(),
                 ('r', false) => "reload".into(),
+                ('r', true) => "reload-hard".into(),
+                ('k', false) | ('e', false) => "focus-url".into(),
+                ('b', true) => "bookmark-bar-toggle".into(),
+                ('=', _) | ('+', _) => "zoom-in".into(),
+                ('-', false) | ('_', false) => "zoom-out".into(),
+                ('0', false) => "zoom-reset".into(),
                 ('n', false) => "new-window".into(),
                 ('n', true) => "new-incognito".into(),
                 ('o', true) => "bookmarks".into(),
@@ -95,7 +113,9 @@ impl App {
         match (state, button) {
             (ElementState::Pressed, MouseButton::Left) => {
                 self.left_down = true;
-                if y < CHROME_TOP {
+                if self.fullscreen {
+                    // the page owns the window
+                } else if y < CHROME_TOP {
                     self.chrome_click(x, y);
                 } else if self.infobar_click(x, y) {
                     // handled by the permission bar
@@ -153,6 +173,10 @@ impl App {
             return;
         }
         let layout = toolbar::toolbar_layout(w);
+        if crate::viewctl::percent(self.zoom_factor()) != 100 && layout.zoom.contains(x, y) {
+            self.zoom_command("reset");
+            return;
+        }
         let hit = layout.hit(x, y);
         self.toolbar_click(hit, &layout);
     }
@@ -412,7 +436,7 @@ impl App {
                 }
             }
         }
-        if let Some(cmd) = shortcut_command(&ev.logical_key, ctrl, shift) {
+        if let Some(cmd) = shortcut_command(&ev.logical_key, ctrl, shift, self.mods.alt_key()) {
             self.hub.push_command(&cmd);
             return;
         }
@@ -477,20 +501,37 @@ mod tests {
 
     #[test]
     fn ctrl_shortcuts_map_to_commands() {
-        assert_eq!(shortcut_command(&ch("t"), true, false).as_deref(), Some("newtab"));
-        assert_eq!(shortcut_command(&ch("T"), true, true).as_deref(), Some("reopen-tab"));
-        assert_eq!(shortcut_command(&ch("w"), true, false).as_deref(), Some("closetab"));
-        assert_eq!(shortcut_command(&ch("5"), true, false).as_deref(), Some("tab-index/5"));
-        assert_eq!(shortcut_command(&Key::Tab, true, false).as_deref(), Some("tab-next"));
-        assert_eq!(shortcut_command(&Key::Tab, true, true).as_deref(), Some("tab-prev"));
-        assert_eq!(shortcut_command(&ch("N"), true, true).as_deref(), Some("new-incognito"));
+        assert_eq!(shortcut_command(&ch("t"), true, false, false).as_deref(), Some("newtab"));
+        assert_eq!(shortcut_command(&ch("T"), true, true, false).as_deref(), Some("reopen-tab"));
+        assert_eq!(shortcut_command(&ch("w"), true, false, false).as_deref(), Some("closetab"));
+        assert_eq!(shortcut_command(&ch("5"), true, false, false).as_deref(), Some("tab-index/5"));
+        assert_eq!(shortcut_command(&Key::Tab, true, false, false).as_deref(), Some("tab-next"));
+        assert_eq!(shortcut_command(&Key::Tab, true, true, false).as_deref(), Some("tab-prev"));
+        assert_eq!(shortcut_command(&ch("N"), true, true, false).as_deref(), Some("new-incognito"));
+    }
+
+    #[test]
+    fn zoom_reload_and_navigation_shortcuts() {
+        assert_eq!(shortcut_command(&ch("="), true, false, false).as_deref(), Some("zoom-in"));
+        assert_eq!(shortcut_command(&ch("+"), true, true, false).as_deref(), Some("zoom-in"));
+        assert_eq!(shortcut_command(&ch("-"), true, false, false).as_deref(), Some("zoom-out"));
+        assert_eq!(shortcut_command(&ch("0"), true, false, false).as_deref(), Some("zoom-reset"));
+        assert_eq!(shortcut_command(&Key::F5, false, false, false).as_deref(), Some("reload"));
+        assert_eq!(shortcut_command(&Key::F5, true, false, false).as_deref(), Some("reload-hard"));
+        assert_eq!(shortcut_command(&ch("R"), true, true, false).as_deref(), Some("reload-hard"));
+        assert_eq!(shortcut_command(&Key::ArrowLeft, false, false, true).as_deref(), Some("back"));
+        assert_eq!(shortcut_command(&Key::ArrowRight, false, false, true).as_deref(), Some("forward"));
+        assert_eq!(shortcut_command(&ch("d"), false, false, true).as_deref(), Some("focus-url"));
+        assert_eq!(shortcut_command(&ch("k"), true, false, false).as_deref(), Some("focus-url"));
+        assert_eq!(shortcut_command(&ch("B"), true, true, false).as_deref(), Some("bookmark-bar-toggle"));
+        assert_eq!(shortcut_command(&Key::ArrowLeft, false, false, false), None, "plain arrows are for the page");
     }
 
     #[test]
     fn plain_keys_are_not_shortcuts() {
-        assert_eq!(shortcut_command(&ch("t"), false, false), None);
-        assert_eq!(shortcut_command(&Key::Enter, false, false), None);
-        assert_eq!(shortcut_command(&Key::F11, false, false).as_deref(), Some("fullscreen"));
-        assert_eq!(shortcut_command(&ch("z"), true, false), None);
+        assert_eq!(shortcut_command(&ch("t"), false, false, false), None);
+        assert_eq!(shortcut_command(&Key::Enter, false, false, false), None);
+        assert_eq!(shortcut_command(&Key::F11, false, false, false).as_deref(), Some("fullscreen"));
+        assert_eq!(shortcut_command(&ch("z"), true, false, false), None);
     }
 }

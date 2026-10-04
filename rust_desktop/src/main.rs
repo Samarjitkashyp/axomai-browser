@@ -28,6 +28,7 @@ pub mod sys;
 pub mod tabs;
 pub mod theme;
 pub mod toolbar;
+pub mod viewctl;
 pub mod types;
 pub mod ui_shell;
 pub mod viewsource;
@@ -196,6 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        html_fullscreen: false,
         https_warn: Vec::new(),
         safe: false,
         proxy,

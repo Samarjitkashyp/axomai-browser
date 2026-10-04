@@ -69,6 +69,8 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    /// The window is full screen because a page asked for it (so leaving the page's full screen restores it).
+    pub html_fullscreen: bool,
     /// Warning pages waiting to replace the engine's error page: (tab id, html, since).
     pub https_warn: Vec<(u64, String, Instant)>,
 
@@ -237,6 +239,8 @@ impl App {
                 WebEvent::PageMsg(source, json) => self.on_page_message(idx, &source, &json),
                 WebEvent::PermissionAsk { id, uri, name } => self.on_permission_ask(idx, id, &uri, &name),
                 WebEvent::Upgrade(url) => self.on_https_upgrade(idx, &url),
+                WebEvent::Zoom(z) => self.on_zoom_event(idx, z),
+                WebEvent::HtmlFullscreen(on) => self.on_html_fullscreen(on),
                 WebEvent::UpgradeFailed(url) => self.on_https_failed(idx, &url),
                 WebEvent::LoadStarted(url) => {
                     self.password_page_changed(tab_id);
@@ -309,6 +313,7 @@ impl App {
         if !(lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("file:") || lower.starts_with("ftp:")) {
             return;
         }
+        self.apply_site_zoom(idx, url);
         let private = self.tabs[idx].private || self.private_window;
         let t = &mut self.tabs[idx];
         t.kind = TabKind::Web;
@@ -403,6 +408,7 @@ impl App {
             address_selected: self.addr_selected && self.addr_focused,
             avatar: &avatar,
             private: self.private_window,
+            zoom: Some(crate::viewctl::percent(self.tabs[idx].zoom)).filter(|p| *p != 100),
         };
         let mut quads = toolbar::build_toolbar_quads(
             &mut self.compositor,
@@ -420,6 +426,10 @@ impl App {
 
         quads.extend(self.bar_quads());
         quads.extend(self.infobar_quads());
+        if self.fullscreen {
+            // Full screen: the page owns the whole window.
+            quads.clear();
+        }
         if self.tabs[idx].loading {
             // Eases toward 90% and stays there until the page reports that it has finished loading.
             self.loading_progress += (0.9 - self.loading_progress) * 0.04;

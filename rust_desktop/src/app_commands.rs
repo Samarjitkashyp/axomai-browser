@@ -273,6 +273,8 @@ impl App {
                 let _ = wv.load_html(payload);
             }
             self.redraw = true;
+        } else if kind == "pdf" {
+            self.on_pdf_done(question, payload == "1");
         } else if kind == "bookmark-file" {
             self.import_bookmark_file(payload);
         } else if kind == "download-target" {
@@ -361,6 +363,22 @@ impl App {
                 }
             }
             "reload" => self.reload_active(),
+            "reload-hard" => self.hard_reload(),
+            "zoom-in" => self.zoom_command("in"),
+            "zoom-out" => self.zoom_command("out"),
+            "zoom-reset" => self.zoom_command("reset"),
+            "save-pdf" => self.save_pdf(),
+            "bookmark-bar-toggle" => self.toggle_bookmark_bar(),
+            "back" => {
+                if let Some(wv) = &self.webview {
+                    web::com::go_back(wv);
+                }
+            }
+            "forward" => {
+                if let Some(wv) = &self.webview {
+                    web::com::go_forward(wv);
+                }
+            }
             "bookmark-toggle" => self.toggle_bookmark_now(),
             "fullscreen" => self.toggle_fullscreen(),
             "print" => {
@@ -535,11 +553,6 @@ impl App {
         }
     }
 
-    pub fn toggle_fullscreen(&mut self) {
-        self.fullscreen = !self.fullscreen;
-        self.window.set_fullscreen(if self.fullscreen { Some(tao::window::Fullscreen::Borderless(None)) } else { None });
-        self.redraw = true;
-    }
 }
 
 impl App {
