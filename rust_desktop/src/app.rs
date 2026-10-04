@@ -69,6 +69,9 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
+    pub news_cache: std::collections::HashMap<String, (Instant, String)>,
+    pub news_pending: std::collections::HashSet<String>,
     /// Split view: (left tab id, right tab id).
     pub split: Option<(u64, u64)>,
     /// Last time this window told other launches it is running, and last check for addresses they left.
@@ -156,7 +159,12 @@ impl App {
                 }
                 WindowEvent::MouseInput { state, button, .. } => self.on_mouse_input(state, button),
                 WindowEvent::ModifiersChanged(m) => self.mods = m,
-                WindowEvent::KeyboardInput { event, .. } => self.on_key(event),
+                // Key presses the system replays when the window gains focus (a key that is merely down) are not typing.
+                WindowEvent::KeyboardInput { event, is_synthetic, .. } => {
+                    if !is_synthetic {
+                        self.on_key(event)
+                    }
+                }
                 WindowEvent::Focused(true) => self.redraw = true,
                 _ => {}
             },
@@ -357,6 +365,7 @@ impl App {
         if title.is_empty() {
             return;
         }
+        self.tabs[idx].prev_nav = None;
         // Our generated pages announce themselves by title; that keeps tab and address right after Back/Forward.
         if self.tabs[idx].shared.trusted.load(std::sync::atomic::Ordering::SeqCst) {
             if let Some((addr, kind)) = crate::app_commands::internal_page_for_title(&title) {

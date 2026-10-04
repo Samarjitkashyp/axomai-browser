@@ -73,8 +73,9 @@ The desktop app is a Windows browser built on WebView2 with its own wgpu-drawn t
 - **Address bar**: suggestions from bookmarks and history, bookmarks bar, search-engine choice, per-site zoom with an indicator, full screen (F11 and a page's own full screen), print and save as PDF.
 - **Library**: history by day with search and range delete, bookmark folders with Chrome / HTML import and HTML export, download manager (live progress, pause, resume, cancel, "ask where to save").
 - **Privacy and safety**: ad / tracker blocking, fingerprint noise, HTTPS-only mode with a warning page, tracking-prevention level, Global Privacy Control, per-site permissions answered in a bar the page cannot fake, password manager (DPAPI-encrypted, per-site, saved only after you press Save).
+- **New Tab**: live Assam headlines from Google News (free RSS, no key), weather, working tools; an About page with the real version and engine.
 - **Interface**: Settings page, five heritage themes, English / অসমীয়া / हिन्दी / বাংলা for Settings, the sidebar pages and the menu, high-DPI scaling of the browser chrome.
-- **AI panel**: on-device by default; optionally Claude with your own API key (page text is sent to Anthropic only when you switch that on).
+- **AI panel**: runs on your device (summary, key topics, reading stats, ask-this-page); page text never leaves the computer.
 - **System**: open links from other apps in the running window, register as a web browser in Windows (`axomai_browser --register-default`, undo with `--unregister-default`).
 
 Not done (and not claimed): installing Chrome-store extensions (WebView2 through wry 0.49 cannot load them), an installer or auto-update for the desktop app, end-to-end encrypted sync of bookmarks / passwords between devices (the engine crate has the building blocks, the app does not use them), voice search (the web engine's speech service is unavailable), translated tab strip / toolbar text (the native font path is Latin only), and a store listing. The Hindi, Bengali and Assamese texts were written without a native reviewer.

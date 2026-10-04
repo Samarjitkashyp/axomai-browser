@@ -17,8 +17,8 @@ pub mod extensions;
 pub mod favicons;
 pub mod i18n;
 pub mod launch;
-pub mod llm;
 pub mod i18n_data;
+pub mod news;
 pub mod omnibox;
 pub mod overlays;
 pub mod pages;
@@ -80,6 +80,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+    // The cloud-AI settings were removed from the browser: wipe the keys and switches an earlier build may have left.
+    if let Some(st) = storage.as_ref() {
+        for key in ["ai_key_enc", "ai_key_openai_enc", "ai_llm", "ai_model", "ai_provider"] {
+            let _ = st.delete_setting(key);
+        }
+    }
+    // Downloads that were still running when the last window closed can never finish (unless another window is up).
+    if !launch::is_running(&storage::data_dir()) {
+        if let Some(st) = storage.as_ref() {
+            let _ = st.fail_stale_downloads();
+        }
+    }
     let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
     let settings = settings::Settings::load(storage.as_ref());
     let search_engine = match setting("search_engine").as_deref() {
@@ -92,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new();
     let proxy = event_loop.create_proxy();
     let icon = {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons").join("axomai_logo.png");
+        let path = sys::asset_path("icons/axomai_logo.png");
         image::open(&path)
             .ok()
             .and_then(|img| {
@@ -152,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let download_dir = if settings.download_dir.is_empty() { dirs_download() } else { PathBuf::from(&settings.download_dir) };
     let _ = std::fs::create_dir_all(&download_dir);
-    let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
+    let ui_dir = sys::ui_dir();
     let hub = web::WebShared::new(download_dir, &ui_dir);
     let mut extensions = create_extensions();
     let mut core = actions::Core::new(storage.as_ref(), &mut extensions);
@@ -228,6 +240,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        news_cache: Default::default(),
+        news_pending: Default::default(),
         split: None,
         last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
         last_handoff_poll: std::time::Instant::now(),
@@ -239,7 +253,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
-    app.core.ai_llm = app.settings.ai_llm && app.ai_key().is_some();
     app.apply_privacy_settings();
     app.refresh_bar();
     app.restore_or_start(saved_tabs);

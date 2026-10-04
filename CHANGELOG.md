@@ -27,10 +27,15 @@
 - Download manager (progress, pause / resume / cancel, open, show in folder, ask where to save); Save as PDF; per-site zoom; full screen.
 - Password manager with DPAPI encryption and per-site matching; site-permission bar; HTTPS-only mode; tracking-prevention level; Global Privacy Control.
 - Home page with live weather, theme, working tools and a real Shield counter (the made-up news and statistics were removed).
-- Optional Claude mode for the AI panel using the user's own key (stored encrypted).
+- Live headlines on the New Tab page from Google News' free RSS feeds (Assam first, cached 15 minutes); a real About page instead of the old landing-page mockup.
 - Open links from other apps, register as a web browser, high-DPI scaling of the browser chrome.
 
 ### Fixed (phases)
+- The first page of a new or restored tab could load before the document-start scripts (ad blocking, Global Privacy Control, password manager) were registered; the view now starts blank and loads the address after they are in place.
+- A key that was merely held down when the window gained focus was typed into the address bar (a stray letter at the start of the address); focus-replayed key events are ignored.
+- Typing an address that turned out to be a download left the address bar showing the file URL over the old page; the tab now keeps what it showed.
+- The browser found its pages and icon through the build folder; it now looks next to the program first, so a moved or installed copy still works.
+- Downloads left half-finished by a closed browser no longer stay marked as downloading; autofill offers expire after 30 seconds.
 - A page title could be saved against the previous page's history entry when a new address was typed during a load.
 - Space and held keys in the address bar, view-source race, address bar reverting while focus echoed.
 

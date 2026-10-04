@@ -120,8 +120,57 @@ pub fn screenshots_dir() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("Axomai Screenshots"))
 }
 
+/// Folders to look in for files that ship with the browser: next to the program, then in each parent folder
+/// (a development build runs from `target/debug`), and last the folder this build was made from.
+fn resource_roots() -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        let mut dir = exe.parent().map(|p| p.to_path_buf());
+        for _ in 0..6 {
+            match dir {
+                Some(d) => {
+                    roots.push(d.clone());
+                    dir = d.parent().map(|p| p.to_path_buf());
+                }
+                None => break,
+            }
+        }
+    }
+    roots
+}
+
+/// The folder with the browser's own pages (`home.html`, images, styles).
+pub fn ui_dir() -> std::path::PathBuf {
+    for root in resource_roots() {
+        let ui = root.join("ui");
+        if ui.join("home.html").is_file() {
+            return ui;
+        }
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui")
+}
+
+/// A file from the desktop app's `assets` folder, e.g. `icons/axomai_logo.png`.
+pub fn asset_path(rel: &str) -> std::path::PathBuf {
+    for root in resource_roots() {
+        for base in [root.join("assets"), root.join("rust_desktop").join("assets")] {
+            let p = base.join(rel);
+            if p.is_file() {
+                return p;
+            }
+        }
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(rel)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resources_are_found_from_where_the_program_runs() {
+        assert!(super::ui_dir().join("home.html").is_file());
+        assert!(super::asset_path("icons/axomai_logo.png").is_file());
+    }
+
     use super::*;
 
     #[test]

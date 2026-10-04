@@ -89,6 +89,9 @@ pub struct Tab {
     pub source_html: Option<String>,
     /// Page zoom (1.0 = 100%).
     pub zoom: f64,
+    /// What the tab showed before a typed address, until the new page proves itself with a title (a download
+    /// never does, so the tab goes back to this).
+    pub prev_nav: Option<(TabKind, String, String)>,
 }
 
 impl Tab {
@@ -115,6 +118,7 @@ impl Tab {
             ext_gen: u64::MAX,
             source_html: None,
             zoom: 1.0,
+            prev_nav: None,
         }
     }
 }

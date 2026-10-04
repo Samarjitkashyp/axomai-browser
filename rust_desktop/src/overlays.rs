@@ -316,7 +316,7 @@ finish(card);
     js
 }
 
-pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str, llm: bool) -> String {
+pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str) -> String {
     let mut js = open(theme, token, "__ax_pop_ai");
     js.push_str(&format!(
         r#"
@@ -348,23 +348,10 @@ finish(card);
         css = css_literal("", right, 380.0),
         title = serde_json::to_string(&truncate(title, 60)).unwrap_or_else(|_| "\"\"".into()),
         host = serde_json::to_string(host_name).unwrap_or_else(|_| "\"\"".into()),
-        badge = serde_json::to_string(if llm { "Claude \u{00B7} your key" } else { "on-device" }).unwrap_or_default(),
-        note = serde_json::to_string(if llm {
-            "Summaries and answers are written by Claude with your own API key, so the text of this page is sent to Anthropic. Key topics and reading stats stay on your device."
-        } else {
-            "Runs on your device \u{2014} the page text never leaves this computer. Results are extractive (picked from the page itself)."
-        })
-        .unwrap_or_default(),
+        badge = serde_json::to_string("on-device").unwrap_or_default(),
+        note = serde_json::to_string("Runs on your device \u{2014} the page text never leaves this computer. Results are extractive (picked from the page itself).").unwrap_or_default(),
     ));
     js
-}
-
-/// A short remark under the current AI result (used when Claude could not answer).
-pub fn ai_note(text: &str) -> String {
-    format!(
-        "(function(){{var h=document.getElementById('__ax_pop_ai');if(!h||!h.__axSet)return;var o=h.__axOut;if(o){{var p=document.createElement('p');p.style.cssText='color:#dc2626;font-size:11.5px';p.textContent={};o.appendChild(p)}}}})();",
-        serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
-    )
 }
 
 /// Push a result into an open AI popup (no-op if it was closed).
@@ -544,7 +531,7 @@ mod tests {
         assert!(balanced(&profile_popup(t, "tok", 60.0, &pv)));
         assert!(balanced(&theme_popup(t, "tok", 150.0)));
         assert!(balanced(&site_info_popup(t, "tok", 300.0, crate::toolbar::Security::Insecure, "example.com", 2)));
-        assert!(balanced(&ai_popup(t, "tok", 100.0, "example.com", "A title", false)));
+        assert!(balanced(&ai_popup(t, "tok", 100.0, "example.com", "A title")));
         assert!(balanced(&qr_popup(t, "tok", 300.0, "https://example.com", 2, &[true, false, false, true])));
         assert!(balanced(&toast(t, "Saved", Some(("Open", "tok", "open-folder")))));
     }
@@ -552,7 +539,7 @@ mod tests {
     #[test]
     fn user_text_is_json_escaped() {
         let t = crate::theme::by_id("tea-garden");
-        let js = ai_popup(t, "tok", 10.0, "evil\"</script>.com", "x'; alert(1); '", true);
+        let js = ai_popup(t, "tok", 10.0, "evil\"</script>.com", "x'; alert(1); '");
         assert!(js.contains("evil\\\"</script>.com"));
         // Single quotes are harmless inside a JSON (double-quoted) literal; they must never appear as a bare JS string.
         assert!(js.contains("\"x'; alert(1); '\""));

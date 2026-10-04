@@ -391,6 +391,7 @@ html[data-theme=cyber-dark]{--acc:#10b981;--acc-2:#34d399;--acc-rgb:16,185,129;-
         
       </div>
       <div class="news-content-layout" id="newsLayout"></div>
+      <div id="newsNote" style="font-size:11.5px;color:var(--t-muted);margin-top:10px"></div>
     </div>
 
     <!-- Smart Tools Card -->
@@ -586,13 +587,24 @@ html[data-theme=cyber-dark]{--acc:#10b981;--acc-2:#34d399;--acc-rgb:16,185,129;-
     if(big)return '<div class="featured-article" data-url="'+esc(a.u)+'"><div class="featured-img-wrap">'+pic+'<span class="news-badge badge-green">'+esc(a.b)+'</span></div><h3 class="featured-title">'+esc(a.t)+'</h3><div class="news-footer-meta"><span class="news-source">'+esc(a.d)+'</span></div></div>';
     return '<div class="sub-article" data-url="'+esc(a.u)+'"><div class="sub-img-wrap">'+pic+'</div><div class="sub-info"><span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">'+esc(a.b)+'</span><h4 class="sub-title">'+esc(a.t)+'</h4><span class="news-time">'+esc(a.d)+'</span></div></div>';
   }
-  function show(cat){
-    var list=EXPLORE[cat]||EXPLORE.assam;
-    document.getElementById('newsLayout').innerHTML=art(list[0],true)+'<div class="stacked-articles">'+list.slice(1).map(function(a){return art(a,false)}).join('')+'</div>';
-    document.querySelectorAll('#newsLayout [data-url]').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){location.href=this.dataset.url})});
-  }
-  document.querySelectorAll('.card-tab').forEach(function(t){t.addEventListener('click',function(){show(this.dataset.cat)})});
-  show('assam');
+  var cur='assam',newsData={},updated={};
+  function bindLinks(){document.querySelectorAll('#newsLayout [data-url]').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){location.href=this.dataset.url})})}
+  function ago(d){var t=Date.parse(d);if(!t)return '';var m=Math.round((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+' min ago';var h=Math.round(m/60);if(h<24)return h+' hour'+(h>1?'s':'')+' ago';var dd=Math.round(h/24);return dd+' day'+(dd>1?'s':'')+' ago'}
+  function headline(n,big){var src=n.s||'News';
+    if(big)return '<div class="featured-article" data-url="'+esc(n.u)+'"><div class="featured-img-wrap"><div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:800;color:var(--acc);background:var(--card-2)">'+esc(src.charAt(0).toUpperCase())+'</div><span class="news-badge badge-green">'+esc(src)+'</span></div><h3 class="featured-title">'+esc(n.t)+'</h3><div class="news-footer-meta"><span class="news-time">'+esc(ago(n.d))+'</span></div></div>';
+    return '<div class="sub-article" data-url="'+esc(n.u)+'"><div class="sub-info"><span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">'+esc(src)+'</span><h4 class="sub-title">'+esc(n.t)+'</h4><span class="news-time">'+esc(ago(n.d))+'</span></div></div>'}
+  function render(cat){
+    var box=document.getElementById('newsLayout'),note=document.getElementById('newsNote'),list=newsData[cat];
+    if(list===undefined){box.innerHTML='<p style="color:var(--t-muted)">Loading headlines\u2026</p>';note.textContent='';return}
+    if(!list||!list.length){var ex=EXPLORE[cat]||EXPLORE.assam;box.innerHTML=art(ex[0],true)+'<div class="stacked-articles">'+ex.slice(1).map(function(a){return art(a,false)}).join('')+'</div>';note.textContent='Live headlines are not available right now (offline?), so these are saved links.';bindLinks();return}
+    box.innerHTML=headline(list[0],true)+'<div class="stacked-articles">'+list.slice(1,4).map(function(a){return headline(a,false)}).join('')+'</div>';
+    var t=new Date(updated[cat]||Date.now());note.textContent='Headlines from Google News \u00b7 updated '+t.getHours()+':'+String(t.getMinutes()).padStart(2,'0');
+    bindLinks()}
+  window.__news=function(cat,p){newsData[cat]=(p&&p.ok)?p.items.slice().sort(function(x,y){return (Date.parse(y.d)||0)-(Date.parse(x.d)||0)}):null;updated[cat]=Date.now();if(cat===cur)render(cat)};
+  function want(cat){location.href='axomai://news/'+cat}
+  document.querySelectorAll('.card-tab').forEach(function(t){t.addEventListener('click',function(){cur=this.dataset.cat;render(cur);want(cur)})});
+  render('assam');want('assam');
+  setInterval(function(){want(cur)},15*60*1000);
 
   // ---- tools
   document.querySelectorAll('.tool-tile[data-url]').forEach(function(el){el.addEventListener('click',function(){location.href=this.dataset.url})});

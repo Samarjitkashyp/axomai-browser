@@ -57,6 +57,8 @@ pub struct PwPending {
 pub struct PwOffer {
     pub origin: String,
     pub ids: Vec<i64>,
+    /// When the list was shown; an old offer is not honoured.
+    pub at: Instant,
 }
 
 fn host_label(origin: &str) -> &str {
@@ -179,7 +181,7 @@ impl App {
             return;
         }
         let users: Vec<String> = logins.iter().map(|(_, u)| if u.is_empty() { "(no username)".to_string() } else { u.clone() }).collect();
-        self.pw_offer = Some(PwOffer { origin: origin.clone(), ids: logins.into_iter().map(|(id, _)| id).collect() });
+        self.pw_offer = Some(PwOffer { origin: origin.clone(), ids: logins.into_iter().map(|(id, _)| id).collect(), at: Instant::now() });
         if let Some(wv) = &self.webview {
             let _ = wv.evaluate_script(&overlays::pw_offer(self.core.theme, host_label(&origin), x, y, w, &users));
         }
@@ -187,6 +189,9 @@ impl App {
 
     fn fill_login(&mut self, origin: &str, index: usize) {
         let Some(offer) = self.pw_offer.take() else { return };
+        if offer.at.elapsed() > Duration::from_secs(30) {
+            return;
+        }
         // The offer was made for this site, and the page that is loaded now must still be that site.
         let current = self.webview.as_ref().and_then(|wv| wv.url().ok()).and_then(|u| origin_of(&u));
         if offer.origin != origin || current.as_deref() != Some(origin) {
