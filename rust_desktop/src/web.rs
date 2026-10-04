@@ -20,6 +20,30 @@ pub enum Initial<'a> {
     Html(&'a str),
 }
 
+/// A file download, identified by a process-wide id.
+#[derive(Clone, Debug)]
+pub enum DlEvent {
+    Started { id: u64, url: String, path: PathBuf, total: i64 },
+    Progress { id: u64, received: i64, total: i64 },
+    Paused { id: u64, paused: bool },
+    Done { id: u64 },
+    Failed { id: u64, reason: String },
+}
+
+/// `dir/name`, or `dir/name (1).ext`, `(2)` ... when that file already exists.
+pub fn unique_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let name = name.trim();
+    let name = if name.is_empty() { "download" } else { name };
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let p = std::path::Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
+    let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (1..10_000).map(|n| dir.join(format!("{} ({}){}", stem, n, ext))).find(|c| !c.exists()).unwrap_or(first)
+}
+
 /// Things a web view reports. Every event is tagged with the id of the tab (web view) that produced it.
 #[derive(Clone, Debug)]
 pub enum WebEvent {
@@ -38,6 +62,8 @@ pub enum WebEvent {
     Favicon(Vec<u8>),
     /// The page started / stopped playing audio.
     Audio(bool),
+    /// Progress of a file download started by this tab.
+    Download(DlEvent),
 }
 
 /// Live counters + switches read by the network hook. The switches and the lifetime total are shared by every
@@ -78,7 +104,6 @@ pub struct WebShared {
     /// `axomai://` commands from popups and our own pages (shared by all tabs).
     pub nav: Arc<Mutex<Vec<String>>>,
     pub events: Arc<Mutex<Vec<(u64, WebEvent)>>>,
-    pub downloads: Arc<Mutex<Vec<(String, String, bool)>>>,
     /// Where downloads are saved; the Settings page can change it while the browser runs.
     pub download_dir: Arc<Mutex<PathBuf>>,
     /// True while this tab's top-level document is one of our own pages (data:, about:, file under `ui_prefix`).
@@ -100,7 +125,6 @@ impl WebShared {
         WebShared {
             nav: Arc::new(Mutex::new(Vec::new())),
             events: Arc::new(Mutex::new(Vec::new())),
-            downloads: Arc::new(Mutex::new(Vec::new())),
             download_dir: Arc::new(Mutex::new(download_dir)),
             trusted: Arc::new(AtomicBool::new(true)),
             token: Arc::new(format!("{:032x}", mixed)),
@@ -191,9 +215,6 @@ pub fn build_webview(
     let title_shared = shared.clone();
     let load_shared = shared.clone();
     let window_shared = shared.clone();
-    let dl_dir = shared.download_dir.clone();
-    let dl_sig = shared.downloads.clone();
-    let dl_started = shared.clone();
 
     let builder = WebViewBuilder::new();
     let builder = match initial {
@@ -249,23 +270,6 @@ pub fn build_webview(
             PageLoadEvent::Started => load_shared.push_event(WebEvent::LoadStarted(url)),
             PageLoadEvent::Finished => load_shared.push_event(WebEvent::LoadFinished(url)),
         })
-        .with_download_started_handler(move |url, path| {
-            let fname = url.rsplit('/').next().unwrap_or("download").split('?').next().unwrap_or("download");
-            let fname = if fname.is_empty() { "download" } else { fname };
-            *path = dl_dir.lock().map(|d| d.join(fname)).unwrap_or_else(|_| PathBuf::from(fname));
-            // The navigation became a download, so no page will ever report that it finished loading.
-            dl_started.push_event(WebEvent::LoadFinished(url));
-            true
-        })
-        .with_download_completed_handler(move |url, path, success| {
-            let fname = path
-                .as_ref()
-                .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
-                .unwrap_or_default();
-            if let Ok(mut sig) = dl_sig.lock() {
-                sig.push((url, fname, success));
-            }
-        })
         .build_as_child(window)
         .ok()?;
 
@@ -278,6 +282,7 @@ pub fn build_webview(
         com::install_favicon(&wv, shared.clone());
         com::install_audio(&wv, shared.clone());
         com::install_focus(&wv, shared.clone());
+        com::install_downloads(&wv, shared.clone());
     }
     Some(wv)
 }
@@ -290,7 +295,7 @@ pub mod com {
         take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler,
         AcceleratorKeyPressedEventHandler, ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, FaviconChangedEventHandler,
         GetFaviconCompletedHandler, FocusChangedEventHandler, ClearBrowsingDataCompletedHandler, IsDocumentPlayingAudioChangedEventHandler, TrySuspendCompletedHandler, WebMessageReceivedEventHandler,
-        WebResourceRequestedEventHandler,
+        WebResourceRequestedEventHandler, BytesReceivedChangedEventHandler, DownloadStartingEventHandler, StateChangedEventHandler,
     };
     use windows::core::{w, Interface, HSTRING, PWSTR};
     use windows::Win32::Foundation::BOOL;
@@ -456,6 +461,98 @@ pub mod com {
         unsafe {
             let mut token = std::mem::zeroed();
             let _ = controller.add_GotFocus(&handler, &mut token);
+        }
+    }
+
+    thread_local! {
+        /// Download operations that are still running, by download id (WebView2 objects stay on the UI thread).
+        static OPS: std::cell::RefCell<std::collections::HashMap<u64, ICoreWebView2DownloadOperation>> = Default::default();
+    }
+    static NEXT_DOWNLOAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+    /// "pause", "resume" or "cancel" for a running download.
+    pub fn download_control(id: u64, action: &str) {
+        OPS.with(|ops| {
+            if let Some(op) = ops.borrow().get(&id) {
+                unsafe {
+                    let _ = match action {
+                        "pause" => op.Pause(),
+                        "resume" => op.Resume(),
+                        _ => op.Cancel(),
+                    };
+                }
+            }
+        });
+    }
+
+    /// Takes over every download of this web view: saves into the download folder under a free name, hides the
+    /// browser's own download flyout, and reports progress so the Downloads page can show it live.
+    pub fn install_downloads(wv: &WebView, shared: WebShared) {
+        let Some(core) = core(wv) else { return };
+        unsafe {
+            let Ok(core4) = core.cast::<ICoreWebView2_4>() else { return };
+            let handler = DownloadStartingEventHandler::create(Box::new(move |_sender, args| {
+                let Some(args) = args else { return Ok(()) };
+                let op = args.DownloadOperation()?;
+                let mut s = PWSTR::null();
+                op.Uri(&mut s)?;
+                let url = take_pwstr(s);
+                let mut s = PWSTR::null();
+                args.ResultFilePath(&mut s)?;
+                let suggested = take_pwstr(s);
+                let name = std::path::Path::new(&suggested).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let path = unique_path(&shared.download_dir(), &name);
+                let wide = HSTRING::from(path.to_string_lossy().as_ref());
+                args.SetResultFilePath(&wide)?;
+                args.SetHandled(true)?;
+                let mut total = 0i64;
+                let _ = op.TotalBytesToReceive(&mut total);
+                let id = NEXT_DOWNLOAD.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                OPS.with(|ops| ops.borrow_mut().insert(id, op.clone()));
+                // The navigation became a download, so no page will ever report that it finished loading.
+                shared.push_event(WebEvent::LoadFinished(url.clone()));
+                shared.push_event(WebEvent::Download(DlEvent::Started { id, url, path, total: total.max(0) }));
+
+                let progress = shared.clone();
+                let on_bytes = BytesReceivedChangedEventHandler::create(Box::new(move |sender, _| {
+                    if let Some(op) = sender {
+                        let (mut got, mut all) = (0i64, 0i64);
+                        let _ = op.BytesReceived(&mut got);
+                        let _ = op.TotalBytesToReceive(&mut all);
+                        progress.push_event(WebEvent::Download(DlEvent::Progress { id, received: got, total: all.max(0) }));
+                    }
+                    Ok(())
+                }));
+                let state_events = shared.clone();
+                let on_state = StateChangedEventHandler::create(Box::new(move |sender, _| {
+                    let Some(op) = sender else { return Ok(()) };
+                    let mut state = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+                    let _ = op.State(&mut state);
+                    let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_NONE;
+                    let _ = op.InterruptReason(&mut reason);
+                    if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+                        OPS.with(|ops| ops.borrow_mut().remove(&id));
+                        state_events.push_event(WebEvent::Download(DlEvent::Done { id }));
+                    } else if state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
+                        if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_PAUSED {
+                            state_events.push_event(WebEvent::Download(DlEvent::Paused { id, paused: true }));
+                        } else {
+                            OPS.with(|ops| ops.borrow_mut().remove(&id));
+                            let why = if reason == COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_USER_CANCELED { "canceled".to_string() } else { format!("error {}", reason.0) };
+                            state_events.push_event(WebEvent::Download(DlEvent::Failed { id, reason: why }));
+                        }
+                    } else {
+                        state_events.push_event(WebEvent::Download(DlEvent::Paused { id, paused: false }));
+                    }
+                    Ok(())
+                }));
+                let mut token = std::mem::zeroed();
+                let _ = op.add_BytesReceivedChanged(&on_bytes, &mut token);
+                let _ = op.add_StateChanged(&on_state, &mut token);
+                Ok(())
+            }));
+            let mut token = std::mem::zeroed();
+            let _ = core4.add_DownloadStarting(&handler, &mut token);
         }
     }
 
@@ -756,6 +853,8 @@ pub mod com {
     impl DocScript {
         pub fn set(&self, _wv: &WebView, _js: &str) {}
     }
+
+    pub fn download_control(_id: u64, _action: &str) {}
 
     pub fn can_go(_wv: &WebView) -> (bool, bool) {
         (false, false)

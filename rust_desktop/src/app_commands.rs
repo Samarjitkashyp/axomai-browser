@@ -117,7 +117,7 @@ impl App {
             }
             TabKind::Page("downloads") => {
                 let entries = self.storage.as_ref().and_then(|s| s.get_downloads(200).ok()).unwrap_or_default();
-                pages::downloads_page(&ctx, &entries)
+                pages::downloads_page(&ctx, &entries, &self.live_downloads())
             }
             _ => crate::ui_shell::page(&ctx, "", "Axomai", "<p class=\"sub\">This page is not available yet.</p>", ""),
         }
@@ -263,6 +263,10 @@ impl App {
                 let _ = wv.load_html(payload);
             }
             self.redraw = true;
+        } else if kind == "download-target" {
+            if let Ok(id) = question.parse::<u64>() {
+                self.on_download_target(id, payload);
+            }
         } else if kind == "download-dir" {
             self.apply_setting("download_dir", payload);
         } else if kind == "capture-full" {
@@ -483,6 +487,8 @@ impl App {
                 let _ = s.delete_history(id);
             }
             self.load_active_page();
+        } else if let Some((action, id)) = cmd.strip_prefix("dl-").and_then(|r| r.split_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
+            self.download_command(action, id);
         } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
             self.open_suggestion(row);
         } else if let Some(q) = cmd.strip_prefix("search/") {

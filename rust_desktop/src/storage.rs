@@ -260,6 +260,30 @@ impl BrowserStorage {
         Ok(entries)
     }
 
+    pub fn get_download(&self, id: i64) -> Option<DownloadEntry> {
+        self.conn
+            .query_row("SELECT id, url, filename, filepath, size_bytes, status, started_at FROM downloads WHERE id = ?1", params![id], |row| {
+                Ok(DownloadEntry { id: row.get(0)?, url: row.get(1)?, filename: row.get(2)?, filepath: row.get(3)?, size_bytes: row.get(4)?, status: row.get(5)?, started_at: row.get(6)? })
+            })
+            .ok()
+    }
+
+    pub fn delete_download(&self, id: i64) -> Result<(), rusqlite::Error> {
+        self.conn.execute("DELETE FROM downloads WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn set_download_path(&self, id: i64, filepath: &str, filename: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE downloads SET filepath = ?1, filename = ?2 WHERE id = ?3", params![filepath, filename, id])?;
+        Ok(())
+    }
+
+    /// Downloads that were still running when the browser last closed can never finish.
+    pub fn fail_stale_downloads(&self) -> Result<(), rusqlite::Error> {
+        self.conn.execute("UPDATE downloads SET status = 'failed' WHERE status = 'downloading'", [])?;
+        Ok(())
+    }
+
     pub fn clear_downloads(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM downloads", [])?;
         Ok(())

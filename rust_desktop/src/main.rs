@@ -6,6 +6,7 @@ pub mod app_input;
 pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
+pub mod downloads;
 pub mod ext_scripts;
 pub mod extensions;
 pub mod favicons;
@@ -183,6 +184,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sugg_shown: false,
         sugg_hide_at: None,
         bar_marks: Vec::new(),
+        dls: Vec::new(),
+        dl_push_at: std::time::Instant::now(),
         safe: false,
         proxy,
         _instance: instance,

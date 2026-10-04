@@ -60,6 +60,9 @@ pub struct App {
     pub sugg_hide_at: Option<Instant>,
     /// Bookmarks listed on the bookmarks bar (newest first, as stored).
     pub bar_marks: Vec<crate::storage::Bookmark>,
+    /// Downloads that are running (or waiting for a "Save as" answer).
+    pub dls: Vec<crate::downloads::DlState>,
+    pub dl_push_at: Instant,
 
     pub mouse: (f32, f32),
     pub left_down: bool,
@@ -176,7 +179,7 @@ impl App {
             self.sugg_hide_at = None;
             self.hide_suggestions();
         }
-        self.process_downloads();
+        self.push_download_progress();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();
         self.sync_with_page();
@@ -219,6 +222,7 @@ impl App {
             let Some(idx) = self.tabs.iter().position(|t| t.id == tab_id) else { continue };
             match ev {
                 WebEvent::Navigating(url) => self.on_navigating(idx, &url),
+                WebEvent::Download(d) => self.on_download_event(idx, d),
                 WebEvent::LoadStarted(url) => {
                     if url.starts_with("http://") || url.starts_with("https://") {
                         self.tabs[idx].loading = true;
@@ -344,31 +348,6 @@ impl App {
             _ => {}
         }
         self.redraw = true;
-    }
-
-    fn process_downloads(&mut self) {
-        let items: Vec<(String, String, bool)> = self.hub.downloads.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default();
-        for (url, fname, success) in items {
-            if !self.private_window {
-                if let Some(s) = &self.storage {
-                    let filepath = self.hub.download_dir().join(&fname).to_string_lossy().to_string();
-                    let _ = s.add_download(&url, &fname, &filepath);
-                    if let Ok(downloads) = s.get_downloads(1) {
-                        if let Some(dl) = downloads.first() {
-                            let _ = s.update_download_status(dl.id, if success { "completed" } else { "failed" }, 0);
-                        }
-                    }
-                }
-            }
-            if let Some(wv) = &self.webview {
-                let shared = self.shared();
-                if success {
-                    self.core.toast(wv, &format!("\u{2B07}\u{FE0F} Downloaded {}", fname), Some(("Show downloads", &shared.token, "downloads")), &shared);
-                } else {
-                    self.core.toast(wv, &format!("Download failed: {}", fname), None, &shared);
-                }
-            }
-        }
     }
 
     /// Hidden tabs that have been idle for a while release their memory but keep their state.

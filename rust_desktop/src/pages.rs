@@ -96,22 +96,76 @@ pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
     ui_shell::page(ctx, "bookmarks", "Bookmarks", &body, FILTER_JS)
 }
 
-pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry]) -> String {
+/// Live numbers for a running download: (received, total, paused).
+pub type Live = std::collections::HashMap<i64, (i64, i64, bool)>;
+
+const DOWNLOADS_JS: &str = r#"
+function fmt(b){if(b<=0)return '\u2014';if(b<1024)return b+' B';if(b<1048576)return (b/1024).toFixed(1)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB'}
+window.__dl=function(rows){rows.forEach(function(r){var e=document.querySelector('[data-id="'+r[0]+'"]');if(!e)return;
+ var bar=e.querySelector('.bar i'),m=e.querySelector('.m'),p=r[2]>0?Math.min(100,r[1]*100/r[2]):0;
+ if(bar)bar.style.width=p+'%';
+ if(m)m.textContent=(r[3]?'Paused \u00b7 ':'')+fmt(r[1])+(r[2]>0?' of '+fmt(r[2]):'')}) };
+"#;
+
+pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry], live: &Live) -> String {
     let mut rows = String::new();
     for d in downloads {
+        let running = d.status == "downloading" && live.contains_key(&d.id);
         let (class, label) = match d.status.as_str() {
             "completed" => ("ok", "Completed"),
-            "downloading" => ("", "Downloading"),
+            "downloading" if running => ("", "Downloading"),
+            "cancelled" => ("bad", "Cancelled"),
             _ => ("bad", "Failed"),
         };
+        let (middle, actions) = if running {
+            let (got, total, paused) = live[&d.id];
+            let pct = crate::downloads::percent(got, total).unwrap_or(0);
+            (
+                format!(
+                    "<div class=\"bar\" style=\"height:5px;border-radius:3px;background:var(--surface2);margin-top:6px;overflow:hidden\"><i style=\"display:block;height:100%;width:{pct}%;background:var(--primary)\"></i></div>",
+                    pct = pct
+                ),
+                format!(
+                    "<button class=\"btn ghost\" onclick=\"go('dl-{}/{}')\">{}</button><button class=\"btn danger\" onclick=\"go('dl-cancel/{}')\">Cancel</button>",
+                    if paused { "resume" } else { "pause" },
+                    d.id,
+                    if paused { "Resume" } else { "Pause" },
+                    d.id
+                ),
+            )
+        } else if d.status == "completed" {
+            (
+                String::new(),
+                format!(
+                    "<button class=\"btn ghost\" onclick=\"go('dl-open/{id}')\">Open</button><button class=\"btn ghost\" onclick=\"go('dl-show/{id}')\">Show in folder</button>",
+                    id = d.id
+                ),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+        let size = if running {
+            let (got, total, _) = live[&d.id];
+            if total > 0 {
+                format!("{} of {}", format_bytes(got), format_bytes(total))
+            } else {
+                format_bytes(got)
+            }
+        } else {
+            format_bytes(d.size_bytes)
+        };
         rows.push_str(&format!(
-            "<div class=\"item\" style=\"cursor:default\"><div class=\"ic\">\u{2B07}\u{FE0F}</div><div class=\"t\"><b>{name}</b><span>{url}</span></div>\
-             <div class=\"m\">{size}</div><span class=\"pill {class}\">{label}</span></div>",
+            "<div class=\"item\" data-id=\"{id}\" style=\"cursor:default\"><div class=\"ic\">\u{2B07}\u{FE0F}</div><div class=\"t\"><b>{name}</b><span>{url}</span>{middle}</div>\
+             <div class=\"m\">{size}</div><span class=\"pill {class}\">{label}</span>{actions}\
+             <button class=\"x\" title=\"Remove from list\" onclick=\"go('dl-remove/{id}')\">\u{2715}</button></div>",
+            id = d.id,
             name = escape(&d.filename),
             url = escape(&truncate(&d.url, 90)),
-            size = format_bytes(d.size_bytes),
+            middle = middle,
+            size = size,
             class = class,
-            label = label
+            label = label,
+            actions = actions
         ));
     }
     if rows.is_empty() {
@@ -122,7 +176,7 @@ pub fn downloads_page(ctx: &PageCtx, downloads: &[DownloadEntry]) -> String {
         head = ui_shell::heading("Downloads", "Files you downloaded"),
         rows = rows
     );
-    ui_shell::page(ctx, "downloads", "Downloads", &body, "")
+    ui_shell::page(ctx, "downloads", "Downloads", &body, DOWNLOADS_JS)
 }
 
 pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
@@ -179,7 +233,26 @@ mod tests {
     #[test]
     fn empty_pages_say_so() {
         assert!(bookmarks_page(&ctx(), &[]).contains("No bookmarks yet"));
-        assert!(downloads_page(&ctx(), &[]).contains("No downloads yet"));
+        assert!(downloads_page(&ctx(), &[], &Live::new()).contains("No downloads yet"));
+    }
+
+    #[test]
+    fn running_download_shows_progress_and_controls() {
+        let d = DownloadEntry { id: 4, url: "https://x.test/f.zip".into(), filename: "f.zip".into(), filepath: "C:/f.zip".into(), size_bytes: 0, status: "downloading".into(), started_at: String::new() };
+        let mut live = Live::new();
+        live.insert(4, (50, 200, false));
+        let html = downloads_page(&ctx(), &[d.clone()], &live);
+        assert!(html.contains("width:25%"));
+        assert!(html.contains("go('dl-pause/4')") && html.contains("go('dl-cancel/4')"));
+        live.insert(4, (50, 200, true));
+        assert!(downloads_page(&ctx(), &[d], &live).contains("go('dl-resume/4')"));
+    }
+
+    #[test]
+    fn finished_download_can_be_opened() {
+        let d = DownloadEntry { id: 9, url: "u".into(), filename: "f".into(), filepath: "p".into(), size_bytes: 10, status: "completed".into(), started_at: String::new() };
+        let html = downloads_page(&ctx(), &[d], &Live::new());
+        assert!(html.contains("go('dl-open/9')") && html.contains("go('dl-show/9')"));
     }
 
     #[test]
