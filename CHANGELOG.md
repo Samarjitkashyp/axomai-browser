@@ -27,10 +27,12 @@
 - Download manager (progress, pause / resume / cancel, open, show in folder, ask where to save); Save as PDF; per-site zoom; full screen.
 - Password manager with DPAPI encryption and per-site matching; site-permission bar; HTTPS-only mode; tracking-prevention level; Global Privacy Control.
 - Home page with live weather, theme, working tools and a real Shield counter (the made-up news and statistics were removed).
-- Live headlines on the New Tab page from Google News' free RSS feeds (Assam first, cached 15 minutes); a real About page instead of the old landing-page mockup.
+- Live headlines on the New Tab page from Assam newspapers' and Google News' free RSS feeds (Assam first, with photos or the publisher's logo, cached 15 minutes); a real About page instead of the old landing-page mockup.
+- Site icons on the bookmarks bar, the Bookmarks page and the History page (saved from the pages you visit, fetched once for bookmarks that have none).
 - Open links from other apps, register as a web browser, high-DPI scaling of the browser chrome.
 
 ### Fixed (phases)
+- Opening the browser with bookmarks whose icons were not saved yet could crash at startup; icon fetching now waits until the first tab exists.
 - The first page of a new or restored tab could load before the document-start scripts (ad blocking, Global Privacy Control, password manager) were registered; the view now starts blank and loads the address after they are in place.
 - A key that was merely held down when the window gained focus was typed into the address bar (a stray letter at the start of the address); focus-replayed key events are ignored.
 - Typing an address that turned out to be a download left the address bar showing the file URL over the old page; the tab now keeps what it showed.

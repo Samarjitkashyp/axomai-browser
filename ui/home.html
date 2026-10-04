@@ -263,6 +263,7 @@ html[data-theme=cyber-dark]{--acc:#10b981;--acc-2:#34d399;--acc-rgb:16,185,129;-
 .search-mic-btn.listening{color:#ef4444!important;animation:pulse 1s infinite}
 @keyframes pulse{50%{opacity:.45}}
 .tool-tile{cursor:pointer}
+.nimg{position:relative;width:100%;height:100%;min-height:60px;background:var(--card-2);overflow:hidden}.nimg .nph{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:30px;font-weight:800;color:var(--acc)}.nimg .nph img{width:36px;height:36px;border-radius:9px;background:#fff;padding:3px}.nimg>img.photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 </style>
 </head>
 <body>
@@ -590,9 +591,13 @@ html[data-theme=cyber-dark]{--acc:#10b981;--acc-2:#34d399;--acc-rgb:16,185,129;-
   var cur='assam',newsData={},updated={};
   function bindLinks(){document.querySelectorAll('#newsLayout [data-url]').forEach(function(el){el.style.cursor='pointer';el.addEventListener('click',function(){location.href=this.dataset.url})})}
   function ago(d){var t=Date.parse(d);if(!t)return '';var m=Math.round((Date.now()-t)/60000);if(m<1)return 'just now';if(m<60)return m+' min ago';var h=Math.round(m/60);if(h<24)return h+' hour'+(h>1?'s':'')+' ago';var dd=Math.round(h/24);return dd+' day'+(dd>1?'s':'')+' ago'}
+  function pic(n){var l=esc((n.s||'N').charAt(0).toUpperCase());
+    var logo=n.h?'<img src="https://www.google.com/s2/favicons?domain='+encodeURIComponent(n.h)+'&sz=64" alt="" onerror="this.style.display=\'none\'">':'';
+    var photo=n.i?'<img class="photo" src="'+esc(n.i)+'" alt="" loading="lazy" onerror="this.style.display=\'none\'">':'';
+    return '<div class="nimg"><div class="nph">'+logo+'<span>'+l+'</span></div>'+photo+'</div>'}
   function headline(n,big){var src=n.s||'News';
-    if(big)return '<div class="featured-article" data-url="'+esc(n.u)+'"><div class="featured-img-wrap"><div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:48px;font-weight:800;color:var(--acc);background:var(--card-2)">'+esc(src.charAt(0).toUpperCase())+'</div><span class="news-badge badge-green">'+esc(src)+'</span></div><h3 class="featured-title">'+esc(n.t)+'</h3><div class="news-footer-meta"><span class="news-time">'+esc(ago(n.d))+'</span></div></div>';
-    return '<div class="sub-article" data-url="'+esc(n.u)+'"><div class="sub-info"><span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">'+esc(src)+'</span><h4 class="sub-title">'+esc(n.t)+'</h4><span class="news-time">'+esc(ago(n.d))+'</span></div></div>'}
+    if(big)return '<div class="featured-article" data-url="'+esc(n.u)+'"><div class="featured-img-wrap">'+pic(n)+'<span class="news-badge badge-green">'+esc(src)+'</span></div><h3 class="featured-title">'+esc(n.t)+'</h3><div class="news-footer-meta"><span class="news-time">'+esc(ago(n.d))+'</span></div></div>';
+    return '<div class="sub-article" data-url="'+esc(n.u)+'"><div class="sub-img-wrap">'+pic(n)+'</div><div class="sub-info"><span class="news-badge badge-gold" style="position:static;display:inline-block;margin-bottom:4px">'+esc(src)+'</span><h4 class="sub-title">'+esc(n.t)+'</h4><span class="news-time">'+esc(ago(n.d))+'</span></div></div>'}
   function render(cat){
     var box=document.getElementById('newsLayout'),note=document.getElementById('newsNote'),list=newsData[cat];
     if(list===undefined){box.innerHTML='<p style="color:var(--t-muted)">Loading headlines\u2026</p>';note.textContent='';return}

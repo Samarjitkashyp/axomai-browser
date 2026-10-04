@@ -4,6 +4,7 @@ use crate::extensions as ex;
 use crate::i18n::tr;
 use crate::storage::{Bookmark, DownloadEntry, HistoryEntry};
 use crate::types::Extension;
+use crate::site_icons::{lookup_host, Icons};
 use crate::ui_shell::{self, PageCtx};
 use crate::viewsource::escape;
 
@@ -66,7 +67,15 @@ if(q)q.addEventListener('input',filt);
 function delrange(){var r=document.getElementById('range').value;var label=document.getElementById('range').selectedOptions[0].textContent;if(confirm('Delete browsing history for: '+label+'?'))go('clear-data-range/'+r+'/h')}
 "#;
 
-pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
+/// The round icon cell of a row: the site's own icon when known, else `fallback`.
+fn icon_cell(icons: &Icons, url: &str, fallback: &str) -> String {
+    match lookup_host(url).and_then(|h| icons.get(&h)) {
+        Some(uri) => format!("<div class=\"ic\"><img src=\"{}\" width=\"20\" height=\"20\" alt=\"\" style=\"border-radius:4px\"></div>", uri),
+        None => format!("<div class=\"ic\">{}</div>", fallback),
+    }
+}
+
+pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry], icons: &Icons) -> String {
     // Entries arrive newest first with local "YYYY-MM-DD HH:MM:SS" times; one group per day.
     let mut groups = String::new();
     let mut day = String::new();
@@ -84,9 +93,10 @@ pub fn history_page(ctx: &PageCtx, entries: &[HistoryEntry]) -> String {
         let title = if e.title.is_empty() { &e.url } else { &e.title };
         let time: String = e.visit_time.chars().skip(11).take(5).collect();
         groups.push_str(&format!(
-            "<div class=\"item\"{click}><div class=\"ic\">\u{1F552}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
+            "<div class=\"item\"{click}>{icon}<div class=\"t\"><b>{title}</b><span>{url}</span></div><div class=\"m\">{time}</div>\
              <button class=\"x\" title=\"Remove from history\" onclick=\"event.stopPropagation();go('history-delete/{id}')\">\u{2715}</button></div>",
             click = link_attr(&e.url),
+            icon = icon_cell(icons, &e.url, "\u{1F552}"),
             title = escape(&truncate(title, 90)),
             url = escape(&truncate(&e.url, 100)),
             time = escape(&time),
@@ -128,7 +138,7 @@ function rn(id,t){var v=prompt('Bookmark title',t);if(v!==null&&v.trim())go('bm-
 function df(el){if(confirm('Delete this folder? Its bookmarks move to Unsorted.'))go('bm-folder-delete/'+encodeURIComponent(el.dataset.folder))}
 "#;
 
-pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
+pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark], icons: &Icons) -> String {
     // Folders in order of first appearance, "Bookmarks bar" and "Unsorted" always first.
     let mut folders: Vec<String> = vec![crate::bookmarks_io::BAR_FOLDER.to_string(), crate::bookmarks_io::DEFAULT_FOLDER.to_string()];
     for b in bookmarks {
@@ -149,11 +159,12 @@ pub fn bookmarks_page(ctx: &PageCtx, bookmarks: &[Bookmark]) -> String {
             let title = if b.title.is_empty() { &b.url } else { &b.title };
             let options: String = folders.iter().map(|o| option(&b.folder, o)).collect();
             rows.push_str(&format!(
-                "<div class=\"item\"{click}><div class=\"ic\">\u{2B50}</div><div class=\"t\"><b>{title}</b><span>{url}</span></div>\
+                "<div class=\"item\"{click}>{icon}<div class=\"t\"><b>{title}</b><span>{url}</span></div>\
                  <select data-cur=\"{cur}\" title=\"Move to folder\" onclick=\"event.stopPropagation()\" onchange=\"mv({id},this)\">{options}<option value=\"\u{1}new\">\u{FF0B} New folder\u{2026}</option></select>\
                  <button class=\"x\" title=\"Rename\" data-t=\"{title_attr}\" onclick=\"event.stopPropagation();rn({id},this.dataset.t)\">\u{270E}</button>\
                  <button class=\"x\" title=\"Remove bookmark\" onclick=\"event.stopPropagation();go('remove-bookmark/{id}')\">\u{2715}</button></div>",
                 click = link_attr(&b.url),
+                icon = icon_cell(icons, &b.url, "\u{2B50}"),
                 title = escape(&truncate(title, 90)),
                 title_attr = escape(title),
                 url = escape(&truncate(&b.url, 100)),
@@ -445,7 +456,7 @@ mod tests {
             HistoryEntry { id: 7, url: "https://example.com/?a=1&b=<x>".into(), title: "<script>alert(1)</script>".into(), visit_time: "2026-10-04 10:00:00".into() },
             HistoryEntry { id: 8, url: "javascript:alert(1)".into(), title: String::new(), visit_time: String::new() },
         ];
-        let html = history_page(&ctx(), &entries);
+        let html = history_page(&ctx(), &entries, &Icons::new());
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(html.contains("go('history-delete/7')"));
@@ -456,7 +467,7 @@ mod tests {
     #[test]
     fn history_is_grouped_by_day_and_has_range_delete() {
         let e = |id, url: &str, t: &str| HistoryEntry { id, url: url.into(), title: String::new(), visit_time: t.into() };
-        let html = history_page(&ctx(), &[e(3, "https://a.test", "2026-10-04 10:00:00"), e(2, "https://b.test", "2026-10-04 09:00:00"), e(1, "https://c.test", "2026-10-03 23:00:00")]);
+        let html = history_page(&ctx(), &[e(3, "https://a.test", "2026-10-04 10:00:00"), e(2, "https://b.test", "2026-10-04 09:00:00"), e(1, "https://c.test", "2026-10-03 23:00:00")], &Icons::new());
         assert_eq!(html.matches("class=\"fgroup\"").count(), 2);
         assert!(html.contains("2026-10-03") && html.contains("delrange()"));
     }
@@ -464,7 +475,7 @@ mod tests {
     #[test]
     fn bookmarks_are_grouped_into_folders() {
         let b = |id, url: &str, folder: &str| Bookmark { id, url: url.into(), title: "T".into(), folder: folder.into(), created_at: String::new() };
-        let html = bookmarks_page(&ctx(), &[b(1, "https://a.test", "Work"), b(2, "https://b.test", "Unsorted"), b(3, "https://c.test", "Work")]);
+        let html = bookmarks_page(&ctx(), &[b(1, "https://a.test", "Work"), b(2, "https://b.test", "Unsorted"), b(3, "https://c.test", "Work")], &Icons::new());
         assert_eq!(html.matches("class=\"fgroup\"").count(), 2, "empty folders are not listed");
         assert!(html.contains("go('bm-import-chrome')") && html.contains("go('bm-export')"));
         assert!(html.contains("data-folder=\"Work\""), "custom folders can be deleted");
@@ -473,7 +484,7 @@ mod tests {
 
     #[test]
     fn empty_pages_say_so() {
-        assert!(bookmarks_page(&ctx(), &[]).contains("No bookmarks yet"));
+        assert!(bookmarks_page(&ctx(), &[], &Icons::new()).contains("No bookmarks yet"));
         assert!(downloads_page(&ctx(), &[], &Live::new()).contains("No downloads yet"));
     }
 

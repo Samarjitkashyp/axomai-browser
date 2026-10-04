@@ -119,6 +119,8 @@ impl App {
         } else {
             Vec::new()
         };
+        let urls: Vec<String> = self.storage.as_ref().and_then(|s| s.get_bookmarks().ok()).unwrap_or_default().into_iter().map(|b| b.url).collect();
+        self.ensure_icons(&urls);
         self.redraw = true;
     }
 
@@ -178,9 +180,15 @@ impl App {
                 .find(|c| c.is_alphanumeric())
                 .map(|c| c.to_uppercase().to_string())
                 .unwrap_or_else(|| "*".into());
-            let chip = Rect::new(r.x + 7.0, r.cy() - 7.0, 14.0, 14.0);
-            quads.push(rr_rect(chip, 3.5, rgb(th.primary)));
-            render_text(&mut self.compositor, &mut quads, &letter, chip.x + 3.5, chip.y + 11.0, 9.5, c(255, 255, 255, 255), chip.right());
+            let chip = Rect::new(r.x + 6.0, r.cy() - 8.0, 16.0, 16.0);
+            let url = self.bar_marks[i].url.clone();
+            match self.bar_chip_icon(&url) {
+                Some(slot) => quads.push(crate::favicons::Favicons::quad(slot, chip.x, chip.y, 16.0, 1.0)),
+                None => {
+                    quads.push(rr_rect(chip, 3.5, rgb(th.primary)));
+                    render_text(&mut self.compositor, &mut quads, &letter, chip.x + 4.0, chip.y + 12.0, 10.5, c(255, 255, 255, 255), chip.right());
+                }
+            }
             render_text(&mut self.compositor, &mut quads, &label, r.x + 26.0, r.cy() + 4.5, 12.5, rgb(th.heading), r.right());
         }
         quads

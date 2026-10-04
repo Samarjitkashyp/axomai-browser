@@ -85,6 +85,7 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS favicons (host TEXT PRIMARY KEY, icon BLOB NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')));
             CREATE TABLE IF NOT EXISTS site_zoom (origin TEXT PRIMARY KEY, factor REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS site_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -336,6 +337,15 @@ impl BrowserStorage {
 
     pub fn delete_password(&self, id: i64) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM passwords WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn get_favicon(&self, host: &str) -> Option<Vec<u8>> {
+        self.conn.query_row("SELECT icon FROM favicons WHERE host = ?1", params![host], |r| r.get(0)).ok()
+    }
+
+    pub fn set_favicon(&self, host: &str, icon: &[u8]) -> Result<(), rusqlite::Error> {
+        self.conn.execute("INSERT OR REPLACE INTO favicons (host, icon) VALUES (?1, ?2)", params![host, icon])?;
         Ok(())
     }
 
@@ -600,6 +610,16 @@ mod tests {
         assert_eq!(st.get_site_zoom("https://a.test"), Some(1.5));
         st.set_site_zoom("https://a.test", 1.0).unwrap();
         assert_eq!(st.get_site_zoom("https://a.test"), None);
+    }
+
+    #[test]
+    fn favicons_are_kept_per_host() {
+        let st = temp_storage();
+        assert_eq!(st.get_favicon("a.test"), None);
+        st.set_favicon("a.test", b"icon-1").unwrap();
+        st.set_favicon("a.test", b"icon-2").unwrap();
+        assert_eq!(st.get_favicon("a.test").unwrap(), b"icon-2");
+        assert_eq!(st.get_favicon("b.test"), None);
     }
 
     #[test]

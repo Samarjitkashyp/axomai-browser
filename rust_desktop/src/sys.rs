@@ -1,5 +1,18 @@
 //! Small OS helpers: base64 decoding, real memory trimming, user folders.
 
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 pub fn base64_decode(input: &str) -> Option<Vec<u8>> {
     fn val(c: u8) -> Option<u32> {
         match c {
@@ -165,6 +178,15 @@ pub fn asset_path(rel: &str) -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn base64_round_trips() {
+        for data in [&b""[..], b"f", b"fo", b"foo", b"foob", b"\x00\xff\x10\x80"] {
+            assert_eq!(super::base64_decode(&super::base64_encode(data)).unwrap(), data);
+        }
+        assert_eq!(super::base64_encode(b"Man"), "TWFu");
+        assert_eq!(super::base64_encode(b"Ma"), "TWE=");
+    }
+
     #[test]
     fn resources_are_found_from_where_the_program_runs() {
         assert!(super::ui_dir().join("home.html").is_file());
