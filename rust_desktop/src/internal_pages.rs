@@ -181,7 +181,7 @@ pub fn extensions_page_html(extensions: &[Extension]) -> String {
     for (i, ext) in extensions.iter().enumerate() {
         let status_class = if ext.enabled { "active" } else { "" };
         let status_text = if ext.enabled { "Active" } else { "Inactive" };
-        let badge = if ext.auto_inject { r#"<span class="badge">Auto</span>"# } else { "" };
+        let badge = "";
         let toggle_checked = if ext.enabled { "checked" } else { "" };
         let r = ext.icon_color[0];
         let g = ext.icon_color[1];
@@ -202,6 +202,7 @@ pub fn extensions_page_html(extensions: &[Extension]) -> String {
   <p class="ext-desc">{desc}</p>
   <div class="ext-footer">
     <span class="status {status_class}">{status}</span>
+    <button class="run" data-idx="{idx}" {run_disabled}>{run_label}</button>
   </div>
 </div>"##,
             r=r, g=g, b=b,
@@ -214,6 +215,8 @@ pub fn extensions_page_html(extensions: &[Extension]) -> String {
             desc=ext.description,
             status_class=status_class,
             status=status_text,
+            run_disabled=if ext.enabled { "" } else { "disabled" },
+            run_label=crate::extensions::ACTION_LABEL.get(i).copied().unwrap_or("Open"),
         ));
     }
 
@@ -221,6 +224,7 @@ pub fn extensions_page_html(extensions: &[Extension]) -> String {
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<title>Extensions - Axomai Browser</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
@@ -297,17 +301,22 @@ body{{
 }}
 input:checked+.slider{{background:var(--accent)}}
 input:checked+.slider::before{{transform:translateX(20px)}}
+.run{{border:0;border-radius:100px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;background:var(--accent);color:#fff}}
+.run:disabled{{opacity:.4;cursor:default}}
 </style>
 </head>
 <body>
 <div class="page-header">
   <h1>Extensions</h1>
-  <p>Manage your browser extensions — 5 built-in, ready to use.</p>
+  <p>Manage your browser extensions — 6 built-in. Switch them on or off here, or use the puzzle icon in the toolbar.</p>
 </div>
 <div class="ext-grid">
 {ext_cards}
 </div>
 <script>
+document.querySelectorAll('.run').forEach(function(b){{
+  b.addEventListener('click',function(){{if(!this.disabled)window.location.href='axomai://ext-run/'+this.dataset.idx}});
+}});
 document.querySelectorAll('.toggle input').forEach(function(cb){{
   cb.addEventListener('change',function(){{
     var idx=this.dataset.idx;
@@ -345,6 +354,7 @@ pub fn settings_page_html(selected_engine: SearchEngine, restore_session: bool) 
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<title>Settings - Axomai Browser</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}

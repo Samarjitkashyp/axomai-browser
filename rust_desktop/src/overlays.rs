@@ -1,0 +1,422 @@
+//! Popups for the toolbar buttons, injected into the current page.
+//!
+//! Every popup lives in a closed shadow root (the page can neither restyle nor read it), is themed from the
+//! active heritage theme, and talks back to the browser with `postMessage('<token>/<command>')`, which
+//! `web.rs` only accepts when the token matches. Opening a popup closes any other one.
+
+use crate::ext_scripts::shell;
+use crate::theme::{Theme, THEMES};
+use serde_json::json;
+
+fn open(theme: &Theme, token: &str, id: &str) -> String {
+    format!(
+        "(function(){{var TOKEN='{}';function go(c){{try{{window.chrome.webview.postMessage(TOKEN+'/'+c)}}catch(x){{location.href='axomai://'+TOKEN+'/'+c}}}}\n{}\n\
+         function el(t,c,x){{var e=document.createElement(t);if(c)e.className=c;if(x!==undefined)e.textContent=x;return e}}\n\
+         function finish(card){{root.appendChild(card);document.documentElement.appendChild(host);\
+         document.addEventListener('keydown',function k(e){{if(e.key==='Escape'){{host.remove();document.removeEventListener('keydown',k,true)}}}},true);\
+         document.addEventListener('mousedown',function m(e){{if(!e.composedPath().includes(host)){{host.remove();document.removeEventListener('mousedown',m,true)}}}},true)}}",
+        token,
+        shell(theme, id)
+    )
+}
+
+const CARD_CSS: &str = r#"
+.card{position:fixed;top:6px;background:var(--bg);backdrop-filter:blur(24px);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:8px 6px;color:var(--text);font-size:13px;max-height:calc(100vh - 16px);overflow:auto;animation:in .16s cubic-bezier(.16,1,.3,1)}
+@keyframes in{from{opacity:0;transform:translateY(-6px) scale(.97)}to{opacity:1;transform:none}}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 4px}
+.hd b{font-size:14px;color:var(--heading)}.hd span{font-size:11.5px;color:var(--muted)}
+.sub{padding:2px 12px 8px;font-size:11px;color:var(--muted);line-height:1.4}
+.row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;cursor:pointer;border:0;background:transparent;width:100%;text-align:left;color:inherit;font:inherit}
+.row:hover{background:var(--hover)}.row .em{font-size:18px;width:24px;text-align:center}
+.row .tx{display:flex;flex-direction:column;flex:1;min-width:0}.row .tx b{font-size:12.5px;color:var(--heading)}.row .tx i{font-style:normal;font-size:10.5px;color:var(--muted)}
+.row .sc{font-size:11px;color:var(--muted)}.div{height:1px;background:var(--border);margin:6px 8px}
+.sw{position:relative;width:34px;height:19px;flex-shrink:0}.sw input{opacity:0;width:0;height:0}
+.sl{position:absolute;inset:0;background:rgba(128,128,128,.4);border-radius:19px;transition:.2s;cursor:pointer}
+.sl:before{content:"";position:absolute;width:15px;height:15px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s}
+.sw input:checked+.sl{background:var(--primary)}.sw input:checked+.sl:before{transform:translateX(15px)}
+.foot{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;cursor:pointer;color:var(--heading);font-size:12.5px;font-weight:600}.foot:hover{background:var(--hover)}
+.btn{border:0;border-radius:10px;padding:8px 14px;background:var(--primary);color:#fff;font-weight:600;cursor:pointer;font-size:12.5px}
+.btn.ghost{background:var(--hover);color:var(--heading)}.btn.danger{background:#dc2626}
+"#;
+
+fn css_literal(extra: &str, right: f32, width: f32) -> String {
+    let all = format!("{}{}.card{{right:{:.0}px;width:{:.0}px}}", CARD_CSS, extra, right.max(6.0), width);
+    serde_json::to_string(&all).unwrap_or_else(|_| "\"\"".into())
+}
+
+pub struct ExtItem {
+    pub idx: usize,
+    pub emoji: &'static str,
+    pub name: &'static str,
+    pub status: String,
+    pub enabled: bool,
+}
+
+/// The puzzle-icon popup. Rows come from the real extension state, so it always matches the Extensions page.
+pub fn extensions_popup(theme: &Theme, token: &str, right: f32, items: &[ExtItem]) -> String {
+    let data: Vec<_> = items
+        .iter()
+        .map(|i| json!({"i": i.idx, "e": i.emoji, "n": i.name, "s": i.status, "on": i.enabled}))
+        .collect();
+    let active = items.iter().filter(|i| i.enabled).count();
+    let mut js = open(theme, token, "__ax_pop_ext");
+    js.push_str(&format!(
+        r#"
+css({css});
+var data={data};
+var card=el('div','card');
+var hd=el('div','hd');hd.appendChild(el('b','','Extensions'));var cnt=el('span','','{active} of '+data.length+' on');hd.appendChild(cnt);card.appendChild(hd);
+card.appendChild(el('div','sub','Click an extension to use it. Use the switch to turn it on or off.'));
+function recount(){{var n=0;card.querySelectorAll('input').forEach(function(i){{if(i.checked)n++}});cnt.textContent=n+' of '+data.length+' on'}}
+data.forEach(function(d){{
+  var r=el('div','row');
+  r.appendChild(el('span','em',d.e));
+  var tx=el('span','tx');tx.appendChild(el('b','',d.n));var st=el('i','',d.on?d.s:'Turned off');tx.appendChild(st);r.appendChild(tx);
+  var sw=el('label','sw');var inp=document.createElement('input');inp.type='checkbox';inp.checked=d.on;
+  sw.appendChild(inp);sw.appendChild(el('span','sl'));r.appendChild(sw);
+  sw.addEventListener('click',function(e){{e.stopPropagation()}});
+  inp.addEventListener('change',function(){{go('ext-toggle/'+d.i);st.textContent=inp.checked?d.s:'Turned off';recount()}});
+  r.addEventListener('click',function(){{if(!inp.checked){{inp.checked=true;go('ext-toggle/'+d.i);recount()}}host.remove();go('ext-run/'+d.i)}});
+  card.appendChild(r);
+}});
+card.appendChild(el('div','div'));
+var f=el('div','foot');f.appendChild(el('span','','⚙️'));f.appendChild(el('span','','Manage extensions'));f.onclick=function(){{host.remove();go('extensions')}};card.appendChild(f);
+finish(card);
+}})();"#,
+        css = css_literal("", right, 330.0),
+        data = serde_json::to_string(&data).unwrap_or_else(|_| "[]".into()),
+        active = active
+    ));
+    js
+}
+
+pub struct MenuEntry {
+    pub emoji: &'static str,
+    pub label: &'static str,
+    pub cmd: &'static str,
+    pub danger: bool,
+}
+
+/// Three-dot menu (also used when the page area is a web page).
+pub fn menu_popup(theme: &Theme, token: &str, right: f32, entries: &[MenuEntry]) -> String {
+    let data: Vec<_> = entries
+        .iter()
+        .map(|m| json!({"e": m.emoji, "l": m.label, "c": m.cmd, "d": m.danger}))
+        .collect();
+    let mut js = open(theme, token, "__ax_pop_menu");
+    js.push_str(&format!(
+        r#"
+css({css});
+var card=el('div','card');
+{data}.forEach(function(m){{
+  if(m.l==='-'){{card.appendChild(el('div','div'));return}}
+  var r=el('button','row');r.appendChild(el('span','em',m.e));var tx=el('span','tx');var b=el('b','',m.l);if(m.d)b.style.color='#dc2626';tx.appendChild(b);r.appendChild(tx);
+  r.onclick=function(){{host.remove();go(m.c)}};card.appendChild(r);
+}});
+finish(card);
+}})();"#,
+        css = css_literal("", right, 270.0),
+        data = serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())
+    ));
+    js
+}
+
+pub struct ShieldView {
+    pub host: String,
+    pub page_blocked: u32,
+    pub total_blocked: u64,
+    pub adblock: bool,
+    pub privacy: bool,
+}
+
+pub fn shield_popup(theme: &Theme, token: &str, right: f32, v: &ShieldView) -> String {
+    let mut js = open(theme, token, "__ax_pop_shield");
+    js.push_str(&format!(
+        r#"
+css({css}+'.big{{font-size:38px;font-weight:800;color:var(--primary);line-height:1}}.stat{{padding:6px 12px 10px}}.stat small{{display:block;color:var(--muted);font-size:11px;margin-top:4px}}');
+var card=el('div','card');
+var hd=el('div','hd');hd.appendChild(el('b','','🛡️ Axomai Shield'));hd.appendChild(el('span','',{host}));card.appendChild(hd);
+var s=el('div','stat');s.appendChild(el('div','big','{page}'));s.appendChild(el('small','','ads & trackers blocked on this page · {total} blocked in total'));card.appendChild(s);
+card.appendChild(el('div','div'));
+function toggle(label,sub,on,idx){{
+  var r=el('div','row');var tx=el('span','tx');tx.appendChild(el('b','',label));tx.appendChild(el('i','',sub));r.appendChild(tx);
+  var sw=el('label','sw');var inp=document.createElement('input');inp.type='checkbox';inp.checked=on;sw.appendChild(inp);sw.appendChild(el('span','sl'));r.appendChild(sw);
+  inp.addEventListener('change',function(){{go('ext-toggle/'+idx)}});card.appendChild(r);
+}}
+toggle('Ad blocker','Blocks ad networks before they load',{adblock},0);
+toggle('Privacy guard','Blocks trackers and fingerprinting',{privacy},3);
+var f=el('div','foot');f.appendChild(el('span','','⚙️'));f.appendChild(el('span','','Manage extensions'));f.onclick=function(){{host.remove();go('extensions')}};card.appendChild(f);
+finish(card);
+}})();"#,
+        css = css_literal("", right, 320.0),
+        host = serde_json::to_string(&v.host).unwrap_or_else(|_| "\"\"".into()),
+        page = v.page_blocked,
+        total = v.total_blocked,
+        adblock = v.adblock,
+        privacy = v.privacy,
+    ));
+    js
+}
+
+pub fn site_info_popup(
+    theme: &Theme,
+    token: &str,
+    right: f32,
+    security: crate::toolbar::Security,
+    host: &str,
+    blocked: u32,
+) -> String {
+    use crate::toolbar::Security;
+    let (emoji, headline, detail) = match security {
+        Security::Secure => ("🔒", "Connection is secure", "Your connection to this site is encrypted with HTTPS, so other people on the network cannot read or change what you send."),
+        Security::Insecure => ("⚠️", "Connection is not secure", "This page uses plain HTTP. Anything you type here, such as passwords or card numbers, can be seen by others on the network."),
+        Security::Internal => ("🏠", "Axomai Browser page", "This is a built-in page. It is stored on your computer and does not use the network."),
+    };
+    let mut js = open(theme, token, "__ax_pop_site");
+    js.push_str(&format!(
+        r#"
+css({css}+'.big{{font-size:28px;padding:10px 14px 2px}}.p{{padding:2px 14px 10px;font-size:12px;line-height:1.5;color:var(--text)}}.h{{padding:0 14px;font-weight:700;color:var(--heading);font-size:14px}}.sm{{padding:0 14px 6px;font-size:11px;color:var(--muted)}}');
+var card=el('div','card');
+card.appendChild(el('div','big',{emoji}));card.appendChild(el('div','h',{headline}));card.appendChild(el('div','sm',{host}));
+card.appendChild(el('div','p',{detail}));
+card.appendChild(el('div','div'));
+var r=el('button','row');r.appendChild(el('span','em','🛡️'));var tx=el('span','tx');tx.appendChild(el('b','','Axomai Shield blocked {blocked} ads & trackers here'));tx.appendChild(el('i','','Click for details'));r.appendChild(tx);
+r.onclick=function(){{host.remove();go('shield')}};card.appendChild(r);
+finish(card);
+}})();"#,
+        css = css_literal("", right, 330.0),
+        emoji = serde_json::to_string(emoji).unwrap_or_default(),
+        headline = serde_json::to_string(headline).unwrap_or_default(),
+        detail = serde_json::to_string(detail).unwrap_or_default(),
+        host = serde_json::to_string(host).unwrap_or_default(),
+        blocked = blocked,
+    ));
+    js
+}
+
+pub struct ProfileView {
+    pub name: String,
+    pub bookmarks: usize,
+    pub history: usize,
+    pub downloads: usize,
+    pub blocked_total: u64,
+}
+
+pub fn profile_popup(theme: &Theme, token: &str, right: f32, v: &ProfileView) -> String {
+    let initial = v.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "A".into());
+    let mut js = open(theme, token, "__ax_pop_profile");
+    js.push_str(&format!(
+        r#"
+css({css}+'.av{{width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--accent));color:#fff;font-size:24px;font-weight:700;display:flex;align-items:center;justify-content:center}}.who{{display:flex;gap:14px;align-items:center;padding:12px}}.who b{{font-size:15px;color:var(--heading)}}.who i{{display:block;font-style:normal;font-size:11px;color:var(--muted);margin-top:2px}}.stats{{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px 10px 10px}}.stats div{{text-align:center;background:var(--hover);border-radius:10px;padding:8px 2px}}.stats b{{display:block;font-size:15px;color:var(--heading)}}.stats small{{font-size:10px;color:var(--muted)}}input.nm{{flex:1;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:transparent;color:var(--heading);font:inherit}}.edit{{display:flex;gap:6px;padding:0 12px 8px}}');
+var card=el('div','card');
+var who=el('div','who');who.appendChild(el('div','av',{initial}));
+var wi=el('div');var nm=el('b','',{name});wi.appendChild(nm);wi.appendChild(el('i','','Local profile · data stays on this device'));who.appendChild(wi);card.appendChild(who);
+var stats=el('div','stats');
+[['Bookmarks','{bm}'],['History','{hi}'],['Downloads','{dl}'],['Blocked','{bl}']].forEach(function(p){{var d=el('div');d.appendChild(el('b','',p[1]));d.appendChild(el('small','',p[0]));stats.appendChild(d)}});
+card.appendChild(stats);
+var ed=el('div','edit');var inp=document.createElement('input');inp.className='nm';inp.value={name};inp.maxLength=32;
+var sv=el('button','btn','Save name');sv.onclick=function(){{var v=inp.value.trim();if(v){{go('profile-name/'+encodeURIComponent(v));host.remove()}}}};
+inp.addEventListener('keydown',function(e){{e.stopPropagation();if(e.key==='Enter')sv.click()}},true);
+ed.appendChild(inp);ed.appendChild(sv);card.appendChild(ed);
+card.appendChild(el('div','div'));
+function row(e,t,c){{var r=el('button','row');r.appendChild(el('span','em',e));var tx=el('span','tx');tx.appendChild(el('b','',t));r.appendChild(tx);r.onclick=function(){{host.remove();go(c)}};card.appendChild(r)}}
+row('⭐','Bookmarks','bookmarks');row('🕒','History','history');row('⬇️','Downloads','downloads');row('⚙️','Settings','settings');
+card.appendChild(el('div','div'));
+var clr=el('button','row');clr.appendChild(el('span','em','🧹'));var ct=el('span','tx');var cb=el('b','','Clear browsing data…');cb.style.color='#dc2626';ct.appendChild(cb);ct.appendChild(el('i','','History, downloads list, cookies and cache'));clr.appendChild(ct);
+var armed=false;clr.onclick=function(){{if(!armed){{armed=true;cb.textContent='Click again to confirm';return}}host.remove();go('clear-data')}};card.appendChild(clr);
+finish(card);
+}})();"#,
+        css = css_literal("", right, 340.0),
+        initial = serde_json::to_string(&initial).unwrap_or_else(|_| "\"A\"".into()),
+        name = serde_json::to_string(&v.name).unwrap_or_else(|_| "\"\"".into()),
+        bm = v.bookmarks,
+        hi = v.history,
+        dl = v.downloads,
+        bl = v.blocked_total,
+    ));
+    js
+}
+
+pub fn theme_popup(theme: &Theme, token: &str, right: f32) -> String {
+    let data: Vec<_> = THEMES
+        .iter()
+        .map(|t| json!({"id": t.id, "n": t.name, "d": t.desc, "e": t.emoji, "sw": t.swatch, "on": t.id == theme.id}))
+        .collect();
+    let mut js = open(theme, token, "__ax_pop_theme");
+    js.push_str(&format!(
+        r#"
+css({css}+'.sw2{{width:38px;height:38px;border-radius:10px;flex-shrink:0;border:2px solid transparent}}.row.on{{background:var(--primary-light)}}.row.on .sw2{{border-color:var(--primary)}}');
+var card=el('div','card');
+var hd=el('div','hd');hd.appendChild(el('b','','🎨 Heritage Themes'));card.appendChild(hd);
+card.appendChild(el('div','sub','Colours the toolbar and every popup. Saved for next time.'));
+{data}.forEach(function(t){{
+  var r=el('button','row'+(t.on?' on':''));var s=el('span','sw2');s.style.background=t.sw;r.appendChild(s);
+  var tx=el('span','tx');tx.appendChild(el('b','',t.e+' '+t.n));tx.appendChild(el('i','',t.d));r.appendChild(tx);
+  if(t.on)r.appendChild(el('span','sc','✓ Active'));
+  r.onclick=function(){{host.remove();go('theme/'+t.id)}};card.appendChild(r);
+}});
+finish(card);
+}})();"#,
+        css = css_literal("", right, 330.0),
+        data = serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())
+    ));
+    js
+}
+
+pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str) -> String {
+    let mut js = open(theme, token, "__ax_pop_ai");
+    js.push_str(&format!(
+        r#"
+css({css}+'.out{{padding:4px 12px 10px;font-size:12.5px;line-height:1.55;color:var(--text);max-height:42vh;overflow:auto}}.out p{{margin:0 0 8px}}.out h4{{margin:6px 0;color:var(--heading);font-size:12px}}.chips{{display:flex;flex-wrap:wrap;gap:6px}}.chip{{background:var(--primary-light);color:var(--primary);border-radius:12px;padding:3px 10px;font-size:11.5px;font-weight:600}}.ask{{display:flex;gap:6px;padding:4px 12px 10px}}.ask input{{flex:1;border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:transparent;color:var(--heading);font:inherit}}.acts{{display:flex;gap:6px;padding:4px 12px 8px;flex-wrap:wrap}}.muted{{color:var(--muted)}}');
+var card=el('div','card');
+var hd=el('div','hd');hd.appendChild(el('b','','✨ Axomai AI Copilot'));hd.appendChild(el('span','','on-device'));card.appendChild(hd);
+card.appendChild(el('div','sub',{title}+' · '+{host}));
+var acts=el('div','acts');
+function act(t,c){{var b=el('button','btn ghost',t);b.onclick=function(){{busy();go(c)}};acts.appendChild(b)}}
+act('Summarize','ai/summarize');act('Key topics','ai/keywords');act('Reading stats','ai/stats');
+card.appendChild(acts);
+var ask=el('div','ask');var q=document.createElement('input');q.placeholder='Ask about this page…';
+var go2=el('button','btn','Ask');
+function send(){{var v=q.value.trim();if(v){{busy();go('ai/ask/'+encodeURIComponent(v))}}}}
+go2.onclick=send;q.addEventListener('keydown',function(e){{e.stopPropagation();if(e.key==='Enter')send()}},true);
+ask.appendChild(q);ask.appendChild(go2);card.appendChild(ask);
+var out=el('div','out');out.appendChild(el('p','muted','Runs on your device — the page text never leaves this computer. Results are extractive (picked from the page itself).'));card.appendChild(out);
+function busy(){{out.textContent='';out.appendChild(el('p','muted','Reading the page…'))}}
+host.__axSet=function(r){{
+  out.textContent='';
+  if(r.title)out.appendChild(el('h4','',r.title));
+  (r.paragraphs||[]).forEach(function(t){{out.appendChild(el('p','',t))}});
+  if(r.chips&&r.chips.length){{var c=el('div','chips');r.chips.forEach(function(t){{c.appendChild(el('span','chip',t))}});out.appendChild(c)}}
+  if(!out.firstChild)out.appendChild(el('p','muted','Nothing to show for this page.'));
+}};
+finish(card);
+}})();"#,
+        css = css_literal("", right, 380.0),
+        title = serde_json::to_string(&truncate(title, 60)).unwrap_or_else(|_| "\"\"".into()),
+        host = serde_json::to_string(host_name).unwrap_or_else(|_| "\"\"".into()),
+    ));
+    js
+}
+
+/// Push a result into an open AI popup (no-op if it was closed).
+pub fn ai_result(title: &str, paragraphs: &[String], chips: &[String]) -> String {
+    let payload = json!({"title": title, "paragraphs": paragraphs, "chips": chips});
+    format!(
+        "(function(){{var h=document.getElementById('__ax_pop_ai');if(h&&h.__axSet)h.__axSet({})}})();",
+        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into())
+    )
+}
+
+/// QR code of the current address. `svg_modules` is the module matrix, row-major, true = dark.
+pub fn qr_popup(theme: &Theme, token: &str, right: f32, url: &str, size: usize, modules: &[bool]) -> String {
+    let quiet = 2usize;
+    let total = size + quiet * 2;
+    let mut path = String::new();
+    for y in 0..size {
+        for x in 0..size {
+            if modules[y * size + x] {
+                path.push_str(&format!("M{} {}h1v1h-1z", x + quiet, y + quiet));
+            }
+        }
+    }
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {t} {t}" shape-rendering="crispEdges"><rect width="{t}" height="{t}" fill="#fff"/><path d="{p}" fill="#0f172a"/></svg>"##,
+        t = total,
+        p = path
+    );
+    let mut js = open(theme, token, "__ax_pop_qr");
+    js.push_str(&format!(
+        r#"
+css({css}+'.qr{{display:flex;justify-content:center;padding:8px 0}}.qr svg{{width:210px;height:210px;border-radius:10px;border:1px solid var(--border)}}.url{{padding:0 14px 8px;font-size:11px;color:var(--muted);word-break:break-all;text-align:center}}.acts{{display:flex;gap:8px;justify-content:center;padding:0 12px 10px}}');
+var card=el('div','card');
+var hd=el('div','hd');hd.appendChild(el('b','','📱 Scan to open on your phone'));card.appendChild(hd);
+var q=el('div','qr');q.innerHTML={svg};card.appendChild(q);
+card.appendChild(el('div','url',{url}));
+var acts=el('div','acts');
+var cp=el('button','btn','Copy link');cp.onclick=function(){{try{{navigator.clipboard.writeText({url}).then(function(){{cp.textContent='Copied ✓'}},function(){{cp.textContent='Copy failed'}})}}catch(e){{cp.textContent='Copy failed'}}}};
+var cl=el('button','btn ghost','Close');cl.onclick=function(){{host.remove()}};
+acts.appendChild(cp);acts.appendChild(cl);card.appendChild(acts);
+finish(card);
+}})();"#,
+        css = css_literal("", right, 270.0),
+        svg = serde_json::to_string(&svg).unwrap_or_else(|_| "\"\"".into()),
+        url = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".into()),
+    ));
+    js
+}
+
+/// Small message at the bottom of the page.
+pub fn toast(theme: &Theme, message: &str, action: Option<(&str, &str, &str)>) -> String {
+    // action = (label, token, command)
+    let act = match action {
+        Some((label, token, cmd)) => format!(
+            "var a=document.createElement('button');a.textContent={};a.style.cssText='margin-left:14px;background:rgba(255,255,255,.2);border:0;color:#fff;border-radius:12px;padding:4px 12px;font:600 12px Segoe UI,sans-serif;cursor:pointer';a.onclick=function(){{try{{window.chrome.webview.postMessage('{}/{}')}}catch(e){{}};h.remove()}};box.appendChild(a);",
+            serde_json::to_string(label).unwrap_or_default(),
+            token,
+            cmd
+        ),
+        None => String::new(),
+    };
+    let p = theme.primary;
+    format!(
+        "(function(){{var old=document.getElementById('__ax_toast');if(old)old.remove();var h=document.createElement('div');h.id='__ax_toast';h.style.cssText='all:initial;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:2147483647';\
+         var r=h.attachShadow({{mode:'closed'}});var box=document.createElement('div');box.textContent={};\
+         box.style.cssText='display:flex;align-items:center;background:rgb({},{},{});color:#fff;padding:11px 22px;border-radius:24px;font:600 13.5px Segoe UI,system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.35);max-width:80vw';\
+         {}r.appendChild(box);document.documentElement.appendChild(h);setTimeout(function(){{h.remove()}},{});}})();",
+        serde_json::to_string(message).unwrap_or_default(),
+        p[0], p[1], p[2],
+        act,
+        if action.is_some() { 6500 } else { 2600 },
+    )
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(n).collect();
+        t.push('…');
+        t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn balanced(js: &str) -> bool {
+        js.matches('{').count() == js.matches('}').count() && js.matches('(').count() == js.matches(')').count()
+    }
+
+    #[test]
+    fn popups_are_syntactically_balanced() {
+        let t = crate::theme::by_id("tea-garden");
+        let items = vec![ExtItem { idx: 0, emoji: "🛡️", name: "AdBlock", status: "12 blocked".into(), enabled: true }];
+        assert!(balanced(&extensions_popup(t, "tok", 80.0, &items)));
+        assert!(balanced(&menu_popup(t, "tok", 14.0, &[MenuEntry { emoji: "➕", label: "New Tab", cmd: "newtab", danger: false }])));
+        let sv = ShieldView { host: "example.com".into(), page_blocked: 3, total_blocked: 99, adblock: true, privacy: false };
+        assert!(balanced(&shield_popup(t, "tok", 200.0, &sv)));
+        let pv = ProfileView { name: "Asha".into(), bookmarks: 1, history: 2, downloads: 3, blocked_total: 4 };
+        assert!(balanced(&profile_popup(t, "tok", 60.0, &pv)));
+        assert!(balanced(&theme_popup(t, "tok", 150.0)));
+        assert!(balanced(&site_info_popup(t, "tok", 300.0, crate::toolbar::Security::Insecure, "example.com", 2)));
+        assert!(balanced(&ai_popup(t, "tok", 100.0, "example.com", "A title")));
+        assert!(balanced(&qr_popup(t, "tok", 300.0, "https://example.com", 2, &[true, false, false, true])));
+        assert!(balanced(&toast(t, "Saved", Some(("Open", "tok", "open-folder")))));
+    }
+
+    #[test]
+    fn user_text_is_json_escaped() {
+        let t = crate::theme::by_id("tea-garden");
+        let js = ai_popup(t, "tok", 10.0, "evil\"</script>.com", "x'; alert(1); '");
+        assert!(js.contains("evil\\\"</script>.com"));
+        // Single quotes are harmless inside a JSON (double-quoted) literal; they must never appear as a bare JS string.
+        assert!(js.contains("\"x'; alert(1); '\""));
+    }
+
+    #[test]
+    fn ai_result_serialises_payload() {
+        let js = ai_result("Summary", &["one".into()], &["tea".into()]);
+        assert!(js.contains("\"paragraphs\":[\"one\"]"));
+    }
+}

@@ -1,5 +1,28 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [Unreleased] — Desktop shell: working toolbar & real extensions
+### Fixed
+- Space key works in the address bar, home search and find bar (it arrives as its own key, not a character); held keys repeat.
+- Ctrl+V pastes into the address bar / home search / find bar; Ctrl+A selects the whole address; focusing the bar selects the address so typing replaces it.
+- Smart address input: text with spaces is a search, domains get `https://`, `localhost` / IPs get `http://`, `about:settings` / `axomai://history` open the page, `javascript:` / `data:` are never run.
+- Web view bounds are in physical pixels, so it can no longer overlap the toolbar on 125% / 150% display scaling.
+- Tab titles follow the tab you switched to; tabs that hold `axomai://` pages reopen correctly; Ctrl+R / Ctrl+D behave like the toolbar buttons; downloads show a toast and stop the loading bar.
+- Address bar no longer shows `file:///…/ui/home.html`; our own pages show `about:home`, `axomai://about`, etc.
+- Extensions popup (puzzle icon) is built from the live extension state, so it always matches the Extensions page. Switches persist across restarts.
+- Pages with no background colour render on white instead of the dark internal-page colour.
+- Native chrome colours are converted from sRGB, so the toolbar matches the web UI instead of looking washed out.
+
+### Added
+- Developer tools: F12, Ctrl+Shift+I and right-click > Inspect open the WebView2 (Edge) DevTools.
+- View page source: Ctrl+U, right-click > View page source and `view-source:<url>` open a built-in source viewer (line numbers, wrap toggle) in a new tab.
+- Browser shortcuts now work while the page has focus: Ctrl+T / W / L / U / D / H / J (previously only from the toolbar). Links that open a new window (`target=_blank`) open in a new tab.
+- Every toolbar control works: Back/Forward/Reload (real WebView2 history, correct enabled state), bookmark star (add/remove, filled when bookmarked), Reader, QR code of the current page, security badge (HTTPS / HTTP / Axomai) with details, shield counter + panel, extensions popup, downloads, heritage-theme picker (5 themes, saved), on-device AI panel (summary, key topics, reading stats, ask-this-page), profile panel (editable name, real counts, clear browsing data) and the three-dot menu.
+- Extensions are real: **AdBlock Shield** and **Privacy Guard** block ad/tracker requests at the WebView2 network layer (nothing is downloaded); Privacy Guard also adds noise to canvas / WebGL / audio fingerprinting; **Reader Mode** with size and Paper/Sepia/Dark; **Auto-Translate** language picker; **Screen Capture Studio** saves PNGs (visible area, full page, selected region) via the DevTools protocol; **RAM Booster** sets WebView2 low-memory mode and releases idle working-set memory, reporting the real MB released.
+- Pages cannot drive the browser: `axomai://` commands are accepted only from our own pages or with a per-run token.
+
+### Removed
+- Dead "Passwords & Autofill" menu entry (there is no password manager yet).
+
 ## [`v1.6.0`] — Final Production Edition (2026-10-01)
 ### Added
 - **Auto-Updater Engine**: Background delta updates, Ed25519 cryptographic signature checks, SHA-256 integrity validation.
