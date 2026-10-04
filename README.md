@@ -1,6 +1,8 @@
-# 🚀 Axomai Browser `v2.0.0`
+# 🚀 Axomai Browser `v3.0.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
+
+**New in 3.0 (desktop app):** picture-in-picture, page translate, read aloud, saved sessions, password CSV import / export, data backup, voice commands, screenshot editor, per-site settings, a developer panel (user agent / mobile view) and address-bar search shortcuts (`@yt`, `@wiki`, ...).
 
 **New in 2.0 (desktop app):** tab search and tab groups, reading list, notes on pages, dark mode for websites, cookie-banner hiding, YouTube ad skipping, clean printouts, find-in-page with match count and highlight, mute / block a site, and 35 weather cities. See [CHANGELOG.md](CHANGELOG.md) for details and honest limits.
 
