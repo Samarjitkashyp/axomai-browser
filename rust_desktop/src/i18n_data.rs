@@ -70,6 +70,7 @@ pub const EN_MORE: Table = &[
     ("settings.ai_key.none", "No key saved"),
     ("settings.ai_model", "Model"),
     ("settings.browser", "Browser"),
+    ("settings.default_browser.yes", "Axomai is your default browser."),
 ];
 
 pub const HI: Table = &[
@@ -205,6 +206,7 @@ pub const HI: Table = &[
     ("settings.ai_key.none", "कोई कुंजी सहेजी नहीं है"),
     ("settings.ai_model", "मॉडल"),
     ("settings.browser", "ब्राउज़र"),
+    ("settings.default_browser.yes", "Axomai आपका डिफ़ॉल्ट ब्राउज़र है।"),
 ];
 
 pub const BN: Table = &[
@@ -340,6 +342,7 @@ pub const BN: Table = &[
     ("settings.ai_key.none", "কোনো কী সংরক্ষিত নেই"),
     ("settings.ai_model", "মডেল"),
     ("settings.browser", "ব্রাউজার"),
+    ("settings.default_browser.yes", "Axomai আপনার ডিফল্ট ব্রাউজার।"),
 ];
 
 pub const AS: Table = &[
@@ -475,4 +478,5 @@ pub const AS: Table = &[
     ("settings.ai_key.none", "কোনো কী সংৰক্ষিত নাই"),
     ("settings.ai_model", "মডেল"),
     ("settings.browser", "ব্ৰাউজাৰ"),
+    ("settings.default_browser.yes", "Axomai আপোনাৰ ডিফল্ট ব্ৰাউজাৰ।"),
 ];

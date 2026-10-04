@@ -115,6 +115,7 @@ impl App {
                         download_dir,
                         version: env!("CARGO_PKG_VERSION"),
                         ai_key_saved: self.ai_key().is_some(),
+                        is_default: crate::launch::is_default(),
                     },
                 )
             }
@@ -483,6 +484,18 @@ impl App {
             "add-bookmark" => self.toggle_bookmark_now(),
             "settings-reset" => self.reset_settings(),
             "https-back" => self.https_back(),
+            "default-browser" => {
+                let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                let ok = crate::launch::register(&exe);
+                if let Some(wv) = &self.webview {
+                    let msg = if ok { "Choose Axomai Browser in the list that opened" } else { "Could not register Axomai with Windows" };
+                    self.core.toast(wv, msg, None, &shared);
+                }
+                if ok {
+                    crate::launch::open_default_apps_settings();
+                }
+                self.refresh_internal_page();
+            }
             "open-ai" => {
                 let right = self.anchor_for(|l| l.ai);
                 let title = self.tabs[self.active].title.clone();
@@ -822,6 +835,32 @@ impl App {
 }
 
 impl App {
+    /// A normal window answers other launches: it says it is alive, and opens addresses they hand over.
+    pub fn serve_other_launches(&mut self) {
+        if self.private_window {
+            return;
+        }
+        let dir = crate::storage::data_dir();
+        if self.last_beat.elapsed() > std::time::Duration::from_secs(1) {
+            self.last_beat = std::time::Instant::now();
+            crate::launch::heartbeat(&dir);
+        }
+        if self.last_handoff_poll.elapsed() < std::time::Duration::from_millis(400) {
+            return;
+        }
+        self.last_handoff_poll = std::time::Instant::now();
+        let urls = crate::launch::take_handed_over(&dir);
+        if urls.is_empty() {
+            return;
+        }
+        for u in urls {
+            let at = self.tabs.len();
+            self.open_tab_at(&u, at, true);
+        }
+        self.window.set_minimized(false);
+        self.window.set_focus();
+    }
+
     /// The saved Anthropic key, decrypted on demand (it only ever exists in memory for the length of a request).
     pub fn ai_key(&self) -> Option<String> {
         let hex = self.storage.as_ref()?.get_setting("ai_key_enc").ok().flatten()?;

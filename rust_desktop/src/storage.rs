@@ -488,6 +488,11 @@ impl BrowserStorage {
     }
 }
 
+/// The folder that holds the database and the other per-user files.
+pub fn data_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(dirs_db())
+}
+
 fn dirs_db() -> String {
     if let Some(data_dir) = std::env::var_os("APPDATA") {
         let p = std::path::Path::new(&data_dir).join("AxomaiBrowser");

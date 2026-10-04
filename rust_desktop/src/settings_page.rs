@@ -19,6 +19,8 @@ pub struct SettingsView<'a> {
     pub version: &'a str,
     /// An Anthropic API key is stored (its value is never shown).
     pub ai_key_saved: bool,
+    /// Windows already uses Axomai for web links.
+    pub is_default: bool,
 }
 
 fn row(label: &str, desc: &str, control: &str) -> String {
@@ -164,7 +166,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         "{}{}",
         row(
             t("settings.default_browser"),
-            t("settings.default_browser.desc"),
+            &if v.is_default { format!("{} \u{2014} {}", t("settings.default_browser.desc"), t("settings.default_browser.yes")) } else { t("settings.default_browser.desc").to_string() },
             &format!("<button class=\"btn ghost\" onclick=\"go('default-browser')\">{}</button>", escape(t("settings.default_browser.button")))
         ),
         row(
@@ -240,7 +242,7 @@ mod tests {
         let ctx = PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" };
         settings_page(
             &ctx,
-            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", ai_key_saved: false },
+            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", ai_key_saved: false, is_default: false },
         )
     }
 

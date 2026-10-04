@@ -69,6 +69,9 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
+    /// Last time this window told other launches it is running, and last check for addresses they left.
+    pub last_beat: Instant,
+    pub last_handoff_poll: Instant,
     /// The window is full screen because a page asked for it (so leaving the page's full screen restores it).
     pub html_fullscreen: bool,
     /// Warning pages waiting to replace the engine's error page: (tab id, html, since).
@@ -205,6 +208,7 @@ impl App {
         self.show_pending_prompt();
         self.sync_infobar();
         self.show_https_warnings();
+        self.serve_other_launches();
         self.core.tick(&self.extensions);
         self.sleep_idle_tabs();
         self.sync_with_page();

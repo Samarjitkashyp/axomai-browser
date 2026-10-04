@@ -16,6 +16,7 @@ pub mod ext_scripts;
 pub mod extensions;
 pub mod favicons;
 pub mod i18n;
+pub mod launch;
 pub mod llm;
 pub mod i18n_data;
 pub mod omnibox;
@@ -54,6 +55,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let private_window = args.iter().any(|a| a == "--incognito");
+    if args.iter().any(|a| a == "--register-default") {
+        let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        println!("{}", if launch::register(&exe) { "Axomai is registered as a web browser for this user." } else { "Registration failed." });
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--unregister-default") {
+        launch::unregister();
+        println!("Axomai's browser registration was removed.");
+        return Ok(());
+    }
+    // Addresses given on the command line ("Open with", links from other apps). A window that is already running
+    // takes them; this process then has nothing to do.
+    let urls = launch::addresses_from_args(&args[1..]);
+    if !private_window && launch::hand_over(&storage::data_dir(), &urls) {
+        return Ok(());
+    }
 
     let storage = match storage::BrowserStorage::new() {
         Ok(s) => Some(s),
@@ -146,11 +163,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         hub.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
     }
     // What the first window opens, according to "On startup".
-    let saved_tabs: Vec<storage::SavedTab> = match settings.startup {
+    let mut saved_tabs: Vec<storage::SavedTab> = match settings.startup {
         settings::Startup::Restore if !private_window => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
         settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true }],
         _ => Vec::new(),
     };
+    if !urls.is_empty() {
+        for t in saved_tabs.iter_mut() {
+            t.is_active = false;
+        }
+        let first = saved_tabs.len() as i32;
+        for (i, u) in urls.iter().enumerate() {
+            saved_tabs.push(storage::SavedTab { position: first + i as i32, url: u.clone(), title: String::new(), is_active: i + 1 == urls.len() });
+        }
+    }
     // AXOMAI_UI_SCALE exists so the layout can be checked at other display scales on a 100% screen.
     let scale = std::env::var("AXOMAI_UI_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).filter(|v| (0.75..=4.0).contains(v)).unwrap_or(window.scale_factor() as f32);
     rendering::set_ui_scale(scale);
@@ -201,6 +227,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
+        last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
+        last_handoff_poll: std::time::Instant::now(),
         html_fullscreen: false,
         https_warn: Vec::new(),
         safe: false,
