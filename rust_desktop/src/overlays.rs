@@ -121,6 +121,59 @@ finish(card);
     js
 }
 
+/// A context menu placed from the left edge of the page (used under a tab). Entries are
+/// `(emoji, label, command, danger)`; a label of "-" is a divider.
+pub fn tab_menu_popup(theme: &Theme, token: &str, left: f32, entries: &[(String, String, String, bool)]) -> String {
+    let data: Vec<_> = entries.iter().map(|(e, l, c, d)| json!({"e": e, "l": l, "c": c, "d": d})).collect();
+    let mut js = open(theme, token, "__ax_pop_tabmenu");
+    let css = serde_json::to_string(&format!("{}.card{{left:{:.0}px;width:250px}}", CARD_CSS, left.max(6.0))).unwrap_or_else(|_| "\"\"".into());
+    js.push_str(&format!(
+        r#"
+css({css});
+var card=el('div','card');
+{data}.forEach(function(m){{
+  if(m.l==='-'){{card.appendChild(el('div','div'));return}}
+  var r=el('button','row');r.appendChild(el('span','em',m.e));var tx=el('span','tx');var b=el('b','',m.l);if(m.d)b.style.color='#dc2626';tx.appendChild(b);r.appendChild(tx);
+  r.onclick=function(){{host.remove();go(m.c)}};card.appendChild(r);
+}});
+finish(card);
+}})();"#,
+        css = css,
+        data = serde_json::to_string(&data).unwrap_or_else(|_| "[]".into())
+    ));
+    js
+}
+
+/// Find-in-page bar, living inside the page so the web view cannot cover it. Uses `window.find`.
+pub fn find_popup(theme: &Theme) -> String {
+    let mut js = String::from("(function(){");
+    js.push_str(&shell(theme, "__ax_pop_find"));
+    js.push_str(
+        r#"
+var card=document.createElement('div');card.className='bar';
+var inp=document.createElement('input');inp.placeholder='Find in page';inp.spellcheck=false;
+function clearSel(){try{window.getSelection().removeAllRanges()}catch(e){}}
+function run(back){var q=inp.value;if(!q){clearSel();info.textContent='';return}
+  var ok=window.find(q,false,back,true,false,false,false);info.textContent=ok?'':'No matches';info.style.color=ok?'':'#dc2626'}
+function btn(t,title,fn){var b=document.createElement('button');b.textContent=t;b.title=title;b.onclick=fn;card.appendChild(b);return b}
+var info=document.createElement('span');info.className='info';
+inp.addEventListener('input',function(){clearSel();run(false)});
+inp.addEventListener('keydown',function(e){e.stopPropagation();
+  if(e.key==='Enter'){e.preventDefault();run(e.shiftKey)}
+  else if(e.key==='Escape'){e.preventDefault();clearSel();host.remove()}},true);
+card.appendChild(inp);card.appendChild(info);
+btn('↑','Previous (Shift+Enter)',function(){run(true)});
+btn('↓','Next (Enter)',function(){run(false)});
+btn('✕','Close (Esc)',function(){clearSel();host.remove()});
+css('.bar{position:fixed;top:8px;right:24px;display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px 8px;font-size:13px;color:var(--text)}'+
+'input{width:210px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:transparent;color:var(--heading);font:inherit;outline:none}input:focus{border-color:var(--primary)}'+
+'.info{font-size:11px;min-width:58px;color:var(--muted)}button{border:0;background:var(--hover);color:var(--heading);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:13px}button:hover{background:var(--primary-light)}');
+root.appendChild(card);document.documentElement.appendChild(host);inp.focus();inp.select();
+})();"#,
+    );
+    js
+}
+
 pub struct ShieldView {
     pub host: String,
     pub page_blocked: u32,
@@ -263,13 +316,13 @@ finish(card);
     js
 }
 
-pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str) -> String {
+pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str, llm: bool) -> String {
     let mut js = open(theme, token, "__ax_pop_ai");
     js.push_str(&format!(
         r#"
 css({css}+'.out{{padding:4px 12px 10px;font-size:12.5px;line-height:1.55;color:var(--text);max-height:42vh;overflow:auto}}.out p{{margin:0 0 8px}}.out h4{{margin:6px 0;color:var(--heading);font-size:12px}}.chips{{display:flex;flex-wrap:wrap;gap:6px}}.chip{{background:var(--primary-light);color:var(--primary);border-radius:12px;padding:3px 10px;font-size:11.5px;font-weight:600}}.ask{{display:flex;gap:6px;padding:4px 12px 10px}}.ask input{{flex:1;border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:transparent;color:var(--heading);font:inherit}}.acts{{display:flex;gap:6px;padding:4px 12px 8px;flex-wrap:wrap}}.muted{{color:var(--muted)}}');
 var card=el('div','card');
-var hd=el('div','hd');hd.appendChild(el('b','','✨ Axomai AI Copilot'));hd.appendChild(el('span','','on-device'));card.appendChild(hd);
+var hd=el('div','hd');hd.appendChild(el('b','','✨ Axomai AI Copilot'));hd.appendChild(el('span','',{badge}));card.appendChild(hd);
 card.appendChild(el('div','sub',{title}+' · '+{host}));
 var acts=el('div','acts');
 function act(t,c){{var b=el('button','btn ghost',t);b.onclick=function(){{busy();go(c)}};acts.appendChild(b)}}
@@ -280,8 +333,9 @@ var go2=el('button','btn','Ask');
 function send(){{var v=q.value.trim();if(v){{busy();go('ai/ask/'+encodeURIComponent(v))}}}}
 go2.onclick=send;q.addEventListener('keydown',function(e){{e.stopPropagation();if(e.key==='Enter')send()}},true);
 ask.appendChild(q);ask.appendChild(go2);card.appendChild(ask);
-var out=el('div','out');out.appendChild(el('p','muted','Runs on your device — the page text never leaves this computer. Results are extractive (picked from the page itself).'));card.appendChild(out);
+var out=el('div','out');out.appendChild(el('p','muted',{note}));card.appendChild(out);
 function busy(){{out.textContent='';out.appendChild(el('p','muted','Reading the page…'))}}
+host.__axOut=out;
 host.__axSet=function(r){{
   out.textContent='';
   if(r.title)out.appendChild(el('h4','',r.title));
@@ -294,8 +348,23 @@ finish(card);
         css = css_literal("", right, 380.0),
         title = serde_json::to_string(&truncate(title, 60)).unwrap_or_else(|_| "\"\"".into()),
         host = serde_json::to_string(host_name).unwrap_or_else(|_| "\"\"".into()),
+        badge = serde_json::to_string(if llm { "Claude \u{00B7} your key" } else { "on-device" }).unwrap_or_default(),
+        note = serde_json::to_string(if llm {
+            "Summaries and answers are written by Claude with your own API key, so the text of this page is sent to Anthropic. Key topics and reading stats stay on your device."
+        } else {
+            "Runs on your device \u{2014} the page text never leaves this computer. Results are extractive (picked from the page itself)."
+        })
+        .unwrap_or_default(),
     ));
     js
+}
+
+/// A short remark under the current AI result (used when Claude could not answer).
+pub fn ai_note(text: &str) -> String {
+    format!(
+        "(function(){{var h=document.getElementById('__ax_pop_ai');if(!h||!h.__axSet)return;var o=h.__axOut;if(o){{var p=document.createElement('p');p.style.cssText='color:#dc2626;font-size:11.5px';p.textContent={};o.appendChild(p)}}}})();",
+        serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into())
+    )
 }
 
 /// Push a result into an open AI popup (no-op if it was closed).
@@ -370,6 +439,81 @@ pub fn toast(theme: &Theme, message: &str, action: Option<(&str, &str, &str)>) -
     )
 }
 
+/// The address-bar dropdown: rows are (icon, title, subtitle); clicking one posts `suggest/<row>`.
+pub fn suggest_popup(theme: &Theme, token: &str, left: f32, width: f32, rows: &[(String, String, String)], selected: usize) -> String {
+    let data = serde_json::to_string(&rows.iter().map(|(i, t, s)| json!([i, truncate(t, 90), truncate(s, 100)])).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into());
+    let extra = format!(".card{{top:4px;left:{:.0}px;padding:6px;border-radius:16px}}.row{{padding:7px 10px}}.row.sel{{background:var(--hover)}}", left);
+    format!(
+        "var __o=document.getElementById('__ax_pop_suggest');if(__o)__o.remove();{}         var rows={};var sel={};css({});var card=el('div','card');         rows.forEach(function(r,i){{var b=el('div','row'+(i===sel?' sel':''));var em=el('span','em',r[0]);var tx=el('span','tx');tx.appendChild(el('b','',r[1]));tx.appendChild(el('i','',r[2]));b.appendChild(em);b.appendChild(tx);         b.addEventListener('mousedown',function(e){{e.preventDefault();e.stopPropagation();go('suggest/'+i)}});card.appendChild(b)}});         root.appendChild(card);document.documentElement.appendChild(host)}})();",
+        open(theme, token, "__ax_pop_suggest"),
+        data,
+        selected,
+        css_literal(&extra, 6.0, width),
+    )
+}
+
+const PW_PROMPT_JS: &str = r#"
+var d=__DATA__;
+function send(a){try{window.chrome.webview.postMessage({ax:'pw',k:'confirm',a:a})}catch(e){}host.remove()}
+var bar=document.createElement('div');bar.className='bar';
+var tx=document.createElement('div');tx.className='tx';var b=document.createElement('b');b.textContent=d[0];var i=document.createElement('i');i.textContent='\u{1F511} '+d[1];tx.appendChild(b);tx.appendChild(i);bar.appendChild(tx);
+function btn(t,cls,a){var e=document.createElement('button');e.textContent=t;e.className=cls;e.onclick=function(){send(a)};bar.appendChild(e)}
+btn(d[2],'p','save');btn('Never','g','never');btn('Not now','g','no');
+css('.bar{position:fixed;top:10px;right:24px;display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:12px 14px;color:var(--text);font-size:13px;max-width:min(560px,92vw)}'+
+'.tx{display:flex;flex-direction:column;margin-right:8px;min-width:0}.tx b{color:var(--heading);font-size:13.5px}.tx i{font-style:normal;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'+
+'button{border:0;border-radius:10px;padding:8px 14px;font:600 12.5px inherit;font-family:inherit;cursor:pointer}.p{background:var(--primary);color:#fff}.g{background:var(--hover);color:var(--heading)}');
+root.appendChild(bar);document.documentElement.appendChild(host);
+"#;
+
+const PW_OFFER_JS: &str = r#"
+var d=__DATA__;
+var card=document.createElement('div');card.className='card';
+var hd=document.createElement('div');hd.className='hd';hd.textContent='\u{1F511} Saved passwords for '+d.host;card.appendChild(hd);
+d.users.forEach(function(u,i){var r=document.createElement('div');r.className='row';r.textContent=u;
+ r.addEventListener('mousedown',function(e){e.preventDefault();e.stopPropagation();try{window.chrome.webview.postMessage({ax:'pw',k:'fill',i:i})}catch(x){}host.remove()});card.appendChild(r)});
+css('.card{position:fixed;left:'+Math.max(6,Math.min(d.x,innerWidth-Math.max(240,d.w)-12))+'px;top:'+(d.y+4)+'px;min-width:'+Math.max(240,d.w)+'px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px;color:var(--text);font-size:13px}'+
+'.hd{padding:6px 10px;font-size:11.5px;color:var(--muted)}.row{padding:9px 10px;border-radius:8px;cursor:pointer;color:var(--heading);font-weight:600}.row:hover{background:var(--hover)}');
+root.appendChild(card);document.documentElement.appendChild(host);
+document.addEventListener('mousedown',function m(e){if(!e.composedPath().includes(host)){host.remove();document.removeEventListener('mousedown',m,true)}},true);
+document.addEventListener('keydown',function k(e){if(e.key==='Escape'){host.remove();document.removeEventListener('keydown',k,true)}},true);
+"#;
+
+/// "Save password?" bar. Its buttons post `{ax:'pw',k:'confirm',a}`; the browser decides what that means.
+pub fn pw_prompt(theme: &Theme, host: &str, user: &str, update: bool) -> String {
+    let title = if update { format!("Update password for {}?", host) } else { format!("Save password for {}?", host) };
+    let shown_user = if user.is_empty() { "(no username)" } else { user };
+    let data = json!([title, shown_user, if update { "Update" } else { "Save" }]);
+    format!("(function(){{{}{}}})();", shell(theme, "__ax_pop_pwsave"), PW_PROMPT_JS.replace("__DATA__", &data.to_string()))
+}
+
+/// Dropdown of saved usernames under a login field; choosing one posts `{ax:'pw',k:'fill',i}`.
+pub fn pw_offer(theme: &Theme, host: &str, x: f64, y: f64, w: f64, users: &[String]) -> String {
+    let data = json!({"host": host, "x": x, "y": y, "w": w, "users": users});
+    format!(
+        "(function(){{var __o=document.getElementById('__ax_pop_pw');if(__o)__o.remove();{}{}}})();",
+        shell(theme, "__ax_pop_pw"),
+        PW_OFFER_JS.replace("__DATA__", &data.to_string())
+    )
+}
+
+/// Put a login into the page's form: the visible password field, and the visible text field before it.
+pub fn pw_fill(user: &str, pass: &str) -> String {
+    format!(
+        r#"(function(u,p){{
+function shown(e){{return !!(e.offsetWidth||e.offsetHeight||e.getClientRects().length)}}
+var pf=Array.prototype.filter.call(document.querySelectorAll('input[type=password]'),shown)[0];if(!pf)return;
+var scope=pf.form||document,all=scope.querySelectorAll('input:not([type]),input[type=text],input[type=email],input[type=tel]'),uf=null;
+for(var i=0;i<all.length;i++){{if(shown(all[i])&&(all[i].compareDocumentPosition(pf)&4))uf=all[i]}}
+var set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
+function put(el,v){{set.call(el,v);el.dispatchEvent(new Event('input',{{bubbles:true}}));el.dispatchEvent(new Event('change',{{bubbles:true}}))}}
+if(uf&&u)put(uf,u);put(pf,p);
+var h=document.getElementById('__ax_pop_pw');if(h)h.remove();
+}})({},{});"#,
+        serde_json::to_string(user).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(pass).unwrap_or_else(|_| "\"\"".into())
+    )
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -400,7 +544,7 @@ mod tests {
         assert!(balanced(&profile_popup(t, "tok", 60.0, &pv)));
         assert!(balanced(&theme_popup(t, "tok", 150.0)));
         assert!(balanced(&site_info_popup(t, "tok", 300.0, crate::toolbar::Security::Insecure, "example.com", 2)));
-        assert!(balanced(&ai_popup(t, "tok", 100.0, "example.com", "A title")));
+        assert!(balanced(&ai_popup(t, "tok", 100.0, "example.com", "A title", false)));
         assert!(balanced(&qr_popup(t, "tok", 300.0, "https://example.com", 2, &[true, false, false, true])));
         assert!(balanced(&toast(t, "Saved", Some(("Open", "tok", "open-folder")))));
     }
@@ -408,7 +552,7 @@ mod tests {
     #[test]
     fn user_text_is_json_escaped() {
         let t = crate::theme::by_id("tea-garden");
-        let js = ai_popup(t, "tok", 10.0, "evil\"</script>.com", "x'; alert(1); '");
+        let js = ai_popup(t, "tok", 10.0, "evil\"</script>.com", "x'; alert(1); '", true);
         assert!(js.contains("evil\\\"</script>.com"));
         // Single quotes are harmless inside a JSON (double-quoted) literal; they must never appear as a bare JS string.
         assert!(js.contains("\"x'; alert(1); '\""));

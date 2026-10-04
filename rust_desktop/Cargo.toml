@@ -18,7 +18,8 @@ serde_json = "1"
 resvg = { version = "0.45", default-features = false }
 qrcode = { version = "0.14", default-features = false }
 ureq = "2.9"
+rfd = { version = "0.14", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.35"
-windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Com", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_UI_Input_KeyboardAndMouse"] }

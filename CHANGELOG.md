@@ -20,6 +20,20 @@
 - Extensions are real: **AdBlock Shield** and **Privacy Guard** block ad/tracker requests at the WebView2 network layer (nothing is downloaded); Privacy Guard also adds noise to canvas / WebGL / audio fingerprinting; **Reader Mode** with size and Paper/Sepia/Dark; **Auto-Translate** language picker; **Screen Capture Studio** saves PNGs (visible area, full page, selected region) via the DevTools protocol; **RAM Booster** sets WebView2 low-memory mode and releases idle working-set memory, reporting the real MB released.
 - Pages cannot drive the browser: `axomai://` commands are accepted only from our own pages or with a per-run token.
 
+### Added (desktop browser phases 1-12)
+- Real tabs with one web view per tab (state kept, sleeping, pin / duplicate / reorder / reopen, favicons, mute), incognito and new windows, split view.
+- Settings page and themed History / Bookmarks / Downloads / Passwords / Permissions / Extensions pages; Assamese, Hindi and Bengali for them and the menu.
+- Address-bar suggestions, bookmarks bar, bookmark folders with import (Chrome JSON / HTML) and export, history by day with range delete.
+- Download manager (progress, pause / resume / cancel, open, show in folder, ask where to save); Save as PDF; per-site zoom; full screen.
+- Password manager with DPAPI encryption and per-site matching; site-permission bar; HTTPS-only mode; tracking-prevention level; Global Privacy Control.
+- Home page with live weather, theme, working tools and a real Shield counter (the made-up news and statistics were removed).
+- Optional Claude mode for the AI panel using the user's own key (stored encrypted).
+- Open links from other apps, register as a web browser, high-DPI scaling of the browser chrome.
+
+### Fixed (phases)
+- A page title could be saved against the previous page's history entry when a new address was typed during a load.
+- Space and held keys in the address bar, view-source race, address bar reverting while focus echoed.
+
 ### Removed
 - Dead "Passwords & Autofill" menu entry (there is no password manager yet).
 

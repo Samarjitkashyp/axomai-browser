@@ -20,7 +20,14 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 pub struct Core {
     pub theme: &'static theme::Theme,
     pub profile_name: String,
-    pub doc_script: web::com::DocScript,
+    /// Bumped whenever an extension switch changes; a tab rebuilds its document-start script when it is behind.
+    pub ext_generation: u64,
+    /// Whether web pages get the password-manager script.
+    pub passwords: bool,
+    /// Whether pages see `navigator.globalPrivacyControl`.
+    pub gpc: bool,
+    /// The AI panel uses Claude (user's key) rather than the on-device assistant.
+    pub ai_llm: bool,
     pub booster_next: Option<Instant>,
     pub booster_status: String,
     pub can_back: bool,
@@ -63,7 +70,10 @@ impl Core {
         Core {
             theme,
             profile_name,
-            doc_script: Default::default(),
+            ext_generation: 0,
+            passwords: true,
+            gpc: true,
+            ai_llm: false,
             booster_next: None,
             booster_status: String::new(),
             can_back: false,
@@ -82,13 +92,22 @@ impl Core {
     }
 
     /// Push the current extension switches into the network shield, the document-start script and the engine.
-    pub fn apply_extensions(&mut self, wv: Option<&WebView>, shared: &WebShared, exts: &[Extension]) {
+    pub fn apply_extensions(&mut self, wv: Option<&WebView>, doc: &web::com::DocScript, shared: &WebShared, exts: &[Extension]) {
         let adblock = exts[ex::ADBLOCK].enabled;
         let privacy = exts[ex::PRIVACY].enabled;
         shared.shield.adblock.store(adblock, Ordering::SeqCst);
         shared.shield.privacy.store(privacy, Ordering::SeqCst);
         if let Some(wv) = wv {
-            self.doc_script.set(wv, &ext_scripts::doc_start(adblock, privacy));
+            let mut script = ext_scripts::doc_start(adblock, privacy);
+            if self.gpc {
+                script.push('\n');
+                script.push_str("try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true})}catch(e){}");
+            }
+            if self.passwords {
+                script.push('\n');
+                script.push_str(crate::passwords::PAGE_SCRIPT);
+            }
+            doc.set(wv, &script);
             web::com::set_memory_low(wv, exts[ex::BOOSTER].enabled);
         }
         if exts[ex::BOOSTER].enabled {
@@ -100,10 +119,26 @@ impl Core {
         }
     }
 
+    /// The password manager was switched on or off: every tab rebuilds its document-start script.
+    pub fn set_gpc(&mut self, on: bool) {
+        if self.gpc != on {
+            self.gpc = on;
+            self.ext_generation += 1;
+        }
+    }
+
+    pub fn set_passwords(&mut self, on: bool) {
+        if self.passwords != on {
+            self.passwords = on;
+            self.ext_generation += 1;
+        }
+    }
+
     pub fn toggle_extension(
         &mut self,
         idx: usize,
         wv: Option<&WebView>,
+        doc: &web::com::DocScript,
         shared: &WebShared,
         exts: &mut [Extension],
         storage: Option<&BrowserStorage>,
@@ -111,8 +146,9 @@ impl Core {
         let Some(e) = exts.get_mut(idx) else { return };
         e.enabled = !e.enabled;
         let on = e.enabled;
+        self.ext_generation += 1;
         self.persist_extensions(storage, exts);
-        self.apply_extensions(wv, shared, exts);
+        self.apply_extensions(wv, doc, shared, exts);
         let Some(wv) = wv else { return };
         let remote_page = !shared.trusted.load(Ordering::SeqCst);
         match idx {
@@ -318,9 +354,13 @@ impl Core {
         }
     }
 
-    pub fn open_menu(&self, wv: Option<&WebView>, shared: &WebShared, right: f32) {
+    pub fn open_menu(&self, wv: Option<&WebView>, shared: &WebShared, right: f32, lang: &str) {
         if let Some(wv) = wv {
-            let _ = wv.evaluate_script(&overlays::menu_popup(self.theme, &shared.token, right, MENU));
+            let entries: Vec<overlays::MenuEntry> = MENU
+                .iter()
+                .map(|e| overlays::MenuEntry { emoji: e.emoji, label: if e.cmd.is_empty() { e.label } else { crate::i18n::tr(lang, menu_key(e.cmd)) }, cmd: e.cmd, danger: e.danger })
+                .collect();
+            let _ = wv.evaluate_script(&overlays::menu_popup(self.theme, &shared.token, right, &entries));
         }
     }
 
@@ -328,7 +368,7 @@ impl Core {
         if let Some(wv) = wv {
             let host = shared.shield.page_host.lock().map(|h| h.clone()).unwrap_or_default();
             let host = if host.is_empty() { "this page".to_string() } else { host };
-            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title));
+            let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title, self.ai_llm));
         }
     }
 
@@ -482,6 +522,23 @@ impl Core {
         );
     }
 
+    /// Show the answer Claude wrote (or fall back to the on-device assistant when the request failed).
+    pub fn ai_llm_done(&self, kind: &str, question: &str, page_text: &str, result: Result<String, String>, wv: Option<&WebView>) {
+        let Some(wv) = wv else { return };
+        match result {
+            Ok(text) => {
+                let title = if kind == "ask" { "Answer \u{00B7} Claude" } else { "Summary \u{00B7} Claude" };
+                let _ = wv.evaluate_script(&overlays::ai_result(title, &crate::llm::paragraphs(&text), &[]));
+            }
+            Err(msg) => {
+                let raw = serde_json::to_string(page_text).unwrap_or_default();
+                self.ai_respond(kind, question, &raw, Some(wv));
+                let note = format!("Claude could not answer: {} Showing the on-device result instead.", msg);
+                let _ = wv.evaluate_script(&overlays::ai_note(&note));
+            }
+        }
+    }
+
     pub fn ai_respond(&self, kind: &str, question: &str, raw: &str, wv: Option<&WebView>) {
         let Some(wv) = wv else { return };
         let text = serde_json::from_str::<String>(raw).unwrap_or_default();
@@ -524,8 +581,32 @@ impl Core {
     }
 }
 
+/// Translation key of a menu entry's label.
+pub fn menu_key(cmd: &str) -> &'static str {
+    match cmd {
+        "newtab" => "menu.newtab",
+        "new-window" => "menu.new-window",
+        "new-incognito" => "menu.new-incognito",
+        "home" => "menu.home",
+        "bookmarks" => "menu.bookmarks",
+        "history" => "menu.history",
+        "downloads" => "menu.downloads",
+        "extensions" => "menu.extensions",
+        "theme-menu" => "menu.theme-menu",
+        "split-view" => "menu.split-view",
+        "print" => "menu.print",
+        "save-pdf" => "menu.save-pdf",
+        "clear-ram" => "menu.clear-ram",
+        "settings" => "menu.settings",
+        "about" => "menu.about",
+        _ => "menu.exit",
+    }
+}
+
 pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "➕", label: "New Tab", cmd: "newtab", danger: false },
+    overlays::MenuEntry { emoji: "🪟", label: "New Window", cmd: "new-window", danger: false },
+    overlays::MenuEntry { emoji: "🕶️", label: "New Incognito Window", cmd: "new-incognito", danger: false },
     overlays::MenuEntry { emoji: "🏠", label: "Home Page", cmd: "home", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
     overlays::MenuEntry { emoji: "⭐", label: "Bookmarks", cmd: "bookmarks", danger: false },
@@ -533,7 +614,10 @@ pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "⬇️", label: "Downloads", cmd: "downloads", danger: false },
     overlays::MenuEntry { emoji: "🧩", label: "Extensions", cmd: "extensions", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
+    overlays::MenuEntry { emoji: "◫", label: "Split view", cmd: "split-view", danger: false },
     overlays::MenuEntry { emoji: "🎨", label: "Heritage Themes", cmd: "theme-menu", danger: false },
+    overlays::MenuEntry { emoji: "🖨️", label: "Print…", cmd: "print", danger: false },
+    overlays::MenuEntry { emoji: "📄", label: "Save page as PDF", cmd: "save-pdf", danger: false },
     overlays::MenuEntry { emoji: "🧹", label: "Clear RAM & Cache", cmd: "clear-ram", danger: false },
     overlays::MenuEntry { emoji: "⚙️", label: "Settings", cmd: "settings", danger: false },
     overlays::MenuEntry { emoji: "ℹ️", label: "About Axomai", cmd: "about", danger: false },

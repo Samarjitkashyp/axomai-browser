@@ -47,6 +47,11 @@ pub fn fetch(url: String, shared: &WebShared) {
     });
 }
 
+/// Placeholder shown while the source is being fetched.
+pub fn loading_page(url: &str) -> String {
+    page(url, "", Some("Loading\u{2026}")).replace("Could not load the source: Loading\u{2026}", "Loading the source\u{2026}")
+}
+
 pub fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + s.len() / 8);
     for ch in s.chars() {

@@ -45,15 +45,6 @@ impl SearchEngine {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct DesktopTab {
-    pub title: String,
-    pub url: String,
-    pub is_home: bool,
-    pub is_extensions: bool,
-    pub is_settings: bool,
-}
-
 pub struct Extension {
     pub name: &'static str,
     pub description: &'static str,
@@ -63,29 +54,8 @@ pub struct Extension {
     pub enabled: bool,
 }
 
-pub struct SidebarItem {
-    pub label: &'static str,
-    pub icon: &'static str,
-    pub is_section: bool,
-}
-
-pub const SIDEBAR_ITEMS: &[SidebarItem] = &[
-    SidebarItem { label: "Home", icon: "H", is_section: false },
-    SidebarItem { label: "AI Assistant", icon: "A", is_section: false },
-    SidebarItem { label: "Bookmarks", icon: "B", is_section: false },
-    SidebarItem { label: "History", icon: "h", is_section: false },
-    SidebarItem { label: "Downloads", icon: "D", is_section: false },
-    SidebarItem { label: "Extensions", icon: "E", is_section: false },
-    SidebarItem { label: "Passwords", icon: "P", is_section: false },
-    SidebarItem { label: "Settings", icon: "S", is_section: false },
-    SidebarItem { label: "Workspaces", icon: "", is_section: true },
-    SidebarItem { label: "Personal", icon: "o", is_section: false },
-    SidebarItem { label: "Work", icon: "o", is_section: false },
-    SidebarItem { label: "Study", icon: "o", is_section: false },
-    SidebarItem { label: "AI Tools", icon: "o", is_section: false },
-];
-
 pub const SIDEBAR_W: f32 = 0.0;
 pub const TAB_BAR_H: f32 = 44.0;
 pub const TOOLBAR_H: f32 = 48.0;
 pub const CHROME_TOP: f32 = TAB_BAR_H + TOOLBAR_H;
+pub const BOOKMARK_BAR_H: f32 = 32.0;

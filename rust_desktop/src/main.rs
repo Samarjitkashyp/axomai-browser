@@ -1,102 +1,53 @@
-mod internal_pages;
-pub mod b64_assets;
-pub mod types;
-pub mod storage;
+pub mod actions;
+pub mod ai;
+pub mod app;
+pub mod app_commands;
+pub mod app_input;
+pub mod app_suggest;
+pub mod app_tabs;
+pub mod blocklist;
+pub mod passwords;
+pub mod permissions;
+pub mod secret;
+pub mod bookmarks_io;
+pub mod app_bookmarks;
+pub mod downloads;
+pub mod ext_scripts;
 pub mod extensions;
+pub mod favicons;
+pub mod i18n;
+pub mod launch;
+pub mod llm;
+pub mod i18n_data;
+pub mod omnibox;
+pub mod overlays;
 pub mod pages;
 pub mod rendering;
-pub mod toolbar;
-pub mod blocklist;
-pub mod web;
+pub mod settings;
+pub mod settings_page;
+pub mod splitview;
+pub mod storage;
+pub mod suggest;
 pub mod sys;
+pub mod tabs;
 pub mod theme;
-pub mod ai;
-pub mod ext_scripts;
-pub mod overlays;
-pub mod actions;
-pub mod omnibox;
+pub mod toolbar;
+pub mod viewctl;
+pub mod types;
+pub mod ui_shell;
 pub mod viewsource;
+pub mod web;
 
-use types::{SearchEngine, DesktopTab, SIDEBAR_ITEMS, SIDEBAR_W, TAB_BAR_H, CHROME_TOP};
+use app::App;
+use axomai_engine::{NativeGpuCompositor, WgpuRenderer};
 use extensions::create_extensions;
-
-use axomai_engine::AxomaiEngine;
-use axomai_engine::NativeGpuCompositor;
-use axomai_engine::WgpuRenderer;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use tao::{
     dpi::{LogicalSize, PhysicalSize},
-    event::{ElementState, Event, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    keyboard::{Key, KeyCode},
-    window::{CursorIcon, WindowBuilder},
+    window::WindowBuilder,
 };
-#[cfg(target_os = "windows")]
-use tao::platform::windows::WindowExtWindows;
-use wry::Rect;
-
-use rendering::{w_of, h_of, build_chrome_quads, build_dropdown_quads};
-
-
-/// Load a tab's saved address: web URLs go to the web view, our own `axomai://` / `about:` pages go through the
-/// command queue (a plain navigation to them would be cancelled by the web view).
-fn tab_load(wv: &wry::WebView, shared: &web::WebShared, url: &str) {
-    match omnibox::resolve(url, |q| q.to_string()) {
-        Some(omnibox::Target::Internal(cmd)) => {
-            if let Ok(mut q) = shared.nav.lock() {
-                q.push(format!("axomai://{}", cmd));
-            }
-        }
-        Some(omnibox::Target::ViewSource(u)) => {
-            if let Ok(mut q) = shared.nav.lock() {
-                q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
-            }
-        }
-        _ => {
-            let _ = wv.load_url(url);
-        }
-    }
-}
-
-/// Percent-decoding for command arguments produced by `encodeURIComponent` in the popups.
-fn url_decode(s: &str) -> String {
-    fn hex(b: u8) -> Option<u8> {
-        match b {
-            b'0'..=b'9' => Some(b - b'0'),
-            b'a'..=b'f' => Some(b - b'a' + 10),
-            b'A'..=b'F' => Some(b - b'A' + 10),
-            _ => None,
-        }
-    }
-    let b = s.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%' && i + 2 < b.len() + 0 + 1 && i + 2 <= b.len().saturating_sub(1) {
-            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                out.push(h * 16 + l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-/// Map the `<title>` of one of our generated pages to (address, kind, tab label).
-fn internal_page_for_title(t: &str) -> Option<(&'static str, &'static str, &'static str)> {
-    match t {
-        "Extensions - Axomai Browser" => Some(("axomai://extensions", "extensions", "Extensions")),
-        "Settings - Axomai Browser" => Some(("about:settings", "settings", "Settings")),
-        "History - Axomai Browser" => Some(("axomai://history", "history", "History")),
-        "Bookmarks - Axomai Browser" => Some(("axomai://bookmarks", "bookmarks", "Bookmarks")),
-        "Downloads - Axomai Browser" => Some(("axomai://downloads", "downloads", "Downloads")),
-        _ => None,
-    }
-}
+use types::SearchEngine;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -104,58 +55,63 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         axomai_engine::run_subprocess(&args[2]);
         return Ok(());
     }
+    let private_window = args.iter().any(|a| a == "--incognito");
+    if args.iter().any(|a| a == "--register-default") {
+        let exe = std::env::current_exe().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        println!("{}", if launch::register(&exe) { "Axomai is registered as a web browser for this user." } else { "Registration failed." });
+        return Ok(());
+    }
+    if args.iter().any(|a| a == "--unregister-default") {
+        launch::unregister();
+        println!("Axomai's browser registration was removed.");
+        return Ok(());
+    }
+    // Addresses given on the command line ("Open with", links from other apps). A window that is already running
+    // takes them; this process then has nothing to do.
+    let urls = launch::addresses_from_args(&args[1..]);
+    if !private_window && launch::hand_over(&storage::data_dir(), &urls) {
+        return Ok(());
+    }
 
-    let engine = Arc::new(Mutex::new(AxomaiEngine::new()));
-
-    let browser_storage = match storage::BrowserStorage::new() {
-        Ok(s) => {
-            println!("[Axomai] SQLite storage initialized");
-            Some(s)
-        }
+    let storage = match storage::BrowserStorage::new() {
+        Ok(s) => Some(s),
         Err(e) => {
             eprintln!("[Axomai] Storage init failed (non-fatal): {}", e);
             None
         }
     };
-
-    let selected_search_engine_from_db = browser_storage.as_ref()
-        .and_then(|s| s.get_setting("search_engine").ok().flatten())
-        .and_then(|v| match v.as_str() {
-            "Bing" => Some(SearchEngine::Bing),
-            "Yahoo" => Some(SearchEngine::Yahoo),
-            "DuckDuckGo" => Some(SearchEngine::DuckDuckGo),
-            _ => Some(SearchEngine::Google),
-        });
+    let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
+    let settings = settings::Settings::load(storage.as_ref());
+    let search_engine = match setting("search_engine").as_deref() {
+        Some("Bing") => SearchEngine::Bing,
+        Some("Yahoo") => SearchEngine::Yahoo,
+        Some("DuckDuckGo") => SearchEngine::DuckDuckGo,
+        _ => SearchEngine::Google,
+    };
 
     let event_loop = EventLoop::new();
-
-    let icon_data = {
-        let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons").join("axomai_logo.png");
-        if icon_path.exists() {
-            if let Ok(img) = image::open(&icon_path) {
+    let proxy = event_loop.create_proxy();
+    let icon = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("icons").join("axomai_logo.png");
+        image::open(&path)
+            .ok()
+            .and_then(|img| {
                 let rgba = img.to_rgba8();
                 let (w, h) = (rgba.width(), rgba.height());
                 tao::window::Icon::from_rgba(rgba.into_raw(), w, h).ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+            })
     };
-
     let mut wb = WindowBuilder::new()
-        .with_title("Axomai Browser")
+        .with_title(if private_window { "Axomai Browser (Incognito)" } else { "Axomai Browser" })
         .with_inner_size(LogicalSize::new(1200.0, 700.0))
         .with_min_inner_size(LogicalSize::new(800.0, 500.0));
-    if let Some(icon) = icon_data {
+    if let Some(icon) = icon {
         wb = wb.with_window_icon(Some(icon));
     }
     let window = wb.build(&event_loop)?;
-
     let size: PhysicalSize<u32> = window.inner_size();
 
-    let backend_list: &[(&str, wgpu::Backends)] = if cfg!(target_os = "windows") {
+    let backends: &[(&str, wgpu::Backends)] = if cfg!(target_os = "windows") {
         &[
             ("All", wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL),
             ("GL", wgpu::Backends::GL),
@@ -165,2077 +121,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         &[("All", wgpu::Backends::all())]
     };
-
-    let mut gpu_renderer = None;
-    let mut chosen_instance = None;
-
-    for (name, backends) in backend_list {
-        println!("[Axomai] Trying {} backend...", name);
-        let inst = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: *backends,
-            ..Default::default()
-        });
-        let surface_result = unsafe {
-            inst.create_surface_unsafe(
-                wgpu::SurfaceTargetUnsafe::from_window(&window)
-                    .expect("Failed to create surface target"),
-            )
-        };
-        let surface = match surface_result {
+    let mut gpu: Option<WgpuRenderer> = None;
+    let mut instance: Option<wgpu::Instance> = None;
+    for (name, backend) in backends {
+        let inst = wgpu::Instance::new(wgpu::InstanceDescriptor { backends: *backend, ..Default::default() });
+        let surface = match unsafe { inst.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&window).expect("surface target")) } {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[Axomai] {} surface creation failed: {}", name, e);
                 continue;
             }
         };
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            WgpuRenderer::new(&inst, surface, size.width, size.height)
-        })) {
-            Ok(renderer) => {
-                println!("[Axomai] {} backend succeeded!", name);
-                gpu_renderer = Some(renderer);
-                chosen_instance = Some(inst);
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| WgpuRenderer::new(&inst, surface, size.width, size.height))) {
+            Ok(r) => {
+                println!("[Axomai] {} backend succeeded", name);
+                gpu = Some(r);
+                instance = Some(inst);
                 break;
             }
-            Err(_) => {
-                eprintln!("[Axomai] {} backend failed, trying next...", name);
-            }
+            Err(_) => eprintln!("[Axomai] {} backend failed, trying next...", name),
         }
     }
+    let mut gpu = gpu.expect("Failed to initialize the GPU with any backend. Ensure GPU drivers are installed.");
 
-    let mut gpu_renderer = gpu_renderer
-        .expect("Failed to initialize GPU with any backend. Ensure GPU drivers are installed.");
-    let _instance = chosen_instance.unwrap();
-    println!(
-        "[Axomai] GPU renderer initialized: {}x{} — fully native, no WebView",
-        size.width, size.height
-    );
-
-    // Load home background image
-    {
-        let bg_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join("home_bg.jpg");
-        if bg_path.exists() {
-            let img = image::open(&bg_path).expect("Failed to load home_bg.jpg").to_rgba8();
-            gpu_renderer.upload_bg_image(img.width(), img.height(), img.as_raw());
-            println!("[Axomai] Background image loaded: {}x{}", img.width(), img.height());
-        }
-    }
-
-    let mut mouse_x: f32 = 0.0;
-    let mut mouse_y: f32 = 0.0;
     let mut compositor = NativeGpuCompositor::new(size.width, size.height);
+    let icons = toolbar::load_icons(&mut compositor);
+    let favicons = favicons::Favicons::new();
+    // The chrome's image texture is the favicon atlas; it must exist before the first frame.
+    gpu.upload_bg_image(favicons::ATLAS, favicons::ATLAS, favicons.pixels());
 
-    // Toolbar icons: rasterised from the same SVG paths as ui/index.html
-    let toolbar_icons = toolbar::load_icons(&mut compositor);
-
-    let mut address_bar_text = String::from("about:home");
-    let mut address_bar_cursor: usize = 0;
-    let mut address_bar_focused = false;
-    // Like other browsers, focusing the address bar selects the whole address; typing replaces it.
-    let mut address_all_selected = false;
-    let mut title_tab: usize = 0;
-    let mut home_search_focused = false;
-    let mut home_search_text = String::new();
-    let mut home_search_cursor: usize = 0;
-    let mut _ime_active = false;
-    let mut needs_chrome_redraw = true;
-    let mut sidebar_active: usize = 0;
-    let mut is_home_page = true;
-    let mut home_scroll_y: f32 = 0.0;
-    let mut hover_sidebar_idx: Option<usize> = None;
-    let mut is_settings_page = false;
-    let mut selected_search_engine = selected_search_engine_from_db.unwrap_or(SearchEngine::Google);
-    let mut hover_engine_idx: Option<usize> = None;
-    let mut menu_open = false;
-    let mut hover_menu_idx: Option<usize> = None;
-    let mut is_extensions_page = false;
-    let mut extensions = create_extensions();
-    let mut hover_ext_idx: Option<usize> = None;
-
-    let (mut tabs, mut active_tab_idx) = {
-        let mut restored = false;
-        let mut t: Vec<DesktopTab> = Vec::new();
-        let mut idx: usize = 0;
-        if let Some(ref s) = browser_storage {
-            if let Ok(Some(val)) = s.get_setting("restore_session") {
-                if val == "true" {
-                    if let Ok(saved) = s.get_tabs() {
-                        if !saved.is_empty() {
-                            for st in &saved {
-                                let is_home = st.url == "about:home";
-                                t.push(DesktopTab {
-                                    title: st.title.clone(),
-                                    url: st.url.clone(),
-                                    is_home,
-                                    is_extensions: st.url == "axomai://extensions",
-                                    is_settings: st.url == "axomai://settings",
-                                });
-                                if st.is_active {
-                                    idx = t.len() - 1;
-                                }
-                            }
-                            restored = true;
-                        }
-                    }
-                }
-            }
-        }
-        if !restored {
-            t.push(DesktopTab {
-                title: String::from("Axomai Browser"),
-                url: String::from("about:home"),
-                is_home: true,
-                is_extensions: false,
-                is_settings: false,
-            });
-        }
-        (t, idx)
-    };
-
-    let scale_factor = window.scale_factor() as f32;
-
-
-    let mut webview: Option<wry::WebView> = None;
-    let mut webview_visible = false;
-    let mut load_internal_page: Option<String> = Some("home".to_string());
-
-    let mut modifiers = tao::keyboard::ModifiersState::empty();
-
-    let download_dir = {
-        let d = dirs_download();
-        let _ = std::fs::create_dir_all(&d);
-        d
-    };
+    let download_dir = if settings.download_dir.is_empty() { dirs_download() } else { PathBuf::from(&settings.download_dir) };
+    let _ = std::fs::create_dir_all(&download_dir);
     let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(std::path::Path::new(".")).join("ui");
-    let shared = web::WebShared::new(download_dir.clone(), &ui_dir);
-    let mut core = actions::Core::new(browser_storage.as_ref(), &mut extensions);
-    if let Some(saved) = browser_storage.as_ref().and_then(|s| s.get_setting("blocked_total").ok().flatten()).and_then(|v| v.parse::<u64>().ok()) {
-        shared.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
+    let hub = web::WebShared::new(download_dir, &ui_dir);
+    let mut extensions = create_extensions();
+    let mut core = actions::Core::new(storage.as_ref(), &mut extensions);
+    if private_window {
+        // A private window always uses the dark theme so it is obvious at a glance.
+        core.theme = theme::by_id("cyber-dark");
     }
-
-    let mut is_loading = false;
-    let mut current_title = String::from("Axomai Browser");
-    let mut loading_since = std::time::Instant::now();
-    let mut last_shield_count: u32 = 0;
-    let mut loading_progress: f32 = 0.0;
-
-    let mut find_bar_open = false;
-    let mut find_text = String::new();
-
-    #[allow(unused_assignments)]
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::WaitUntil(
-            std::time::Instant::now() + std::time::Duration::from_millis(16),
-        );
-
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                if let Some(ref s) = browser_storage {
-                    let _ = s.set_setting("blocked_total", &shared.shield.total_blocked.load(std::sync::atomic::Ordering::Relaxed).to_string());
-                    let saved: Vec<storage::SavedTab> = tabs.iter().enumerate().map(|(i, t)| {
-                        storage::SavedTab {
-                            position: i as i32,
-                            url: t.url.clone(),
-                            title: t.title.clone(),
-                            is_active: i == active_tab_idx,
-                        }
-                    }).collect();
-                    let _ = s.save_tabs(&saved);
-                }
-                *control_flow = ControlFlow::Exit;
-            }
-            Event::WindowEvent {
-                event: WindowEvent::Resized(new_size),
-                ..
-            } => {
-                if new_size.width > 0 && new_size.height > 0 {
-                    gpu_renderer.resize(new_size.width, new_size.height);
-                    needs_chrome_redraw = true;
-                    if let Some(ref wv) = webview {
-                        let _ = wv.set_bounds(Rect {
-                            position: wry::dpi::PhysicalPosition::new(SIDEBAR_W as i32, CHROME_TOP as i32).into(),
-                            size: wry::dpi::PhysicalSize::new(
-                                (new_size.width as f32 - SIDEBAR_W) as u32,
-                                (new_size.height as f32 - CHROME_TOP) as u32,
-                            ).into(),
-                        });
-                    }
-                }
-            }
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                mouse_x = position.x as f32;
-                mouse_y = position.y as f32;
-                // Sidebar hover tracking
-                let old_hover = hover_sidebar_idx;
-                hover_sidebar_idx = None;
-                if mouse_x < SIDEBAR_W {
-                    let mut item_y = 50.0;
-                    for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
-                        if item.is_section {
-                            item_y += 41.0;
-                        } else {
-                            let h = 33.0;
-                            if mouse_y >= item_y && mouse_y < item_y + h {
-                                hover_sidebar_idx = Some(i);
-                                break;
-                            }
-                            item_y += h;
-                        }
-                    }
-                }
-                // Extensions page hover tracking
-                if is_extensions_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
-                    let content_x = mouse_x - SIDEBAR_W;
-                    let content_y = mouse_y - CHROME_TOP;
-                    let content_w = gpu_renderer.surface_config.width as f32 - SIDEBAR_W;
-                    let old_ext_hover = hover_ext_idx;
-                    hover_ext_idx = None;
-                    let padding = 24.0;
-                    let gap = 16.0;
-                    let cols = if content_w > 600.0 { 2usize } else { 1 };
-                    let card_w = if cols == 2 { (content_w - padding * 2.0 - gap) / 2.0 } else { content_w - padding * 2.0 };
-                    let card_h = 160.0;
-                    let grid_start_y = 64.0 + 24.0 + 36.0;
-                    for i in 0..extensions.len() {
-                        let col = (i % cols) as f32;
-                        let row = (i / cols) as f32;
-                        let cx = padding + col * (card_w + gap);
-                        let cy = grid_start_y + row * (card_h + gap);
-                        if content_x >= cx && content_x <= cx + card_w
-                            && content_y >= cy && content_y <= cy + card_h {
-                            hover_ext_idx = Some(i);
-                            break;
-                        }
-                    }
-                    if old_ext_hover != hover_ext_idx { needs_chrome_redraw = true; }
-                }
-                // Settings page hover tracking
-                if is_settings_page && mouse_x > SIDEBAR_W && mouse_y > CHROME_TOP {
-                    let content_x = mouse_x - SIDEBAR_W;
-                    let content_y = mouse_y - CHROME_TOP;
-                    let old_engine_hover = hover_engine_idx;
-                    hover_engine_idx = None;
-                    let card_x = 40.0;
-                    let card_w = (gpu_renderer.surface_config.width as f32 - SIDEBAR_W) - 80.0;
-                    let engine_start_y = 130.0;
-                    let engine_h = 56.0;
-                    for i in 0..SearchEngine::all().len() {
-                        let ey = engine_start_y + i as f32 * (engine_h + 8.0);
-                        if content_x >= card_x && content_x <= card_x + card_w
-                            && content_y >= ey && content_y <= ey + engine_h
-                        {
-                            hover_engine_idx = Some(i);
-                            break;
-                        }
-                    }
-                    if old_engine_hover != hover_engine_idx {
-                        needs_chrome_redraw = true;
-                    }
-                } else {
-                    hover_engine_idx = None;
-                }
-                if old_hover != hover_sidebar_idx {
-                    needs_chrome_redraw = true;
-                }
-                // Menu hover tracking
-                if menu_open {
-                    let old_menu_hover = hover_menu_idx;
-                    hover_menu_idx = None;
-                    let dm_w = 250.0;
-                    let dm_x = gpu_renderer.surface_config.width as f32 - dm_w - 16.0;
-                    let dm_y = CHROME_TOP + 4.0;
-                    for i in 0..12 {
-                        let iy = dm_y + 8.0 + i as f32 * 36.0;
-                        if mouse_x >= dm_x && mouse_x <= dm_x + dm_w
-                            && mouse_y >= iy && mouse_y <= iy + 34.0
-                        {
-                            hover_menu_idx = Some(i);
-                            break;
-                        }
-                    }
-                    if old_menu_hover != hover_menu_idx {
-                        needs_chrome_redraw = true;
-                    }
-                }
-                if !is_home_page && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
-                    if let Ok(mut eng) = engine.lock() {
-                        let _ = eng.handle_pointer_move(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP);
-                    }
-                }
-
-                // Chrome-style cursor pointer effect (Hand tool / Text / Default)
-                let mut cursor_icon = CursorIcon::Default;
-                let w = gpu_renderer.surface_config.width as f32;
-
-                if mouse_x < SIDEBAR_W {
-                    if hover_sidebar_idx.is_some() || mouse_y > 450.0 {
-                        cursor_icon = CursorIcon::Hand;
-                    }
-                } else if mouse_y <= TAB_BAR_H {
-                    // Over tab bar
-                    let strip = toolbar::tab_strip(w, tabs.len());
-                    if mouse_x >= toolbar::TAB_START_X && mouse_x <= strip.end_x(tabs.len()) {
-                        cursor_icon = CursorIcon::Hand;
-                    } else if strip.plus.contains(mouse_x, mouse_y) {
-                        cursor_icon = CursorIcon::Hand;
-                    }
-                } else if mouse_y <= CHROME_TOP {
-                    // Over toolbar
-                    cursor_icon = match toolbar::toolbar_layout(w).hit(mouse_x, mouse_y) {
-                        Some(toolbar::ToolbarHit::Omnibox) => CursorIcon::Text,
-                        Some(_) => CursorIcon::Hand,
-                        None => CursorIcon::Default,
-                    };
-                } else if menu_open && hover_menu_idx.is_some() {
-                    cursor_icon = CursorIcon::Hand;
-                } else if is_settings_page && hover_engine_idx.is_some() {
-                    cursor_icon = CursorIcon::Hand;
-                } else if is_extensions_page && hover_ext_idx.is_some() {
-                    cursor_icon = CursorIcon::Hand;
-                }
-
-                window.set_cursor_icon(cursor_icon);
-            }
-            Event::WindowEvent {
-                event: WindowEvent::MouseInput { state, button, .. },
-                ..
-            } => {
-                let w = gpu_renderer.surface_config.width as f32;
-                // Accurate client mouse coordinates via ScreenToClient
-                #[cfg(target_os = "windows")]
-                {
-                    unsafe {
-                        extern "system" {
-                            fn GetCursorPos(point: *mut [i32; 2]) -> i32;
-                            fn ScreenToClient(hwnd: *mut std::ffi::c_void, point: *mut [i32; 2]) -> i32;
-                        }
-                        let mut pt: [i32; 2] = [0, 0];
-                        GetCursorPos(&mut pt);
-                        ScreenToClient(window.hwnd() as _, &mut pt);
-                        mouse_x = pt[0] as f32;
-                        mouse_y = pt[1] as f32;
-                    }
-                }
-                if state == ElementState::Pressed && button == MouseButton::Left {
-                    if SIDEBAR_W > 0.0 && mouse_x < SIDEBAR_W {
-                        let mut item_y = 50.0;
-                        for (i, item) in SIDEBAR_ITEMS.iter().enumerate() {
-                            if item.is_section {
-                                item_y += 41.0;
-                            } else {
-                                let h = 33.0;
-                                if mouse_y >= item_y && mouse_y < item_y + h {
-                                    sidebar_active = i;
-                                    if i == 0 {
-                                        is_home_page = true;
-                                        is_settings_page = false;
-                                        is_extensions_page = false;
-                                        address_bar_text = String::from("about:home");
-                                        home_scroll_y = 0.0;
-                                        load_internal_page = Some("home".to_string());
-                                    } else if i == 5 {
-                                        is_extensions_page = true;
-                                        is_home_page = false;
-                                        is_settings_page = false;
-                                        address_bar_text = String::from("axomai://extensions");
-                                        load_internal_page = Some("extensions".to_string());
-                                    } else if i == 7 {
-                                        is_settings_page = true;
-                                        is_home_page = false;
-                                        is_extensions_page = false;
-                                        address_bar_text = String::from("about:settings");
-                                        load_internal_page = Some("settings".to_string());
-                                    } else {
-                                        is_settings_page = false;
-                                        is_extensions_page = false;
-                                    }
-                                    needs_chrome_redraw = true;
-                                    break;
-                                }
-                                item_y += h;
-                            }
-                        }
-                    } else if menu_open {
-                        // Check if click is on a menu item
-                        let menu_x = w - 266.0;
-                        let menu_y_start = CHROME_TOP + 4.0;
-                        let menu_w = 250.0;
-                        let menu_items = [
-                            "New Tab", "Home", "Bookmarks", "History",
-                            "Downloads", "Extensions", "Passwords",
-                            "Heritage Themes", "Clear RAM & Cache", "Settings", "About", "Exit"
-                        ];
-                        let mut clicked_item = None;
-                        for (i, _item) in menu_items.iter().enumerate() {
-                            let iy = menu_y_start + 8.0 + i as f32 * 36.0;
-                            if mouse_x >= menu_x && mouse_x <= menu_x + menu_w
-                                && mouse_y >= iy && mouse_y <= iy + 34.0
-                            {
-                                clicked_item = Some(i);
-                                break;
-                            }
-                        }
-                        menu_open = false;
-                        if let Some(ref wv) = webview {
-                            let _ = wv.set_visible(!is_home_page && !is_settings_page && !is_extensions_page);
-                        }
-                        if let Some(idx) = clicked_item {
-                            match idx {
-                                0 => {
-                                    // New Tab
-                                    tabs.push(DesktopTab {
-                                        title: String::from("New Tab"),
-                                        url: String::from("about:home"),
-                                        is_home: true,
-                                        is_extensions: false,
-                                        is_settings: false,
-                                    });
-                                    active_tab_idx = tabs.len() - 1;
-                                    is_home_page = true;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("about:home");
-                                    load_internal_page = Some("home".to_string());
-                                }
-                                1 => {
-                                    // Home
-                                    is_home_page = true;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("about:home");
-                                    load_internal_page = Some("home".to_string());
-                                }
-                                2 => {
-                                    // Bookmarks
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("axomai://bookmarks");
-                                    load_internal_page = Some("bookmarks".to_string());
-                                }
-                                3 => {
-                                    // History
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("axomai://history");
-                                    load_internal_page = Some("history".to_string());
-                                }
-                                4 => {
-                                    // Downloads
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("axomai://downloads");
-                                    load_internal_page = Some("downloads".to_string());
-                                }
-                                5 => {
-                                    // Extensions
-                                    is_extensions_page = true;
-                                    is_home_page = false;
-                                    is_settings_page = false;
-                                    sidebar_active = 5;
-                                    address_bar_text = String::from("axomai://extensions");
-                                    load_internal_page = Some("extensions".to_string());
-                                }
-                                6 => {
-                                    // Passwords
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("axomai://passwords");
-                                    load_internal_page = Some("home".to_string());
-                                }
-                                7 => {
-                                    // Themes
-                                    is_settings_page = true;
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    address_bar_text = String::from("about:settings");
-                                    load_internal_page = Some("settings".to_string());
-                                }
-                                8 => {
-                                    // Clear RAM
-                                    println!("[Axomai] RAM & Cache cleared");
-                                }
-                                9 => {
-                                    // Settings
-                                    is_settings_page = true;
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    sidebar_active = 7;
-                                    address_bar_text = String::from("about:settings");
-                                    load_internal_page = Some("settings".to_string());
-                                }
-                                10 => {
-                                    // About
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    address_bar_text = String::from("axomai://about");
-                                    load_internal_page = Some("about".to_string());
-                                }
-                                11 => {
-                                    // Exit
-                                    *control_flow = ControlFlow::Exit;
-                                }
-                                _ => {}
-                            }
-                        }
-                        needs_chrome_redraw = true;
-                    } else if mouse_y < CHROME_TOP {
-                        let strip = toolbar::tab_strip(w, tabs.len());
-                        let mut tab_action = None; // (index, is_close)
-
-                        if mouse_y <= TAB_BAR_H {
-                            for (i, _) in tabs.iter().enumerate() {
-                                if strip.close_rect(i).contains(mouse_x, mouse_y) {
-                                    tab_action = Some((i, true));
-                                    break;
-                                } else if strip.tab_rect(i).contains(mouse_x, mouse_y) {
-                                    tab_action = Some((i, false));
-                                    break;
-                                }
-                            }
-
-                            if strip.plus.contains(mouse_x, mouse_y) {
-                                // + New Tab
-                                tabs.push(DesktopTab {
-                                    title: String::from("New Tab"),
-                                    url: String::from("about:home"),
-                                    is_home: true,
-                                    is_extensions: false,
-                                    is_settings: false,
-                                });
-                                active_tab_idx = tabs.len() - 1;
-                                is_home_page = true;
-                                is_extensions_page = false;
-                                is_settings_page = false;
-                                address_bar_text = String::from("about:home");
-                                home_search_text.clear();
-                                home_search_focused = false;
-                                load_internal_page = Some("home".to_string());
-                                needs_chrome_redraw = true;
-                            } else if let Some((i, is_close)) = tab_action {
-                                if is_close {
-                                    if tabs.len() > 1 {
-                                        tabs.remove(i);
-                                        if active_tab_idx >= tabs.len() {
-                                            active_tab_idx = tabs.len() - 1;
-                                        } else if active_tab_idx > i {
-                                            active_tab_idx -= 1;
-                                        }
-                                    } else {
-                                        tabs[0] = DesktopTab {
-                                            title: String::from("Axomai Browser"),
-                                            url: String::from("about:home"),
-                                            is_home: true,
-                                            is_extensions: false,
-                                            is_settings: false,
-                                        };
-                                        active_tab_idx = 0;
-                                    }
-                                    let cur = &tabs[active_tab_idx];
-                                    is_home_page = cur.is_home;
-                                    is_extensions_page = cur.is_extensions;
-                                    is_settings_page = cur.is_settings;
-                                    address_bar_text = cur.url.clone();
-                                    if cur.is_home {
-                                        load_internal_page = Some("home".to_string());
-                                    } else if cur.is_extensions {
-                                        load_internal_page = Some("extensions".to_string());
-                                    } else if cur.is_settings {
-                                        load_internal_page = Some("settings".to_string());
-                                    } else if let Some(ref wv) = webview {
-                                        tab_load(wv, &shared, &cur.url);
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                    needs_chrome_redraw = true;
-                                } else {
-                                    // Switch tab
-                                    active_tab_idx = i;
-                                    let cur = &tabs[active_tab_idx];
-                                    is_home_page = cur.is_home;
-                                    is_extensions_page = cur.is_extensions;
-                                    is_settings_page = cur.is_settings;
-                                    address_bar_text = cur.url.clone();
-                                    if cur.is_home {
-                                        load_internal_page = Some("home".to_string());
-                                    } else if cur.is_extensions {
-                                        load_internal_page = Some("extensions".to_string());
-                                    } else if cur.is_settings {
-                                        load_internal_page = Some("settings".to_string());
-                                    } else if let Some(ref wv) = webview {
-                                        tab_load(wv, &shared, &cur.url);
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                        }
-                        // Toolbar controls (hit-tested against toolbar::toolbar_layout, same geometry as the renderer)
-                        let tb = toolbar::toolbar_layout(w);
-                        let hit = tb.hit(mouse_x, mouse_y);
-                        // Clicking anything in the toolbar or tab strip dismisses an open popup, as in other browsers.
-                        // Buttons that open a popup are excluded so that clicking the same button again toggles it closed.
-                        if !matches!(
-                            hit,
-                            Some(toolbar::ToolbarHit::Extensions) | Some(toolbar::ToolbarHit::Menu) | Some(toolbar::ToolbarHit::Theme)
-                                | Some(toolbar::ToolbarHit::Shield) | Some(toolbar::ToolbarHit::Ai) | Some(toolbar::ToolbarHit::Profile)
-                                | Some(toolbar::ToolbarHit::Qr) | Some(toolbar::ToolbarHit::Secure)
-                        ) {
-                            core.close_popups(webview.as_ref());
-                        }
-                        let anchor = |r: toolbar::Rect| actions::anchor_right(w, r.right(), scale_factor);
-                        match hit {
-                            Some(toolbar::ToolbarHit::Extensions) => {
-                                if webview.is_some() {
-                                    core.open_extensions(webview.as_ref(), &shared, &extensions, anchor(tb.extensions));
-                                } else {
-                                    is_extensions_page = true;
-                                    is_home_page = false;
-                                    is_settings_page = false;
-                                    sidebar_active = 5;
-                                    address_bar_text = String::from("axomai://extensions");
-                                    load_internal_page = Some("extensions".to_string());
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Menu) => {
-                                if webview.is_some() {
-                                    core.open_menu(webview.as_ref(), &shared, anchor(tb.menu));
-                                } else {
-                                    menu_open = !menu_open;
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Downloads) => {
-                                is_home_page = false;
-                                is_extensions_page = false;
-                                is_settings_page = false;
-                                address_bar_text = String::from("axomai://downloads");
-                                load_internal_page = Some("downloads".to_string());
-                            }
-                            Some(toolbar::ToolbarHit::Theme) => core.open_theme_menu(webview.as_ref(), &shared, anchor(tb.theme)),
-                            Some(toolbar::ToolbarHit::Secure) => {
-                                let addr = address_bar_text.clone();
-                                core.open_site_info(webview.as_ref(), &shared, actions::anchor_right(w, tb.secure_badge.x + 330.0, scale_factor), &addr);
-                            }
-                            Some(toolbar::ToolbarHit::Shield) => core.open_shield(webview.as_ref(), &shared, &extensions, anchor(tb.shield)),
-                            Some(toolbar::ToolbarHit::Ai) => core.open_ai(webview.as_ref(), &shared, anchor(tb.ai), &current_title),
-                            Some(toolbar::ToolbarHit::Profile) => core.open_profile(webview.as_ref(), &shared, browser_storage.as_ref(), anchor(tb.profile)),
-                            Some(toolbar::ToolbarHit::Qr) => {
-                                let url = address_bar_text.clone();
-                                core.open_qr(webview.as_ref(), &shared, anchor(tb.qr), &url);
-                            }
-                            Some(toolbar::ToolbarHit::Reader) => {
-                                core.run_extension(extensions::READER, webview.as_ref(), &shared, &extensions, anchor(tb.reader));
-                            }
-                            Some(toolbar::ToolbarHit::Bookmark) => {
-                                let url = address_bar_text.clone();
-                                let result = core.toggle_bookmark(&url, &current_title, browser_storage.as_ref());
-                                if let Some(ref wv) = webview {
-                                    match result {
-                                        Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
-                                        Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
-                                        None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
-                                    }
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Omnibox) => {
-                                address_bar_focused = true;
-                                find_bar_open = false;
-                                if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
-                                    address_bar_cursor = address_bar_text.chars().count();
-                                    address_all_selected = true;
-                                } else {
-                                    address_bar_text.clear();
-                                    address_bar_cursor = 0;
-                                    address_all_selected = false;
-                                }
-                                #[cfg(target_os = "windows")]
-                                unsafe {
-                                    extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                    SetFocus(window.hwnd() as _);
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Back) => {
-                                if let Some(ref wv) = webview {
-                                    if core.can_back {
-                                        web::com::go_back(wv);
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Forward) => {
-                                if let Some(ref wv) = webview {
-                                    if core.can_fwd {
-                                        web::com::go_forward(wv);
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Reload) => {
-                                if is_home_page {
-                                    load_internal_page = Some("home".to_string());
-                                } else if is_extensions_page {
-                                    load_internal_page = Some("extensions".to_string());
-                                } else if is_settings_page {
-                                    load_internal_page = Some("settings".to_string());
-                                } else if let Some(ref wv) = webview {
-                                    web::com::reload(wv);
-                                }
-                            }
-                            Some(toolbar::ToolbarHit::Home) => {
-                                is_home_page = true;
-                                is_settings_page = false;
-                                is_extensions_page = false;
-                                address_bar_text = String::from("about:home");
-                                home_scroll_y = 0.0;
-                                home_search_focused = false;
-                                home_search_text.clear();
-                                home_search_cursor = 0;
-                                sidebar_active = 0;
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.set_visible(false);
-                                    webview_visible = false;
-                                }
-                                load_internal_page = Some("home".to_string());
-                            }
-                            None => {}
-                        }
-                        if hit.is_some() || mouse_y >= TAB_BAR_H {
-                            if hit != Some(toolbar::ToolbarHit::Omnibox) && address_bar_focused {
-                                address_bar_focused = false;
-                                address_bar_text = tabs[active_tab_idx].url.clone();
-                            }
-                            needs_chrome_redraw = true;
-                        }
-                    } else if is_extensions_page {
-                        address_bar_focused = false;
-                        menu_open = false;
-                        let content_x = mouse_x - SIDEBAR_W;
-                        let content_y = mouse_y - CHROME_TOP;
-                        let content_w = w - SIDEBAR_W;
-                        let padding = 24.0;
-                        let gap = 16.0;
-                        let cols = if content_w > 600.0 { 2usize } else { 1 };
-                        let card_w = if cols == 2 { (content_w - padding * 2.0 - gap) / 2.0 } else { content_w - padding * 2.0 };
-                        let card_h = 160.0;
-                        let grid_start_y = 64.0 + 24.0 + 36.0;
-                        for i in 0..extensions.len() {
-                            let col = (i % cols) as f32;
-                            let row = (i / cols) as f32;
-                            let cx = padding + col * (card_w + gap);
-                            let cy = grid_start_y + row * (card_h + gap);
-                            if content_x >= cx && content_x <= cx + card_w
-                                && content_y >= cy && content_y <= cy + card_h
-                            {
-                                core.toggle_extension(i, webview.as_ref(), &shared, &mut extensions, browser_storage.as_ref());
-                                needs_chrome_redraw = true;
-                                break;
-                            }
-                        }
-                    } else if is_settings_page {
-                        address_bar_focused = false;
-                        menu_open = false;
-                        let content_x = mouse_x - SIDEBAR_W;
-                        let content_y = mouse_y - CHROME_TOP;
-                        let card_x = 40.0;
-                        let card_w = (w - SIDEBAR_W) - 80.0;
-                        let engine_start_y = 130.0;
-                        let engine_h = 56.0;
-                        for (i, eng_option) in SearchEngine::all().iter().enumerate() {
-                            let ey = engine_start_y + i as f32 * (engine_h + 8.0);
-                            if content_x >= card_x && content_x <= card_x + card_w
-                                && content_y >= ey && content_y <= ey + engine_h
-                            {
-                                selected_search_engine = *eng_option;
-                                needs_chrome_redraw = true;
-                                break;
-                            }
-                        }
-                    } else if is_home_page {
-                        address_bar_focused = false;
-                        menu_open = false;
-                        let content_w = w - SIDEBAR_W;
-                        let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                        let cx = content_w / 2.0;
-                        let cy = content_h / 2.0 - 60.0;
-                        let search_w = 540.0f32.min(content_w - 80.0);
-                        let search_x = SIDEBAR_W + cx - search_w / 2.0;
-                        let search_y = CHROME_TOP + cy + 135.0;
-                        if mouse_x >= search_x && mouse_x <= search_x + search_w
-                            && mouse_y >= search_y && mouse_y <= search_y + 44.0
-                        {
-                            home_search_focused = true;
-                            home_search_text.clear();
-                            needs_chrome_redraw = true;
-                            #[cfg(target_os = "windows")]
-                            unsafe {
-                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                SetFocus(window.hwnd() as _);
-                            }
-                        } else {
-                            home_search_focused = false;
-                            needs_chrome_redraw = true;
-                        }
-                    } else if !is_home_page {
-                        address_bar_focused = false;
-                        menu_open = false;
-                        let btn = match button {
-                            MouseButton::Left => 0,
-                            MouseButton::Right => 2,
-                            MouseButton::Middle => 1,
-                            _ => 0,
-                        };
-                        if let Ok(mut eng) = engine.lock() {
-                            if let Some(nav_url) = eng.handle_pointer_down(
-                                mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, btn,
-                            ) {
-                                let content_w = w - SIDEBAR_W;
-                                let content_h = gpu_renderer.surface_config.height as f32 - CHROME_TOP;
-                                let _ = eng.load_url(&nav_url, content_w, content_h);
-                                address_bar_text = nav_url;
-                                needs_chrome_redraw = true;
-                            }
-                        }
-                    }
-                }
-                if state == ElementState::Released && !is_home_page && mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
-                    let btn = match button {
-                        MouseButton::Left => 0,
-                        MouseButton::Right => 2,
-                        MouseButton::Middle => 1,
-                        _ => 0,
-                    };
-                    if let Ok(mut eng) = engine.lock() {
-                        let _ = eng.handle_pointer_up(mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, btn);
-                    }
-                }
-            }
-            Event::WindowEvent {
-                event: WindowEvent::ModifiersChanged(new_modifiers),
-                ..
-            } => {
-                modifiers = new_modifiers;
-            }
-            Event::WindowEvent {
-                event: WindowEvent::KeyboardInput { event: key_event, .. },
-                ..
-            } => {
-                if key_event.state == ElementState::Pressed {
-                    let ctrl = modifiers.control_key();
-                    if ctrl {
-                        match key_event.logical_key {
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("u") && !address_bar_focused && !home_search_focused && !find_bar_open => {
-                                if let Ok(mut q) = shared.nav.lock() {
-                                    q.push(String::from("axomai://viewsource-current"));
-                                }
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("a") && address_bar_focused => {
-                                address_bar_cursor = address_bar_text.chars().count();
-                                address_all_selected = !address_bar_text.is_empty();
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("v") && (address_bar_focused || home_search_focused || find_bar_open) => {
-                                // Paste: newlines would break the single-line fields, so they become spaces.
-                                if let Some(text) = sys::clipboard_text() {
-                                    let text: String = text.chars().map(|c| if c == '\r' || c == '\n' || c == '\t' { ' ' } else { c }).collect();
-                                    if address_bar_focused {
-                                        if address_all_selected {
-                                            address_bar_text.clear();
-                                            address_bar_cursor = 0;
-                                            address_all_selected = false;
-                                        }
-                                        let at = address_bar_text.char_indices().nth(address_bar_cursor).map(|(i, _)| i).unwrap_or(address_bar_text.len());
-                                        address_bar_text.insert_str(at, &text);
-                                        address_bar_cursor += text.chars().count();
-                                    } else if home_search_focused {
-                                        let at = home_search_text.char_indices().nth(home_search_cursor).map(|(i, _)| i).unwrap_or(home_search_text.len());
-                                        home_search_text.insert_str(at, &text);
-                                        home_search_cursor += text.chars().count();
-                                    } else {
-                                        find_text.push_str(&text);
-                                        if let Some(ref wv) = webview {
-                                            let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                                            let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                                        }
-                                    }
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("t") => {
-                                tabs.push(DesktopTab {
-                                    title: String::from("New Tab"),
-                                    url: String::from("about:home"),
-                                    is_home: true,
-                                    is_extensions: false,
-                                    is_settings: false,
-                                });
-                                active_tab_idx = tabs.len() - 1;
-                                address_bar_text = String::from("about:home");
-                                is_home_page = true;
-                                is_settings_page = false;
-                                is_extensions_page = false;
-                                home_search_focused = false;
-                                home_search_text.clear();
-                                address_bar_focused = false;
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.set_visible(false);
-                                    webview_visible = false;
-                                }
-                                load_internal_page = Some("home".to_string());
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("w") => {
-                                if tabs.len() > 1 {
-                                    tabs.remove(active_tab_idx);
-                                    if active_tab_idx >= tabs.len() {
-                                        active_tab_idx = tabs.len() - 1;
-                                    }
-                                } else {
-                                    tabs[0] = DesktopTab {
-                                        title: String::from("Axomai Browser"),
-                                        url: String::from("about:home"),
-                                        is_home: true,
-                                        is_extensions: false,
-                                        is_settings: false,
-                                    };
-                                    active_tab_idx = 0;
-                                }
-                                let cur = &tabs[active_tab_idx];
-                                address_bar_text = cur.url.clone();
-                                is_home_page = cur.is_home;
-                                is_extensions_page = cur.is_extensions;
-                                is_settings_page = cur.is_settings;
-                                address_bar_focused = false;
-                                home_search_focused = false;
-                                if is_home_page || is_extensions_page || is_settings_page {
-                                    if let Some(ref wv) = webview {
-                                        let _ = wv.set_visible(false);
-                                        webview_visible = false;
-                                    }
-                                    let page = if is_extensions_page { "extensions" } else if is_settings_page { "settings" } else { "home" };
-                                    load_internal_page = Some(page.to_string());
-                                } else if let Some(ref wv) = webview {
-                                    tab_load(wv, &shared, &cur.url);
-                                    if !webview_visible {
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("l") => {
-                                address_bar_focused = true;
-                                find_bar_open = false;
-                                if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
-                                    address_bar_cursor = address_bar_text.chars().count();
-                                    address_all_selected = true;
-                                } else {
-                                    address_bar_text.clear();
-                                    address_bar_cursor = 0;
-                                    address_all_selected = false;
-                                }
-                                needs_chrome_redraw = true;
-                                #[cfg(target_os = "windows")]
-                                unsafe {
-                                    extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                    SetFocus(window.hwnd() as _);
-                                }
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("d") => {
-                                // Same toggle as the toolbar star: a second Ctrl+D removes the bookmark instead of duplicating it.
-                                let url = address_bar_text.clone();
-                                let result = core.toggle_bookmark(&url, &current_title, browser_storage.as_ref());
-                                if let Some(ref wv) = webview {
-                                    match result {
-                                        Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
-                                        Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
-                                        None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
-                                    }
-                                }
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("r") => {
-                                if is_home_page {
-                                    load_internal_page = Some("home".to_string());
-                                } else if is_extensions_page {
-                                    load_internal_page = Some("extensions".to_string());
-                                } else if is_settings_page {
-                                    load_internal_page = Some("settings".to_string());
-                                } else if let Some(ref wv) = webview {
-                                    web::com::reload(wv);
-                                }
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("h") => {
-                                load_internal_page = Some("history".to_string());
-                                address_bar_text = String::from("axomai://history");
-                                is_home_page = false;
-                                is_settings_page = false;
-                                is_extensions_page = false;
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.set_visible(false);
-                                    webview_visible = false;
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("j") => {
-                                load_internal_page = Some("downloads".to_string());
-                                address_bar_text = String::from("axomai://downloads");
-                                is_home_page = false;
-                                is_settings_page = false;
-                                is_extensions_page = false;
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.set_visible(false);
-                                    webview_visible = false;
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(ref ch) if ch.eq_ignore_ascii_case("f") => {
-                                find_bar_open = !find_bar_open;
-                                if !find_bar_open {
-                                    find_text.clear();
-                                    if let Some(ref wv) = webview {
-                                        let _ = wv.evaluate_script("window.getSelection().removeAllRanges();");
-                                    }
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            _ => {}
-                        }
-                    } else if find_bar_open {
-                        match key_event.logical_key {
-                            Key::Backspace => {
-                                find_text.pop();
-                                if let Some(ref wv) = webview {
-                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Enter => {
-                                if let Some(ref wv) = webview {
-                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                                }
-                            }
-                            Key::Escape => {
-                                find_bar_open = false;
-                                find_text.clear();
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.evaluate_script("window.getSelection().removeAllRanges();");
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(_) | Key::Space => {
-                                // Space arrives as its own key (not `Character`), and held keys must repeat.
-                                match key_event.logical_key {
-                                    Key::Character(ref ch) => find_text.push_str(ch),
-                                    _ => find_text.push(' '),
-                                }
-                                if let Some(ref wv) = webview {
-                                    let escaped = find_text.replace('\\', "\\\\").replace('\'', "\\'");
-                                    let _ = wv.evaluate_script(&format!("window.find('{}')", escaped));
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            _ => {}
-                        }
-                    } else if address_bar_focused {
-                        if address_all_selected {
-                            // Whole address selected: editing keys replace it, navigation keys just drop the selection.
-                            let len = address_bar_text.chars().count();
-                            match key_event.logical_key {
-                                Key::Character(_) | Key::Space | Key::Backspace | Key::Delete => {
-                                    address_bar_text.clear();
-                                    address_bar_cursor = 0;
-                                    address_all_selected = false;
-                                    if matches!(key_event.logical_key, Key::Backspace | Key::Delete) {
-                                        needs_chrome_redraw = true;
-                                        return;
-                                    }
-                                }
-                                Key::ArrowLeft | Key::Home => {
-                                    address_bar_cursor = 0;
-                                    address_all_selected = false;
-                                    needs_chrome_redraw = true;
-                                    return;
-                                }
-                                Key::ArrowRight | Key::End => {
-                                    address_bar_cursor = len;
-                                    address_all_selected = false;
-                                    needs_chrome_redraw = true;
-                                    return;
-                                }
-                                _ => {}
-                            }
-                        }
-                        let is_arrow_left = matches!(key_event.logical_key, Key::ArrowLeft) || matches!(key_event.physical_key, KeyCode::ArrowLeft);
-                        let is_arrow_right = matches!(key_event.logical_key, Key::ArrowRight) || matches!(key_event.physical_key, KeyCode::ArrowRight);
-                        let is_home_key = matches!(key_event.logical_key, Key::Home) || matches!(key_event.physical_key, KeyCode::Home);
-                        let is_end_key = matches!(key_event.logical_key, Key::End) || matches!(key_event.physical_key, KeyCode::End);
-                        let is_delete = matches!(key_event.logical_key, Key::Delete) || matches!(key_event.physical_key, KeyCode::Delete);
-
-                        if is_arrow_left {
-                            if address_bar_cursor > 0 {
-                                address_bar_cursor -= 1;
-                                needs_chrome_redraw = true;
-                            }
-                        } else if is_arrow_right {
-                            let char_count = address_bar_text.chars().count();
-                            if address_bar_cursor < char_count {
-                                address_bar_cursor += 1;
-                                needs_chrome_redraw = true;
-                            }
-                        } else if is_home_key {
-                            address_bar_cursor = 0;
-                            needs_chrome_redraw = true;
-                        } else if is_end_key {
-                            address_bar_cursor = address_bar_text.chars().count();
-                            needs_chrome_redraw = true;
-                        } else if is_delete {
-                            let char_count = address_bar_text.chars().count();
-                            if address_bar_cursor < char_count {
-                                let byte_start = address_bar_text.char_indices()
-                                    .nth(address_bar_cursor).map(|(i, _)| i)
-                                    .unwrap_or(address_bar_text.len());
-                                let byte_end = address_bar_text.char_indices()
-                                    .nth(address_bar_cursor + 1).map(|(i, _)| i)
-                                    .unwrap_or(address_bar_text.len());
-                                address_bar_text.replace_range(byte_start..byte_end, "");
-                                needs_chrome_redraw = true;
-                            }
-                        } else {
-                        match key_event.logical_key {
-                            Key::Backspace => {
-                                if address_bar_cursor > 0 {
-                                    let byte_pos = address_bar_text.char_indices()
-                                        .nth(address_bar_cursor - 1).map(|(i, _)| i);
-                                    let byte_end = address_bar_text.char_indices()
-                                        .nth(address_bar_cursor).map(|(i, _)| i)
-                                        .unwrap_or(address_bar_text.len());
-                                    if let Some(start) = byte_pos {
-                                        address_bar_text.replace_range(start..byte_end, "");
-                                        address_bar_cursor -= 1;
-                                    }
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Enter => {
-                                address_bar_focused = false;
-                                address_all_selected = false;
-                                let url = match omnibox::resolve(&address_bar_text, |q| selected_search_engine.search_url(q)) {
-                                    Some(omnibox::Target::Navigate(u)) => u,
-                                    Some(omnibox::Target::Internal(cmd)) => {
-                                        if let Ok(mut q) = shared.nav.lock() {
-                                            q.push(format!("axomai://{}", cmd));
-                                        }
-                                        needs_chrome_redraw = true;
-                                        return;
-                                    }
-                                    Some(omnibox::Target::ViewSource(u)) => {
-                                        if let Ok(mut q) = shared.nav.lock() {
-                                            q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
-                                        }
-                                        address_bar_text = tabs[active_tab_idx].url.clone();
-                                        needs_chrome_redraw = true;
-                                        return;
-                                    }
-                                    None => {
-                                        address_bar_text = tabs[active_tab_idx].url.clone();
-                                        needs_chrome_redraw = true;
-                                        return;
-                                    }
-                                };
-                                if webview.is_none() {
-                                    let cw = w_of(&gpu_renderer);
-                                    let ch = h_of(&gpu_renderer);
-                                    webview = web::build_webview(&window, (cw, ch), CHROME_TOP, web::Initial::Url(&url), &shared, (255, 255, 255, 255));
-                                    core.apply_extensions(webview.as_ref(), &shared, &extensions);
-                                    webview_visible = webview.is_some();
-                                    if webview.is_some() {
-                                        println!("[Axomai] WebView2 initialized successfully");
-                                    }
-                                } else if let Some(ref wv) = webview {
-                                    let _ = wv.load_url(&url);
-                                    if !webview_visible {
-                                        let _ = wv.set_visible(true);
-                                        webview_visible = true;
-                                    }
-                                }
-                                address_bar_text = url;
-                                is_home_page = false;
-                                is_settings_page = false;
-                                is_extensions_page = false;
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Escape => {
-                                address_bar_focused = false;
-                                address_bar_text = tabs[active_tab_idx].url.clone();
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(_) | Key::Space => {
-                                let typed: String = match key_event.logical_key {
-                                    Key::Character(ref ch) => ch.to_string(),
-                                    _ => " ".to_string(),
-                                };
-                                let byte_pos = address_bar_text.char_indices()
-                                    .nth(address_bar_cursor).map(|(i, _)| i)
-                                    .unwrap_or(address_bar_text.len());
-                                address_bar_text.insert_str(byte_pos, &typed);
-                                address_bar_cursor += typed.chars().count();
-                                needs_chrome_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        } // end else (non-arrow keys)
-                    } else if home_search_focused {
-                        let is_arrow_left = matches!(key_event.logical_key, Key::ArrowLeft) || matches!(key_event.physical_key, KeyCode::ArrowLeft);
-                        let is_arrow_right = matches!(key_event.logical_key, Key::ArrowRight) || matches!(key_event.physical_key, KeyCode::ArrowRight);
-
-                        if is_arrow_left {
-                            if home_search_cursor > 0 {
-                                home_search_cursor -= 1;
-                                needs_chrome_redraw = true;
-                            }
-                        } else if is_arrow_right {
-                            let char_count = home_search_text.chars().count();
-                            if home_search_cursor < char_count {
-                                home_search_cursor += 1;
-                                needs_chrome_redraw = true;
-                            }
-                        } else {
-                        match key_event.logical_key {
-                            Key::Backspace => {
-                                if home_search_cursor > 0 {
-                                    let byte_pos = home_search_text.char_indices()
-                                        .nth(home_search_cursor - 1).map(|(i, _)| i);
-                                    let byte_end = home_search_text.char_indices()
-                                        .nth(home_search_cursor).map(|(i, _)| i)
-                                        .unwrap_or(home_search_text.len());
-                                    if let Some(start) = byte_pos {
-                                        home_search_text.replace_range(start..byte_end, "");
-                                        home_search_cursor -= 1;
-                                    }
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Enter => {
-                                home_search_focused = false;
-                                if !home_search_text.trim().is_empty() {
-                                    let url = match omnibox::resolve(&home_search_text, |q| selected_search_engine.search_url(q)) {
-                                        Some(omnibox::Target::Navigate(u)) => u,
-                                        Some(omnibox::Target::Internal(cmd)) => {
-                                            if let Ok(mut q) = shared.nav.lock() {
-                                                q.push(format!("axomai://{}", cmd));
-                                            }
-                                            home_search_text.clear();
-                                            needs_chrome_redraw = true;
-                                            return;
-                                        }
-                                        Some(omnibox::Target::ViewSource(u)) => {
-                                            if let Ok(mut q) = shared.nav.lock() {
-                                                q.push(format!("axomai://viewsource/{}", viewsource::encode(&u)));
-                                            }
-                                            home_search_text.clear();
-                                            needs_chrome_redraw = true;
-                                            return;
-                                        }
-                                        None => return,
-                                    };
-                                    if webview.is_none() {
-                                        let cw = w_of(&gpu_renderer);
-                                        let ch = h_of(&gpu_renderer);
-                                        webview = web::build_webview(&window, (cw, ch), CHROME_TOP, web::Initial::Url(&url), &shared, (255, 255, 255, 255));
-                                        core.apply_extensions(webview.as_ref(), &shared, &extensions);
-                                        webview_visible = webview.is_some();
-                                    } else if let Some(ref wv) = webview {
-                                        let _ = wv.load_url(&url);
-                                        if !webview_visible {
-                                            let _ = wv.set_visible(true);
-                                            webview_visible = true;
-                                        }
-                                    }
-                                    address_bar_text = url;
-                                    is_home_page = false;
-                                    is_settings_page = false;
-                                    is_extensions_page = false;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                            Key::Escape => {
-                                home_search_focused = false;
-                                home_search_text.clear();
-                                needs_chrome_redraw = true;
-                            }
-                            Key::Character(_) | Key::Space => {
-                                let typed: String = match key_event.logical_key {
-                                    Key::Character(ref ch) => ch.to_string(),
-                                    _ => " ".to_string(),
-                                };
-                                let byte_pos = home_search_text.char_indices()
-                                    .nth(home_search_cursor).map(|(i, _)| i)
-                                    .unwrap_or(home_search_text.len());
-                                home_search_text.insert_str(byte_pos, &typed);
-                                home_search_cursor += typed.chars().count();
-                                needs_chrome_redraw = true;
-                            }
-                            _ => {}
-                        }
-                        } // end else (non-arrow keys)
-                    } else {
-                        if is_home_page {
-                            if let Key::Character(ref ch) = key_event.logical_key {
-                                if !key_event.repeat {
-                                    home_search_focused = true;
-                                    home_search_text.clear();
-                                    home_search_text.push_str(ch);
-                                    home_search_cursor = ch.chars().count();
-                                    needs_chrome_redraw = true;
-                                    #[cfg(target_os = "windows")]
-                                    unsafe {
-                                        extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                        SetFocus(window.hwnd() as _);
-                                    }
-                                }
-                            }
-                        } else {
-                            let key_str = match key_event.logical_key {
-                                Key::Character(ref ch) => ch.to_string(),
-                                Key::Backspace => "BackSpace".to_string(),
-                                Key::Enter => "Enter".to_string(),
-                                Key::Tab => "Tab".to_string(),
-                                Key::Escape => "Escape".to_string(),
-                                Key::Space => " ".to_string(),
-                                Key::ArrowUp => "ArrowUp".to_string(),
-                                Key::ArrowDown => "ArrowDown".to_string(),
-                                Key::ArrowLeft => "ArrowLeft".to_string(),
-                                Key::ArrowRight => "ArrowRight".to_string(),
-                                _ => return,
-                            };
-                            if let Ok(mut eng) = engine.lock() {
-                                if let Some(nav_url) = eng.handle_key_event(
-                                    "keydown", &key_str, "", 0, false, false, false, false, false,
-                                ) {
-                                    let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
-                                    let content_h = h_of(&gpu_renderer) - CHROME_TOP;
-                                    let _ = eng.load_url(&nav_url, content_w, content_h);
-                                    address_bar_text = nav_url;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Event::WindowEvent {
-                event: WindowEvent::ReceivedImeText(ref text),
-                ..
-            } => {
-                // All text input handled by Key::Character in KeyboardInput
-                let _ = text;
-            }
-            Event::WindowEvent {
-                event: WindowEvent::MouseWheel { delta, .. },
-                ..
-            } => {
-                if mouse_y > CHROME_TOP && mouse_x > SIDEBAR_W {
-                    let dy = match delta {
-                        tao::event::MouseScrollDelta::LineDelta(_, y) => y * 40.0,
-                        tao::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                        _ => 0.0,
-                    };
-                    if is_home_page {
-                        home_scroll_y = (home_scroll_y + dy).min(0.0).max(-800.0);
-                        needs_chrome_redraw = true;
-                    } else if let Ok(mut eng) = engine.lock() {
-                        let content_w = w_of(&gpu_renderer) - SIDEBAR_W;
-                        let content_h = h_of(&gpu_renderer) - CHROME_TOP;
-                        let _ = eng.handle_scroll_at(
-                            mouse_x - SIDEBAR_W, mouse_y - CHROME_TOP, 0.0, dy, content_w, content_h,
-                        );
-                    }
-                }
-            }
-            Event::MainEventsCleared => {
-                {
-                    for url in shared.drain_nav() {
-                        if url == "axomai://viewsource-current" {
-                            if address_bar_text.starts_with("http://") || address_bar_text.starts_with("https://") {
-                                viewsource::fetch(address_bar_text.clone(), &shared);
-                            } else if let Some(ref wv) = webview {
-                                core.toast(wv, "View source works on web pages", None, &shared);
-                            }
-                        } else if url.starts_with("axomai://viewsource/") {
-                            let target = url_decode(&url["axomai://viewsource/".len()..]);
-                            if target.starts_with("http://") || target.starts_with("https://") {
-                                viewsource::fetch(target, &shared);
-                            }
-                        } else if url == "axomai://focus-url" {
-                            address_bar_focused = true;
-                            find_bar_open = false;
-                            if address_bar_text.starts_with("http") || address_bar_text.starts_with("file:") {
-                                address_bar_cursor = address_bar_text.chars().count();
-                                address_all_selected = true;
-                            } else {
-                                address_bar_text.clear();
-                                address_bar_cursor = 0;
-                                address_all_selected = false;
-                            }
-                            #[cfg(target_os = "windows")]
-                            unsafe {
-                                extern "system" { fn SetFocus(hwnd: *mut std::ffi::c_void) -> *mut std::ffi::c_void; }
-                                SetFocus(window.hwnd() as _);
-                            }
-                            needs_chrome_redraw = true;
-                        } else if url == "axomai://bookmark-toggle" {
-                            let page = address_bar_text.clone();
-                            let result = core.toggle_bookmark(&page, &current_title, browser_storage.as_ref());
-                            if let Some(ref wv) = webview {
-                                match result {
-                                    Some(true) => core.toast(wv, "⭐ Bookmark added", None, &shared),
-                                    Some(false) => core.toast(wv, "Bookmark removed", None, &shared),
-                                    None => core.toast(wv, "Only web pages can be bookmarked", None, &shared),
-                                }
-                            }
-                            needs_chrome_redraw = true;
-                        } else if url == "axomai://closetab" {
-                            if tabs.len() > 1 {
-                                tabs.remove(active_tab_idx);
-                                if active_tab_idx >= tabs.len() {
-                                    active_tab_idx = tabs.len() - 1;
-                                }
-                            } else {
-                                tabs[0] = DesktopTab {
-                                    title: String::from("Axomai Browser"),
-                                    url: String::from("about:home"),
-                                    is_home: true,
-                                    is_extensions: false,
-                                    is_settings: false,
-                                };
-                                active_tab_idx = 0;
-                            }
-                            let cur_url = tabs[active_tab_idx].url.clone();
-                            is_home_page = tabs[active_tab_idx].is_home;
-                            is_extensions_page = tabs[active_tab_idx].is_extensions;
-                            is_settings_page = tabs[active_tab_idx].is_settings;
-                            address_bar_text = cur_url.clone();
-                            address_bar_focused = false;
-                            if is_home_page || is_extensions_page || is_settings_page {
-                                load_internal_page = Some(if is_extensions_page { "extensions" } else if is_settings_page { "settings" } else { "home" }.to_string());
-                            } else if let Some(ref wv) = webview {
-                                tab_load(wv, &shared, &cur_url);
-                                let _ = wv.set_visible(true);
-                                webview_visible = true;
-                            }
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://ext-toggle/") {
-                            if let Ok(idx) = url["axomai://ext-toggle/".len()..].parse::<usize>() {
-                                core.toggle_extension(idx, webview.as_ref(), &shared, &mut extensions, browser_storage.as_ref());
-                                if is_extensions_page {
-                                    load_internal_page = Some("extensions".to_string());
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                        } else if url.starts_with("axomai://ext-run/") {
-                            if let Ok(idx) = url["axomai://ext-run/".len()..].parse::<usize>() {
-                                let wpx = w_of(&gpu_renderer);
-                                let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).extensions.right(), scale_factor);
-                                core.run_extension(idx, webview.as_ref(), &shared, &extensions, right);
-                            }
-                        } else if url == "axomai://capture/visible" {
-                            core.capture_visible(webview.as_ref(), &shared);
-                        } else if url == "axomai://capture/full" {
-                            core.capture_full_begin(webview.as_ref(), &shared);
-                        } else if url.starts_with("axomai://snip/") {
-                            core.capture_region(&url["axomai://snip/".len()..], webview.as_ref(), &shared);
-                        } else if url == "axomai://shield" {
-                            let wpx = w_of(&gpu_renderer);
-                            let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).shield.right(), scale_factor);
-                            core.open_shield(webview.as_ref(), &shared, &extensions, right);
-                        } else if url == "axomai://open-folder" {
-                            core.open_capture_folder();
-                        } else if url.starts_with("axomai://theme/") {
-                            core.set_theme(&url["axomai://theme/".len()..], browser_storage.as_ref());
-                            needs_chrome_redraw = true;
-                        } else if url == "axomai://theme-menu" {
-                            let wpx = w_of(&gpu_renderer);
-                            let right = actions::anchor_right(wpx, toolbar::toolbar_layout(wpx).theme.right(), scale_factor);
-                            core.open_theme_menu(webview.as_ref(), &shared, right);
-                        } else if url == "axomai://clear-ram" {
-                            core.free_memory(webview.as_ref(), true);
-                        } else if url.starts_with("axomai://profile-name/") {
-                            core.set_profile_name(&url_decode(&url["axomai://profile-name/".len()..]), browser_storage.as_ref());
-                            needs_chrome_redraw = true;
-                        } else if url == "axomai://clear-data" {
-                            core.clear_browsing_data(webview.as_ref(), browser_storage.as_ref(), &shared);
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://ai/") {
-                            let rest = &url["axomai://ai/".len()..];
-                            let (kind, arg) = rest.split_once('/').unwrap_or((rest, ""));
-                            core.ai_request(kind, &url_decode(arg), webview.as_ref(), &shared);
-                        } else if url.starts_with("axomai://newtab") {
-                            tabs.push(DesktopTab {
-                                title: String::from("New Tab"),
-                                url: String::from("about:home"),
-                                is_home: true,
-                                is_extensions: false,
-                                is_settings: false,
-                            });
-                            active_tab_idx = tabs.len() - 1;
-                            is_home_page = true;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            address_bar_text = String::from("about:home");
-                            load_internal_page = Some("home".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://home") {
-                            is_home_page = true;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            address_bar_text = String::from("about:home");
-                            load_internal_page = Some("home".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://extensions") {
-                            is_extensions_page = true;
-                            is_home_page = false;
-                            is_settings_page = false;
-                            address_bar_text = String::from("axomai://extensions");
-                            load_internal_page = Some("extensions".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://settings") || url.starts_with("axomai://themes") {
-                            is_settings_page = true;
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            address_bar_text = String::from("about:settings");
-                            load_internal_page = Some("settings".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://about") {
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            address_bar_text = String::from("axomai://about");
-                            load_internal_page = Some("about".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://exit") {
-                            *control_flow = ControlFlow::Exit;
-                        } else if url.starts_with("axomai://set-engine/") {
-                            let name = url.trim_start_matches("axomai://set-engine/");
-                            selected_search_engine = match name {
-                                "Bing" => SearchEngine::Bing,
-                                "Yahoo" => SearchEngine::Yahoo,
-                                "DuckDuckGo" => SearchEngine::DuckDuckGo,
-                                _ => SearchEngine::Google,
-                            };
-                            if let Some(ref s) = browser_storage {
-                                let _ = s.set_setting("search_engine", selected_search_engine.name());
-                            }
-                            if is_settings_page {
-                                load_internal_page = Some("settings".to_string());
-                            }
-                        } else if url.starts_with("axomai://set-restore-session/") {
-                            let val = url.trim_start_matches("axomai://set-restore-session/");
-                            if let Some(ref s) = browser_storage {
-                                let _ = s.set_setting("restore_session", val);
-                            }
-                            if is_settings_page {
-                                load_internal_page = Some("settings".to_string());
-                            }
-                        } else if url.starts_with("axomai://search/") {
-                            let query = url.trim_start_matches("axomai://search/");
-                            let search_url = format!("{}{}", selected_search_engine.js_search_template(), query);
-                            address_bar_text = search_url.clone();
-                            if let Some(ref wv) = webview {
-                                let _ = wv.load_url(&search_url);
-                            }
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_home.html") || url == "about:home" || url == "axomai://home" || url == "axomai://newtab" {
-                            address_bar_text = String::from("about:home");
-                            is_home_page = true;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            load_internal_page = Some("home".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_history.html") {
-                            address_bar_text = String::from("axomai://history");
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_bookmarks.html") {
-                            address_bar_text = String::from("axomai://bookmarks");
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_downloads.html") {
-                            address_bar_text = String::from("axomai://downloads");
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_extensions.html") || url == "axomai://extensions" {
-                            address_bar_text = String::from("axomai://extensions");
-                            is_extensions_page = true;
-                            is_home_page = false;
-                            is_settings_page = false;
-                            needs_chrome_redraw = true;
-                        } else if url.contains("axomai_settings.html") || url == "axomai://settings" || url == "about:settings" || url == "axomai://themes" {
-                            address_bar_text = String::from("about:settings");
-                            is_settings_page = true;
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://bookmarks") {
-                            address_bar_text = String::from("axomai://bookmarks");
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            load_internal_page = Some("bookmarks".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://history") {
-                            address_bar_text = String::from("axomai://history");
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            load_internal_page = Some("history".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://downloads") {
-                            address_bar_text = String::from("axomai://downloads");
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            load_internal_page = Some("downloads".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://clear-history") {
-                            if let Some(ref s) = browser_storage {
-                                let _ = s.clear_history();
-                                println!("[Axomai] History cleared");
-                            }
-                            load_internal_page = Some("history".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://clear-downloads") {
-                            if let Some(ref s) = browser_storage {
-                                let _ = s.clear_downloads();
-                                println!("[Axomai] Downloads cleared");
-                            }
-                            load_internal_page = Some("downloads".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://remove-bookmark/") {
-                            if let Ok(id) = url.trim_start_matches("axomai://remove-bookmark/").parse::<i64>() {
-                                if let Some(ref s) = browser_storage {
-                                    let _ = s.remove_bookmark(id);
-                                    println!("[Axomai] Bookmark {} removed", id);
-                                }
-                            }
-                            load_internal_page = Some("bookmarks".to_string());
-                            needs_chrome_redraw = true;
-                        } else if url.starts_with("axomai://add-bookmark") {
-                            if let Some(ref s) = browser_storage {
-                                let bookmark_url = &address_bar_text;
-                                let title_str = if let Ok(eng) = engine.lock() {
-                                    eng.current_title.clone()
-                                } else {
-                                    String::new()
-                                };
-                                let _ = s.add_bookmark(bookmark_url, &title_str, "Unsorted");
-                                println!("[Axomai] Bookmarked: {}", bookmark_url);
-                            }
-                            needs_chrome_redraw = true;
-                        } else if web::is_internal_url(&url, &shared.ui_prefix) {
-                            // One of our own pages (home / about / generated HTML): show its friendly name, never the file path.
-                            let lower = url.to_ascii_lowercase();
-                            if lower.starts_with(&*shared.ui_prefix) {
-                                let file = lower.trim_start_matches(&*shared.ui_prefix).trim_start_matches('/');
-                                let file = file.split(&['?', '#'][..]).next().unwrap_or("");
-                                if file == "home.html" {
-                                    address_bar_text = String::from("about:home");
-                                    is_home_page = true;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    current_title = String::from("Axomai Browser");
-                                } else if file == "index.html" {
-                                    address_bar_text = String::from("axomai://about");
-                                    is_home_page = false;
-                                    is_extensions_page = false;
-                                    is_settings_page = false;
-                                    current_title = String::from("About Axomai");
-                                }
-                                needs_chrome_redraw = true;
-                            }
-                        } else {
-                            if let Some(ref s) = browser_storage {
-                                let _ = s.add_history(&url, "");
-                            }
-                            address_bar_text = url;
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            is_loading = true;
-                            loading_progress = 0.0;
-                            loading_since = std::time::Instant::now();
-                            needs_chrome_redraw = true;
-                        }
-                    }
-                }
-                // A navigation that turns into a download never reports 'finished'; do not leave the bar running.
-                if is_loading && loading_since.elapsed() > std::time::Duration::from_secs(45) {
-                    is_loading = false;
-                    loading_progress = 0.0;
-                    needs_chrome_redraw = true;
-                }
-                for ev in shared.drain_events() {
-                    match ev {
-                        web::WebEvent::Title(t) => {
-                            let t = t.trim().to_string();
-                            // Our generated pages announce themselves by title, which keeps the address bar and
-                            // page flags right even after Back/Forward lands on one of them.
-                            if shared.trusted.load(std::sync::atomic::Ordering::SeqCst) {
-                                if let Some((addr, kind, label)) = internal_page_for_title(&t) {
-                                    address_bar_text = addr.to_string();
-                                    is_home_page = false;
-                                    is_extensions_page = kind == "extensions";
-                                    is_settings_page = kind == "settings";
-                                    current_title = label.to_string();
-                                    needs_chrome_redraw = true;
-                                    continue;
-                                }
-                            }
-                            if !t.is_empty() && !is_home_page && !is_extensions_page && !is_settings_page {
-                                if let Some(ref s) = browser_storage {
-                                    let _ = s.update_history_title(&address_bar_text, &t);
-                                }
-                                current_title = t;
-                                needs_chrome_redraw = true;
-                            }
-                        }
-                        web::WebEvent::LoadStarted(u) => {
-                            if u.starts_with("http://") || u.starts_with("https://") {
-                                if let Some(ref wv) = webview {
-                                    // Web pages that paint no background must show white, not the dark internal-page colour.
-                                    let _ = wv.set_background_color((255, 255, 255, 255));
-                                }
-                                is_loading = true;
-                                loading_progress = 0.0;
-                                loading_since = std::time::Instant::now();
-                                // Until the page reports its own title, show the host rather than the previous page's title.
-                                current_title = blocklist::host_of(&u);
-                                needs_chrome_redraw = true;
-                            }
-                        }
-                        web::WebEvent::LoadFinished(_) => {
-                            is_loading = false;
-                            loading_progress = 0.0;
-                            needs_chrome_redraw = true;
-                        }
-                        web::WebEvent::OpenUrl(u) => {
-                            // Links that ask for a new window (target=_blank, window.open) open in a new tab.
-                            tabs.push(DesktopTab {
-                                title: blocklist::host_of(&u),
-                                url: u.clone(),
-                                is_home: false,
-                                is_extensions: false,
-                                is_settings: false,
-                            });
-                            active_tab_idx = tabs.len() - 1;
-                            is_home_page = false;
-                            is_extensions_page = false;
-                            is_settings_page = false;
-                            address_bar_text = u.clone();
-                            if let Some(ref wv) = webview {
-                                let _ = wv.load_url(&u);
-                                let _ = wv.set_visible(true);
-                                webview_visible = true;
-                            }
-                            needs_chrome_redraw = true;
-                        }
-                        web::WebEvent::Captured(r) => core.on_captured(&r, webview.as_ref(), &shared),
-                        web::WebEvent::PageData(kind, question, payload) => {
-                            if kind == "viewsource" {
-                                // `question` carries the page address, `payload` the finished viewer page.
-                                let label = format!("view-source:{}", question);
-                                tabs.push(DesktopTab {
-                                    title: format!("Source: {}", blocklist::host_of(&question)),
-                                    url: label.clone(),
-                                    is_home: false,
-                                    is_extensions: false,
-                                    is_settings: false,
-                                });
-                                active_tab_idx = tabs.len() - 1;
-                                is_home_page = false;
-                                is_extensions_page = false;
-                                is_settings_page = false;
-                                address_bar_text = label;
-                                current_title = format!("Source: {}", blocklist::host_of(&question));
-                                title_tab = active_tab_idx;
-                                if let Some(ref wv) = webview {
-                                    let _ = wv.set_background_color((15, 23, 42, 255));
-                                    let _ = wv.load_html(&payload);
-                                    let _ = wv.set_visible(true);
-                                    webview_visible = true;
-                                }
-                                needs_chrome_redraw = true;
-                            } else if kind == "capture-full" {
-                                core.capture_full_finish(webview.as_ref(), &shared, &payload);
-                            } else if let Some(k) = kind.strip_prefix("ai-") {
-                                core.ai_respond(k, &question, &payload, webview.as_ref());
-                            }
-                        }
-                    }
-                }
-                core.tick(&extensions);
-                {
-                    // Address bar follows in-page navigation (redirects, pushState) and back/forward state stays live.
-                    if let Some(ref wv) = webview {
-                        if !address_bar_focused && !is_home_page && !is_extensions_page && !is_settings_page
-                            && !address_bar_text.starts_with("view-source:")
-                        {
-                            if let Ok(u) = wv.url() {
-                                if (u.starts_with("http://") || u.starts_with("https://")) && u != address_bar_text {
-                                    address_bar_text = u;
-                                    needs_chrome_redraw = true;
-                                }
-                            }
-                        }
-                    }
-                    let probe = if address_bar_focused { String::new() } else { address_bar_text.clone() };
-                    if core.poll(webview.as_ref(), browser_storage.as_ref(), &probe) {
-                        needs_chrome_redraw = true;
-                    }
-                    let blocked = shared.shield.page_blocked.load(std::sync::atomic::Ordering::Relaxed);
-                    if blocked != last_shield_count {
-                        last_shield_count = blocked;
-                        needs_chrome_redraw = true;
-                    }
-                }
-                if let Some(page) = load_internal_page.take() {
-                    let target_html = match page.as_str() {
-                        "home" => String::new(),
-                        "extensions" => {
-                            internal_pages::extensions_page_html(&extensions)
-                        }
-                        "settings" => {
-                            let restore = browser_storage.as_ref()
-                                .and_then(|s| s.get_setting("restore_session").ok().flatten())
-                                .map(|v| v == "true").unwrap_or(false);
-                            internal_pages::settings_page_html(selected_search_engine, restore)
-                        }
-                        "history" => {
-                            let entries = browser_storage.as_ref()
-                                .and_then(|s| s.get_history(100).ok())
-                                .unwrap_or_default();
-                            pages::history_page_html(&entries)
-                        }
-                        "bookmarks" => {
-                            let entries = browser_storage.as_ref()
-                                .and_then(|s| s.get_bookmarks().ok())
-                                .unwrap_or_default();
-                            pages::bookmarks_page_html(&entries)
-                        }
-                        "downloads" => {
-                            let entries = browser_storage.as_ref()
-                                .and_then(|s| s.get_downloads(100).ok())
-                                .unwrap_or_default();
-                            pages::downloads_page_html(&entries)
-                        }
-                        "about" => String::new(),
-                        _ => {
-                            internal_pages::home_page_html_with_engine(selected_search_engine.js_search_template())
-                        }
-                    };
-
-                    let is_file_page = page == "about" || page == "home";
-                    let file_url = if is_file_page {
-                        let ui_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                            .parent().unwrap_or(std::path::Path::new("."))
-                            .join("ui");
-                        let file_name = if page == "about" { "index.html" } else { "home.html" };
-                        format!("file:///{}", ui_dir.join(file_name).to_string_lossy().replace('\\', "/"))
-                    } else {
-                        String::new()
-                    };
-
-                    let cw = w_of(&gpu_renderer);
-                    let ch = h_of(&gpu_renderer);
-                    if webview.is_none() {
-                        let initial = if is_file_page { web::Initial::Url(&file_url) } else { web::Initial::Html(&target_html) };
-                        webview = web::build_webview(&window, (cw, ch), CHROME_TOP, initial, &shared, (15, 23, 42, 255));
-                        core.apply_extensions(webview.as_ref(), &shared, &extensions);
-                        webview_visible = webview.is_some();
-                        if webview.is_some() {
-                            println!("[Axomai] WebView created with internal HTML (no temp file)");
-                        }
-                    } else if let Some(ref wv) = webview {
-                        let _ = wv.set_background_color((15, 23, 42, 255));
-                        if is_file_page {
-                            let _ = wv.load_url(&file_url);
-                        } else {
-                            let _ = wv.load_html(&target_html);
-                        }
-                        if !webview_visible {
-                            let _ = wv.set_visible(true);
-                            webview_visible = true;
-                        }
-                    }
-                    needs_chrome_redraw = true;
-                }
-                if let Ok(mut sigs) = shared.downloads.lock() {
-                    for (url, fname, success) in sigs.drain(..) {
-                        if let Some(ref s) = browser_storage {
-                            let filepath = download_dir.join(&fname).to_string_lossy().to_string();
-                            let status = if success { "completed" } else { "failed" };
-                            let _ = s.add_download(&url, &fname, &filepath);
-                            if let Ok(downloads) = s.get_downloads(1) {
-                                if let Some(dl) = downloads.first() {
-                                    let _ = s.update_download_status(dl.id, status, 0);
-                                }
-                            }
-                        }
-                        if let Some(ref wv) = webview {
-                            if success {
-                                core.toast(wv, &format!("⬇️ Downloaded {}", fname), Some(("Show downloads", &shared.token, "downloads")), &shared);
-                            } else {
-                                core.toast(wv, &format!("Download failed: {}", fname), None, &shared);
-                            }
-                        }
-                        println!("[Axomai] Download {}: {} ({})", if success { "completed" } else { "failed" }, fname, url);
-                    }
-                }
-
-                let w = w_of(&gpu_renderer);
-                let h = h_of(&gpu_renderer);
-                let content_w = w - SIDEBAR_W;
-                let content_h = h - CHROME_TOP;
-
-                if is_loading {
-                    needs_chrome_redraw = true;
-                }
-                let should_render = if is_home_page || is_settings_page || is_extensions_page {
-                    needs_chrome_redraw || gpu_renderer.presented_frames < 3
-                } else if let Ok(mut eng) = engine.lock() {
-                    let updated = eng.process_event_loop(content_w, content_h);
-                    updated || needs_chrome_redraw || gpu_renderer.presented_frames < 3
-                } else {
-                    false
-                };
-
-                if should_render {
-                    needs_chrome_redraw = false;
-                    compositor.width = content_w as u32;
-                    compositor.height = content_h as u32;
-
-                    // `current_title` belongs to one tab; after a tab switch start from that tab's own title.
-                    if title_tab != active_tab_idx && active_tab_idx < tabs.len() {
-                        current_title = tabs[active_tab_idx].title.clone();
-                        title_tab = active_tab_idx;
-                    }
-                    let title = if is_home_page {
-                        "Axomai Browser".to_string()
-                    } else if is_extensions_page {
-                        "Extensions".to_string()
-                    } else if is_settings_page {
-                        "Settings".to_string()
-                    } else {
-                        current_title.clone()
-                    };
-
-                    if active_tab_idx < tabs.len() {
-                        if !address_bar_focused {
-                            tabs[active_tab_idx].url = address_bar_text.clone();
-                        }
-                        tabs[active_tab_idx].is_home = is_home_page;
-                        tabs[active_tab_idx].is_extensions = is_extensions_page;
-                        tabs[active_tab_idx].is_settings = is_settings_page;
-                        tabs[active_tab_idx].title = title.clone();
-                    }
-                    let avatar = core.avatar_letter();
-                    let chrome_state = toolbar::ChromeState {
-                        theme: core.theme,
-                        shield_count: shared.shield.page_blocked.load(std::sync::atomic::Ordering::Relaxed),
-                        bookmarked: core.bookmarked,
-                        address_selected: address_all_selected && address_bar_focused,
-                        // While typing, the badge keeps describing the page that is actually loaded.
-                        security: toolbar::Security::from_address(if address_bar_focused { &tabs[active_tab_idx].url } else { &address_bar_text }),
-                        avatar: &avatar,
-                    };
-                    let mut quads = build_chrome_quads(
-                        &mut compositor, w, h, &address_bar_text, address_bar_focused, address_bar_cursor,
-                        &tabs, active_tab_idx, core.can_back, core.can_fwd, sidebar_active, hover_sidebar_idx,
-                        menu_open, hover_menu_idx, &toolbar_icons, &chrome_state,
-                    );
-
-                    if is_home_page || is_extensions_page || is_settings_page {
-                        // Internal pages rendered via WebView HTML — no GPU quads needed
-                    } else {
-                        if let Ok(eng) = engine.lock() {
-                            let mut page_quads = compositor.extract_gpu_quads(&eng.display_list);
-                            for q in &mut page_quads {
-                                for v in &mut q.vertices {
-                                    v.position[0] += SIDEBAR_W;
-                                    v.position[1] += CHROME_TOP;
-                                }
-                            }
-                            quads.extend(page_quads);
-                        }
-                    }
-
-                    if menu_open {
-                        quads.extend(build_dropdown_quads(&mut compositor, w, hover_menu_idx));
-                    }
-
-                    if find_bar_open {
-                        let fb_w = 320.0f32.min(w - SIDEBAR_W - 20.0);
-                        let fb_x = w - fb_w - 16.0;
-                        let fb_y = CHROME_TOP + 4.0;
-                        let fb_h = 36.0;
-                        quads.push(NativeGpuCompositor::solid_quad(fb_x + 2.0, fb_y + 2.0, fb_w, fb_h, rendering::c(0, 0, 0, 30)));
-                        quads.push(NativeGpuCompositor::solid_quad(fb_x, fb_y, fb_w, fb_h, rendering::c(255, 255, 255, 250)));
-                        quads.push(NativeGpuCompositor::solid_quad(fb_x, fb_y + fb_h - 2.0, fb_w, 2.0, rendering::c(26, 115, 232, 255)));
-                        let display = if find_text.is_empty() { "Find in page..." } else { &find_text };
-                        let tc = if find_text.is_empty() { rendering::c(150, 155, 168, 255) } else { rendering::c(32, 33, 36, 255) };
-                        rendering::render_text(&mut compositor, &mut quads, display, fb_x + 12.0, fb_y + 24.0, 13.0, tc, fb_x + fb_w - 30.0);
-                        rendering::render_text(&mut compositor, &mut quads, "x", fb_x + fb_w - 20.0, fb_y + 24.0, 13.0, rendering::c(95, 99, 104, 255), fb_x + fb_w);
-                    }
-
-                    if is_loading {
-                        // Eases toward 90% and stays there until the page reports it has finished loading.
-                        loading_progress += (0.9 - loading_progress) * 0.04;
-                        let bar_w = (w - SIDEBAR_W) * loading_progress;
-                        let p = core.theme.primary;
-                        quads.push(NativeGpuCompositor::solid_quad(SIDEBAR_W, CHROME_TOP - 3.0, bar_w, 3.0, rendering::c(p[0], p[1], p[2], 230)));
-                    }
-
-                    if compositor.glyph_atlas.dirty {
-                        gpu_renderer.upload_glyph_atlas(&compositor.glyph_atlas);
-                        compositor.glyph_atlas.dirty = false;
-                    }
-
-                    match gpu_renderer.render_frame(&quads) {
-                        Ok(frame_idx) => {
-                            if frame_idx % 300 == 1 {
-                                println!("[Axomai GPU] Frame #{} — {} quads", frame_idx, quads.len());
-                            }
-                        }
-                        Err(wgpu::SurfaceError::Lost) => {
-                            let cfg = &gpu_renderer.surface_config;
-                            gpu_renderer.resize(cfg.width, cfg.height);
-                        }
-                        Err(wgpu::SurfaceError::OutOfMemory) => {
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        Err(e) => {
-                            eprintln!("[Axomai GPU] Render error: {:?}", e);
-                        }
-                    }
-
-                    window.set_title(&format!("Axomai Browser — {}", title));
-                }
-            }
-            _ => {}
+    if let Some(saved) = setting("blocked_total").and_then(|v| v.parse::<u64>().ok()) {
+        hub.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
+    }
+    // What the first window opens, according to "On startup".
+    let mut saved_tabs: Vec<storage::SavedTab> = match settings.startup {
+        settings::Startup::Restore if !private_window => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
+        settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true }],
+        _ => Vec::new(),
+    };
+    if !urls.is_empty() {
+        for t in saved_tabs.iter_mut() {
+            t.is_active = false;
         }
+        let first = saved_tabs.len() as i32;
+        for (i, u) in urls.iter().enumerate() {
+            saved_tabs.push(storage::SavedTab { position: first + i as i32, url: u.clone(), title: String::new(), is_active: i + 1 == urls.len() });
+        }
+    }
+    // AXOMAI_UI_SCALE exists so the layout can be checked at other display scales on a 100% screen.
+    let scale = std::env::var("AXOMAI_UI_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).filter(|v| (0.75..=4.0).contains(v)).unwrap_or(window.scale_factor() as f32);
+    rendering::set_ui_scale(scale);
+
+    let mut app = App {
+        window,
+        gpu,
+        compositor,
+        icons,
+        favicons,
+        hub,
+        core,
+        extensions,
+        storage,
+        search_engine,
+        settings,
+        tabs: Vec::new(),
+        active: 0,
+        webview: None,
+        closed: Vec::new(),
+        next_tab_id: 1,
+        addr_text: String::new(),
+        addr_cursor: 0,
+        addr_focused: false,
+        addr_selected: false,
+        addr_focus_at: std::time::Instant::now(),
+        mouse: (0.0, 0.0),
+        left_down: false,
+        mods: Default::default(),
+        scale,
+        drag: None,
+        redraw: true,
+        loading_progress: 0.0,
+        last_shield_count: 0,
+        fullscreen: false,
+        private_window,
+        exit: false,
+        view_pending: false,
+        suggestions: Vec::new(),
+        sugg_sel: 0,
+        sugg_shown: false,
+        sugg_hide_at: None,
+        bar_marks: Vec::new(),
+        dls: Vec::new(),
+        dl_push_at: std::time::Instant::now(),
+        pw_pending: None,
+        pw_offer: None,
+        perm_queue: Vec::new(),
+        perm_session: Default::default(),
+        infobar_on: false,
+        split: None,
+        last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
+        last_handoff_poll: std::time::Instant::now(),
+        html_fullscreen: false,
+        https_warn: Vec::new(),
+        safe: false,
+        proxy,
+        _instance: instance,
+    };
+    app.core.passwords = app.settings.password_manager;
+    app.core.gpc = app.settings.gpc;
+    app.core.ai_llm = app.settings.ai_llm && app.ai_key().is_some();
+    app.apply_privacy_settings();
+    app.refresh_bar();
+    app.restore_or_start(saved_tabs);
+
+    event_loop.run(move |event, _, flow| {
+        *flow = ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_millis(16));
+        app.handle(event, flow);
     });
 }
 
@@ -2244,25 +255,5 @@ fn dirs_download() -> PathBuf {
         PathBuf::from(home).join("Downloads")
     } else {
         PathBuf::from(".")
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn url_decode_handles_utf8_and_bad_escapes() {
-        assert_eq!(url_decode("Asha%20Devi"), "Asha Devi");
-        assert_eq!(url_decode("%E0%A6%85%E0%A6%B8%E0%A6%AE"), "\u{985}\u{9b8}\u{9ae}");
-        assert_eq!(url_decode("100%"), "100%");
-        assert_eq!(url_decode("%zz%4"), "%zz%4");
-    }
-
-    #[test]
-    fn internal_titles_map_to_pages() {
-        assert_eq!(internal_page_for_title("History - Axomai Browser").map(|t| t.1), Some("history"));
-        assert!(internal_page_for_title("Some Website").is_none());
     }
 }
