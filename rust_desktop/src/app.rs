@@ -291,7 +291,8 @@ impl App {
                         self.redraw = true;
                     }
                 }
-                WebEvent::LoadFinished(_) => {
+                WebEvent::LoadFinished(url) => {
+                    self.show_notes_for(idx, &url);
                     self.tabs[idx].loading = false;
                     if idx == self.active {
                         self.loading_progress = 0.0;

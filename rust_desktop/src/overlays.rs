@@ -569,6 +569,38 @@ fn css_wrap(extra: &str, width: f32) -> String {
     format!("\ncss({});\n", css_literal(extra, 6.0, width))
 }
 
+const NOTES_JS: &str = r#"
+(function(d){
+var old=document.getElementById('__ax_notes');if(old)old.remove();
+var host=document.createElement('div');host.id='__ax_notes';host.style.cssText='all:initial;position:fixed;top:12px;right:12px;z-index:2147483646';
+var root=host.attachShadow({mode:'closed'});
+var st=document.createElement('style');
+st.textContent='*{box-sizing:border-box;font-family:"Segoe UI",system-ui,sans-serif}.note{width:250px;background:#fef08a;color:#422006;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.28);margin-bottom:10px;overflow:hidden}'+
+ '.bar{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fde047;font-size:12px;font-weight:700}.bar button{border:0;background:transparent;font-size:15px;cursor:pointer;color:#713f12}'+
+ 'textarea{display:block;width:100%;height:110px;border:0;outline:0;resize:vertical;background:transparent;padding:8px 10px;font-size:13px;line-height:1.4;color:#422006}';
+root.appendChild(st);
+function post(o){o.ax='note';try{window.chrome.webview.postMessage(o)}catch(e){}}
+var focusTa=null;
+d.notes.forEach(function(n){
+ var card=document.createElement('div');card.className='note';
+ var bar=document.createElement('div');bar.className='bar';var t=document.createElement('span');t.textContent='\ud83d\udcdd Note';bar.appendChild(t);
+ var x=document.createElement('button');x.textContent='\u2715';x.title='Delete note';bar.appendChild(x);card.appendChild(bar);
+ var ta=document.createElement('textarea');ta.maxLength=2000;ta.value=n.t;ta.placeholder='Type your note\u2026';card.appendChild(ta);
+ var timer=null;ta.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(function(){post({k:'save',id:n.id,t:ta.value})},500)});
+ ta.addEventListener('keydown',function(e){e.stopPropagation()},true);ta.addEventListener('keyup',function(e){e.stopPropagation()},true);
+ x.onclick=function(){post({k:'del',id:n.id});card.remove();if(!root.querySelector('.note'))host.remove()};
+ root.appendChild(card);if(n.id===d.focus)focusTa=ta;
+});
+document.documentElement.appendChild(host);if(focusTa)focusTa.focus();
+})(__DATA__);
+"#;
+
+/// Sticky notes of a page, shown at its top-right corner. `focus` is the id of a note that was just created.
+pub fn notes_overlay(_theme: &Theme, notes: &[(i64, String)], focus: i64) -> String {
+    let data = json!({"notes": notes.iter().map(|(id, t)| json!({"id": id, "t": t})).collect::<Vec<_>>(), "focus": focus});
+    NOTES_JS.replace("__DATA__", &data.to_string())
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()

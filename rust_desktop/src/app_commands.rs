@@ -55,6 +55,8 @@ pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
         "Downloads" => ("axomai://downloads", TabKind::Page("downloads")),
         "Passwords" => ("axomai://passwords", TabKind::Page("passwords")),
         "Permissions" => ("axomai://permissions", TabKind::Page("permissions")),
+        "Reading list" => ("axomai://readinglist", TabKind::Page("readinglist")),
+        "Notes" => ("axomai://notes", TabKind::Page("notes")),
         _ => return None,
     })
 }
@@ -139,6 +141,13 @@ impl App {
                 let icons = self.icon_map(&urls);
                 pages::bookmarks_page(&ctx, &entries, &icons)
             }
+            TabKind::Page("readinglist") => {
+                let items = self.storage.as_ref().map(|s| s.reading_items()).unwrap_or_default();
+                let urls: Vec<&str> = items.iter().map(|i| i.url.as_str()).collect();
+                let icons = self.icon_map(&urls);
+                pages::reading_list_page(&ctx, &items, &icons)
+            }
+            TabKind::Page("notes") => pages::notes_page(&ctx, &self.storage.as_ref().map(|s| s.notes_all()).unwrap_or_default()),
             TabKind::Page("passwords") => {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
                 pages::passwords_page(&ctx, &logins, &never)
@@ -261,6 +270,8 @@ impl App {
             "downloads" => TabKind::Page("downloads"),
             "passwords" => TabKind::Page("passwords"),
             "permissions" => TabKind::Page("permissions"),
+            "readinglist" => TabKind::Page("readinglist"),
+            "notes" => TabKind::Page("notes"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -427,6 +438,8 @@ impl App {
             "new-incognito" => spawn_window(true),
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
+            "reading-add" => self.reading_add(),
+            "note-new" => self.note_new(),
             "page-focus" => {
                 // Giving the web view focus ourselves (tab switch) echoes back as a focus event; only a real click counts.
                 if self.addr_focused && self.addr_focus_at.elapsed() > std::time::Duration::from_millis(600) {
@@ -491,7 +504,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" => {
                 self.open_internal(cmd)
             }
 
@@ -625,6 +638,10 @@ impl App {
             self.bookmarks_changed();
         } else if let Some((action, arg)) = cmd.strip_prefix("perm-").and_then(|r| r.split_once('/')) {
             self.permission_command(action, &url_decode(arg));
+        } else if let Some((action, id)) = cmd.strip_prefix("reading-").and_then(|r| r.rsplit_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
+            self.reading_command(action, id);
+        } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
+            self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {
             self.news_request(cat);
         } else if let Some(url) = cmd.strip_prefix("qr-for/") {

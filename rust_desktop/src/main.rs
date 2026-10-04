@@ -3,6 +3,7 @@ pub mod ai;
 pub mod app;
 pub mod app_commands;
 pub mod app_input;
+pub mod app_notes;
 pub mod app_suggest;
 pub mod app_tabs;
 pub mod blocklist;
