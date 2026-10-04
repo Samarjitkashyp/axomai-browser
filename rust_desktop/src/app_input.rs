@@ -213,6 +213,7 @@ impl App {
             match result {
                 Some(true) => self.core.toast(wv, "\u{2B50} Bookmark added", None, &shared),
                 Some(false) => self.core.toast(wv, "Bookmark removed", None, &shared),
+                None if self.private_window => self.core.toast(wv, "Bookmarks are not saved in a private window", None, &shared),
                 None => self.core.toast(wv, "Only web pages can be bookmarked", None, &shared),
             }
         }

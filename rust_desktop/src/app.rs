@@ -187,7 +187,9 @@ impl App {
             }
         }
         let probe = if self.tabs[idx].kind == TabKind::Web { self.tabs[idx].url.clone() } else { String::new() };
-        if self.core.poll(self.webview.as_ref(), self.storage.as_ref(), &probe) {
+        // A private window never looks at (or reveals) the saved bookmarks.
+        let store = if self.private_window { None } else { self.storage.as_ref() };
+        if self.core.poll(self.webview.as_ref(), store, &probe) {
             self.redraw = true;
         }
         let blocked = self.tabs[idx].shared.shield.page_blocked.load(std::sync::atomic::Ordering::Relaxed);
@@ -382,6 +384,7 @@ impl App {
             bookmarked: self.core.bookmarked,
             address_selected: self.addr_selected && self.addr_focused,
             avatar: &avatar,
+            private: self.private_window,
         };
         let mut quads = toolbar::build_toolbar_quads(
             &mut self.compositor,
@@ -429,6 +432,7 @@ impl App {
             Err(e) => eprintln!("[Axomai GPU] Render error: {:?}", e),
         }
         let title = self.tabs[idx].title.clone();
-        self.window.set_title(&format!("Axomai Browser \u{2014} {}", title));
+        let brand = if self.private_window { "Axomai Browser (Incognito)" } else { "Axomai Browser" };
+        self.window.set_title(&format!("{} \u{2014} {}", brand, title));
     }
 }

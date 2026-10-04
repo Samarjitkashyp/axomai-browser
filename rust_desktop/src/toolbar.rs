@@ -358,6 +358,8 @@ pub struct ChromeState<'a> {
     pub bookmarked: bool,
     pub address_selected: bool,
     pub avatar: &'a str,
+    /// A private (incognito) window.
+    pub private: bool,
 }
 
 pub fn build_toolbar_quads(
@@ -400,7 +402,11 @@ pub fn build_toolbar_quads(
     quads.push(rr_gradient(badge, 6.0, primary, emerald));
     render_text(compositor, &mut quads, "A", badge.x + 7.0, badge.y + 17.5, 14.0, white, badge.right());
     let name_end = render_text(compositor, &mut quads, "Axomai", badge.right() + 8.0, 28.0, 14.0, heading, TAB_START_X);
-    render_text(compositor, &mut quads, "Browser", name_end + 4.0, 28.0, 12.0, primary, TAB_START_X);
+    if st.private {
+        render_text(compositor, &mut quads, "Incognito", name_end + 4.0, 28.0, 12.0, c(168, 85, 247, 255), TAB_START_X + 40.0);
+    } else {
+        render_text(compositor, &mut quads, "Browser", name_end + 4.0, 28.0, 12.0, primary, TAB_START_X);
+    }
 
     let strip = tab_strip(viewport_w, tabs);
     for (i, t) in tabs.iter().enumerate() {

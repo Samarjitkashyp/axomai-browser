@@ -529,6 +529,8 @@ impl Core {
 
 pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "➕", label: "New Tab", cmd: "newtab", danger: false },
+    overlays::MenuEntry { emoji: "🪟", label: "New Window", cmd: "new-window", danger: false },
+    overlays::MenuEntry { emoji: "🕶️", label: "New Incognito Window", cmd: "new-incognito", danger: false },
     overlays::MenuEntry { emoji: "🏠", label: "Home Page", cmd: "home", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
     overlays::MenuEntry { emoji: "⭐", label: "Bookmarks", cmd: "bookmarks", danger: false },
