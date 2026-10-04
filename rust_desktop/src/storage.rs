@@ -111,6 +111,11 @@ impl BrowserStorage {
                 UNIQUE(origin, username)
             );
             CREATE TABLE IF NOT EXISTS pw_never (origin TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS site_rules (
+                host TEXT PRIMARY KEY,
+                muted INTEGER NOT NULL DEFAULT 0,
+                blocked INTEGER NOT NULL DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS reading_list (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT NOT NULL UNIQUE,
@@ -415,6 +420,25 @@ impl BrowserStorage {
     pub fn reading_clear_read(&self) -> Result<(), rusqlite::Error> {
         self.conn.execute("DELETE FROM reading_list WHERE read = 1", [])?;
         Ok(())
+    }
+
+    /// Change the mute and/or block flag of a site (`None` keeps the current value). Rows with both off are removed.
+    pub fn site_rule_set(&self, host: &str, muted: Option<bool>, blocked: Option<bool>) -> Result<(), rusqlite::Error> {
+        self.conn.execute("INSERT OR IGNORE INTO site_rules (host) VALUES (?1)", params![host])?;
+        if let Some(m) = muted {
+            self.conn.execute("UPDATE site_rules SET muted = ?1 WHERE host = ?2", params![m as i64, host])?;
+        }
+        if let Some(b) = blocked {
+            self.conn.execute("UPDATE site_rules SET blocked = ?1 WHERE host = ?2", params![b as i64, host])?;
+        }
+        self.conn.execute("DELETE FROM site_rules WHERE muted = 0 AND blocked = 0", [])?;
+        Ok(())
+    }
+
+    /// `(host, muted, blocked)` for every site with a rule.
+    pub fn site_rules(&self) -> Vec<(String, bool, bool)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT host, muted, blocked FROM site_rules ORDER BY host") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
     }
 
     pub fn note_add(&self, page: &str, text: &str) -> Result<i64, rusqlite::Error> {
@@ -730,6 +754,20 @@ mod tests {
         assert_eq!(back.len(), 2);
         assert_eq!(back[0].group, "2|Work");
         assert_eq!(back[1].group, "");
+    }
+
+    #[test]
+    fn site_rules_keep_each_flag_and_drop_empty_rows() {
+        let st = temp_storage();
+        st.site_rule_set("a.com", Some(true), None).unwrap();
+        st.site_rule_set("a.com", None, Some(true)).unwrap();
+        st.site_rule_set("b.com", None, Some(true)).unwrap();
+        assert_eq!(st.site_rules(), vec![("a.com".to_string(), true, true), ("b.com".to_string(), false, true)]);
+        st.site_rule_set("a.com", Some(false), None).unwrap();
+        st.site_rule_set("b.com", None, Some(false)).unwrap();
+        assert_eq!(st.site_rules(), vec![("a.com".to_string(), false, true)]);
+        st.site_rule_set("a.com", None, Some(false)).unwrap();
+        assert!(st.site_rules().is_empty());
     }
 
     #[test]

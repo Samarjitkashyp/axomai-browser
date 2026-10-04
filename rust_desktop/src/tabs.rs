@@ -84,6 +84,8 @@ pub struct Tab {
     pub favicon: Option<usize>,
     pub audio: bool,
     pub muted: bool,
+    /// Muted because its site is on the muted list (undone when the tab leaves that site).
+    pub site_muted: bool,
     pub loading: bool,
     pub suspended: bool,
     pub last_active: Instant,
@@ -118,6 +120,7 @@ impl Tab {
             favicon: None,
             audio: false,
             muted: false,
+            site_muted: false,
             loading: false,
             suspended: false,
             last_active: Instant::now(),

@@ -74,6 +74,8 @@ pub struct App {
     /// Atlas slot of each site's saved icon, and the hosts whose icon is being fetched.
     pub host_slots: std::collections::HashMap<String, usize>,
     pub icon_pending: std::collections::HashSet<String>,
+    /// Sites that are always muted (blocked sites live in the shield).
+    pub muted_sites: std::collections::HashSet<String>,
     /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
     pub news_cache: std::collections::HashMap<String, (Instant, String)>,
     pub news_pending: std::collections::HashSet<String>,
@@ -277,6 +279,7 @@ impl App {
                 WebEvent::Zoom(z) => self.on_zoom_event(idx, z),
                 WebEvent::HtmlFullscreen(on) => self.on_html_fullscreen(on),
                 WebEvent::UpgradeFailed(url) => self.on_https_failed(idx, &url),
+                WebEvent::SiteBlocked(url) => self.on_site_blocked(idx, &url),
                 WebEvent::LoadStarted(url) => {
                     self.password_page_changed(tab_id);
                     if url.starts_with("http://") || url.starts_with("https://") {
@@ -351,6 +354,7 @@ impl App {
             return;
         }
         self.apply_site_zoom(idx, url);
+        self.apply_site_mute(idx, url);
         let private = self.tabs[idx].private || self.private_window;
         let t = &mut self.tabs[idx];
         t.kind = TabKind::Web;

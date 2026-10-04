@@ -388,6 +388,21 @@ pub fn https_warning_page(ctx: &PageCtx, host: &str, http_url: &str) -> String {
     ui_shell::page(ctx, "", "Connection not secure", &body, "")
 }
 
+pub fn site_blocked_page(ctx: &PageCtx, host: &str) -> String {
+    let l = ctx.lang;
+    let body = format!(
+        "{head}<div class=\"card\" style=\"padding:22px 24px\"><p>{text}</p>\
+         <p style=\"margin-top:16px;display:flex;gap:10px\"><button class=\"btn\" onclick=\"go('https-back')\">{back}</button>\
+         <button class=\"btn ghost\" data-host=\"{attr}\" onclick=\"go('site-unblock/'+encodeURIComponent(this.dataset.host))\">{unblock}</button></p></div>",
+        head = ui_shell::heading(tr(l, "blocked.title"), host),
+        text = escape(tr(l, "blocked.text")),
+        back = escape(tr(l, "blocked.back")),
+        unblock = escape(tr(l, "blocked.unblock")),
+        attr = escape(host)
+    );
+    ui_shell::page(ctx, "", "Site blocked", &body, "")
+}
+
 pub struct AboutInfo {
     pub version: &'static str,
     pub webview: String,
@@ -593,6 +608,13 @@ mod tests {
         assert!(html.contains("1.6.0") && html.contains("130.0.1") && html.contains("AxomaiBrowser"));
         assert!(html.contains("github.com/Samarjitkashyp/axomai-browser"));
         assert!(!html.contains("Search the web"), "no home-page mockup");
+    }
+
+    #[test]
+    fn blocked_page_names_the_site_and_offers_unblock() {
+        let html = site_blocked_page(&ctx(), "ex<b>.com");
+        assert!(html.contains("ex&lt;b&gt;.com") && !html.contains("ex<b>.com"));
+        assert!(html.contains("site-unblock/") && html.contains("go('https-back')"));
     }
 
     #[test]

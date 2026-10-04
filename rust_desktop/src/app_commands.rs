@@ -93,7 +93,7 @@ impl App {
         )
     }
 
-    fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
+    pub fn page_ctx<'a>(&'a self, shared: &'a WebShared) -> PageCtx<'a> {
         PageCtx { theme: self.core.theme, token: &shared.token, lang: &self.settings.language }
     }
 
@@ -126,6 +126,7 @@ impl App {
                         download_dir,
                         version: env!("CARGO_PKG_VERSION"),
                         is_default: crate::launch::is_default(),
+                        site_rules: &self.storage.as_ref().map(|s| s.site_rules()).unwrap_or_default(),
                     },
                 )
             }
@@ -439,6 +440,8 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "site-mute" => self.site_mute_current(),
+            "site-block-current" => self.site_block_current(),
             "note-new" => self.note_new(),
             "page-focus" => {
                 // Giving the web view focus ourselves (tab switch) echoes back as a focus event; only a real click counts.
@@ -640,6 +643,9 @@ impl App {
             self.permission_command(action, &url_decode(arg));
         } else if let Some((action, id)) = cmd.strip_prefix("reading-").and_then(|r| r.rsplit_once('/')).and_then(|(a, i)| i.parse::<i64>().ok().map(|i| (a, i))) {
             self.reading_command(action, id);
+        } else if let Some((action, host)) = ["block", "unblock", "mute", "unmute"].iter().find_map(|a| cmd.strip_prefix(&format!("site-{}/", a)).map(|h| (*a, h))) {
+            let host = url_decode(host);
+            self.site_rule_command(action, &host);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {

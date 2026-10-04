@@ -66,6 +66,34 @@ pub const CITIES: &[(&str, &str)] = &[
     ("tezpur", "Tezpur"),
     ("tinsukia", "Tinsukia"),
     ("nagaon", "Nagaon"),
+    ("sivasagar", "Sivasagar"),
+    ("golaghat", "Golaghat"),
+    ("north-lakhimpur", "North Lakhimpur"),
+    ("dhemaji", "Dhemaji"),
+    ("dhubri", "Dhubri"),
+    ("bongaigaon", "Bongaigaon"),
+    ("kokrajhar", "Kokrajhar"),
+    ("goalpara", "Goalpara"),
+    ("barpeta", "Barpeta"),
+    ("nalbari", "Nalbari"),
+    ("mangaldoi", "Mangaldoi"),
+    ("diphu", "Diphu"),
+    ("haflong", "Haflong"),
+    ("karimganj", "Karimganj"),
+    ("hailakandi", "Hailakandi"),
+    ("shillong", "Shillong"),
+    ("itanagar", "Itanagar"),
+    ("kohima", "Kohima"),
+    ("imphal", "Imphal"),
+    ("aizawl", "Aizawl"),
+    ("agartala", "Agartala"),
+    ("gangtok", "Gangtok"),
+    ("kolkata", "Kolkata"),
+    ("delhi", "Delhi"),
+    ("mumbai", "Mumbai"),
+    ("bengaluru", "Bengaluru"),
+    ("chennai", "Chennai"),
+    ("hyderabad", "Hyderabad"),
 ];
 
 #[derive(Clone, Debug)]
@@ -274,6 +302,20 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_weather_city_is_known_to_the_home_page() {
+        let home = include_str!("../../ui/home.html");
+        for (key, name) in CITIES {
+            let quoted = format!("'{}'", name);
+            assert!(home.contains(&quoted), "home.html has no coordinates for {}", name);
+            assert!(home.contains(&format!("{}:[", key)) || home.contains(&format!("'{}':[", key)), "home.html has no entry for key {}", key);
+        }
+        let mut keys: Vec<&str> = CITIES.iter().map(|c| c.0).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), CITIES.len(), "duplicate city keys");
+    }
 
     #[test]
     fn defaults_are_sensible() {

@@ -19,6 +19,8 @@ pub struct SettingsView<'a> {
     pub version: &'a str,
     /// Windows already uses Axomai for web links.
     pub is_default: bool,
+    /// `(host, muted, blocked)` of the sites with a rule.
+    pub site_rules: &'a [(String, bool, bool)],
 }
 
 fn row(label: &str, desc: &str, control: &str) -> String {
@@ -148,6 +150,31 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         row(t("settings.print_clean"), t("settings.print_clean.desc"), &switch("data-set=\"print_clean\"", s.print_clean)),
     );
 
+    // ---- site rules
+    let mut rules = String::new();
+    for (host, muted, blocked) in v.site_rules {
+        let mut tags = String::new();
+        if *muted {
+            tags.push_str(&format!("<button class=\"btn ghost\" data-host=\"{h}\" onclick=\"go('site-unmute/'+enc(this.dataset.host))\">&#128263; {l}</button> ", h = escape(host), l = escape(t("siterules.unmute"))));
+        }
+        if *blocked {
+            tags.push_str(&format!("<button class=\"btn ghost\" data-host=\"{h}\" onclick=\"go('site-unblock/'+enc(this.dataset.host))\">&#9940; {l}</button>", h = escape(host), l = escape(t("siterules.unblock"))));
+        }
+        rules.push_str(&row(host, "", &tags));
+    }
+    if rules.is_empty() {
+        rules.push_str(&row(t("siterules.none"), "", ""));
+    }
+    let site_rules = format!(
+        "{}{}",
+        row(
+            t("siterules.add"),
+            t("siterules.add.desc"),
+            &format!("<input type=\"text\" id=\"blockHost\" placeholder=\"example.com\" onkeydown=\"if(event.key==='Enter')go('site-block/'+enc(this.value))\"> <button class=\"btn ghost keepscroll\" onclick=\"go('site-block/'+enc(document.getElementById('blockHost').value))\">{}</button>", escape(t("siterules.block")))
+        ),
+        rules
+    );
+
     // ---- downloads & performance
     let downloads = format!(
         "{}{}",
@@ -184,12 +211,13 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let body = format!(
-        "{head}{a}{b}{c}{w}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
+        "{head}{a}{b}{c}{w}{sr}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
         a = section(t("settings.appearance"), &appearance),
         b = section(t("settings.startup"), &format!("{}{}", startup, search)),
         c = section(t("settings.privacy"), &privacy),
         w = section(t("settings.web_pages"), &web_pages),
+        sr = section(t("settings.siterules"), &site_rules),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),
@@ -198,6 +226,8 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let script = r#"
+var km=/^axs:(\d+)$/.exec(window.name||'');if(km){window.name='';window.scrollTo(0,+km[1])}
+document.addEventListener('click',function(e){if(e.target.closest&&e.target.closest('[data-host],.keepscroll')){window.name='axs:'+Math.round(window.scrollY)}},true);
 document.querySelectorAll('[data-set]').forEach(function(el){
   el.addEventListener('change',function(){
     if(el.type==='radio'&&!el.checked)return;
@@ -226,7 +256,7 @@ mod tests {
         let ctx = PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" };
         settings_page(
             &ctx,
-            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", is_default: false },
+            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", is_default: false, site_rules: &[("a.com".to_string(), true, true)] },
         )
     }
 
