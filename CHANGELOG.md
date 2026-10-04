@@ -27,7 +27,7 @@
 - Download manager (progress, pause / resume / cancel, open, show in folder, ask where to save); Save as PDF; per-site zoom; full screen.
 - Password manager with DPAPI encryption and per-site matching; site-permission bar; HTTPS-only mode; tracking-prevention level; Global Privacy Control.
 - Home page with live weather, theme, working tools and a real Shield counter (the made-up news and statistics were removed).
-- Optional Claude mode for the AI panel using the user's own key (stored encrypted).
+- Live headlines on the New Tab page from Google News' free RSS feeds (Assam first, cached 15 minutes); a real About page instead of the old landing-page mockup.
 - Open links from other apps, register as a web browser, high-DPI scaling of the browser chrome.
 
 ### Fixed (phases)

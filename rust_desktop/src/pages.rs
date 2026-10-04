@@ -377,6 +377,31 @@ pub fn https_warning_page(ctx: &PageCtx, host: &str, http_url: &str) -> String {
     ui_shell::page(ctx, "", "Connection not secure", &body, "")
 }
 
+pub struct AboutInfo {
+    pub version: &'static str,
+    pub webview: String,
+    pub data_dir: String,
+}
+
+pub fn about_page(ctx: &PageCtx, info: &AboutInfo) -> String {
+    let l = ctx.lang;
+    let row = |label: &str, value: &str| format!("<div class=\"row\"><div class=\"l\"><b>{}</b><span>{}</span></div></div>", escape(label), escape(value));
+    let body = format!(
+        "{head}<div class=\"card\">{version}{engine}{data}</div>\
+         <h2>{links_title}</h2><div class=\"card\">\
+         <div class=\"item\" onclick=\"location.href='https://github.com/Samarjitkashyp/axomai-browser'\"><div class=\"ic\">\u{1F4BB}</div><div class=\"t\"><b>{source}</b><span>github.com/Samarjitkashyp/axomai-browser</span></div></div>\
+         </div><p class=\"sub\" style=\"margin-top:22px\">{privacy}</p>",
+        head = ui_shell::heading(tr(l, "about.title"), tr(l, "about.tagline")),
+        version = row(tr(l, "about.version"), info.version),
+        engine = row(tr(l, "about.webview"), &info.webview),
+        data = row(tr(l, "about.data"), &info.data_dir),
+        links_title = escape(tr(l, "about.links")),
+        source = escape(tr(l, "about.source")),
+        privacy = escape(tr(l, "about.privacy")),
+    );
+    ui_shell::page(ctx, "", "About", &body, "")
+}
+
 pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
     let mut rows = String::new();
     for (i, e) in extensions.iter().enumerate() {
@@ -493,6 +518,15 @@ mod tests {
         let html = https_warning_page(&ctx(), "ex<b>.com", "http://ex.com/?a=\"1\"");
         assert!(html.contains("ex&lt;b&gt;.com") && html.contains("https-continue/") && html.contains("https-back"));
         assert!(!html.contains("a=\"1\"\" onclick"));
+    }
+
+    #[test]
+    fn about_page_shows_real_facts_not_a_mockup() {
+        let html = about_page(&ctx(), &AboutInfo { version: "1.6.0", webview: "130.0.1".into(), data_dir: "C:\\Users\\x\\AppData\\Roaming\\AxomaiBrowser".into() });
+        assert!(html.contains("<title>About - Axomai Browser</title>"));
+        assert!(html.contains("1.6.0") && html.contains("130.0.1") && html.contains("AxomaiBrowser"));
+        assert!(html.contains("github.com/Samarjitkashyp/axomai-browser"));
+        assert!(!html.contains("Search the web"), "no home-page mockup");
     }
 
     #[test]

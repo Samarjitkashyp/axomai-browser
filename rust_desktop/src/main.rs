@@ -17,8 +17,8 @@ pub mod extensions;
 pub mod favicons;
 pub mod i18n;
 pub mod launch;
-pub mod llm;
 pub mod i18n_data;
+pub mod news;
 pub mod omnibox;
 pub mod overlays;
 pub mod pages;
@@ -80,6 +80,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None
         }
     };
+    // The cloud-AI settings were removed from the browser: wipe the keys and switches an earlier build may have left.
+    if let Some(st) = storage.as_ref() {
+        for key in ["ai_key_enc", "ai_key_openai_enc", "ai_llm", "ai_model", "ai_provider"] {
+            let _ = st.delete_setting(key);
+        }
+    }
     let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
     let settings = settings::Settings::load(storage.as_ref());
     let search_engine = match setting("search_engine").as_deref() {
@@ -228,7 +234,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         perm_queue: Vec::new(),
         perm_session: Default::default(),
         infobar_on: false,
-        ai_limiter: llm::RateLimiter::new(),
+        news_cache: Default::default(),
+        news_pending: Default::default(),
         split: None,
         last_beat: std::time::Instant::now() - std::time::Duration::from_secs(10),
         last_handoff_poll: std::time::Instant::now(),
@@ -240,7 +247,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     app.core.passwords = app.settings.password_manager;
     app.core.gpc = app.settings.gpc;
-    app.sync_ai_core();
     app.apply_privacy_settings();
     app.refresh_bar();
     app.restore_or_start(saved_tabs);

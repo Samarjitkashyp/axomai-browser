@@ -69,8 +69,9 @@ pub struct App {
     pub perm_queue: Vec<crate::permissions::PermAsk>,
     pub perm_session: std::collections::HashMap<(String, String), bool>,
     pub infobar_on: bool,
-    /// Keeps cloud-AI requests under a per-minute and per-day cap.
-    pub ai_limiter: crate::llm::RateLimiter,
+    /// Headlines per category (when fetched, JSON for the page) and the categories being fetched right now.
+    pub news_cache: std::collections::HashMap<String, (Instant, String)>,
+    pub news_pending: std::collections::HashSet<String>,
     /// Split view: (left tab id, right tab id).
     pub split: Option<(u64, u64)>,
     /// Last time this window told other launches it is running, and last check for addresses they left.

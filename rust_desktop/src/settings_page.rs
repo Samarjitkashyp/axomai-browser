@@ -17,8 +17,6 @@ pub struct SettingsView<'a> {
     /// The folder downloads really go to (the setting, or the system Downloads folder).
     pub download_dir: String,
     pub version: &'a str,
-    /// An Anthropic API key is stored (its value is never shown).
-    pub ai_key_saved: bool,
     /// Windows already uses Axomai for web links.
     pub is_default: bool,
 }
@@ -176,32 +174,6 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         ),
     );
 
-    // ---- AI assistant
-    let provider = crate::llm::Provider::parse(&s.ai_provider).unwrap_or(crate::llm::Provider::Anthropic);
-    let models: Vec<(String, String)> = provider.models().iter().map(|(id, name)| (id.to_string(), name.to_string())).collect();
-    let providers = vec![("anthropic".to_string(), "Claude (Anthropic)".to_string()), ("openai".to_string(), "ChatGPT (OpenAI)".to_string())];
-    let key_status = if v.ai_key_saved { t("settings.ai_key.saved") } else { t("settings.ai_key.none") };
-    let ai = format!(
-        "{}{}{}{}",
-        row(
-            t("settings.ai_llm"),
-            t("settings.ai_llm.desc"),
-            &switch(&format!("data-set=\"ai_llm\"{}", if v.ai_key_saved { "" } else { " disabled" }), s.ai_llm && v.ai_key_saved)
-        ),
-        row(t("settings.ai_provider"), "", &select("ai_provider", &providers, &s.ai_provider)),
-        row(
-            if provider == crate::llm::Provider::OpenAi { t("settings.ai_key.openai") } else { t("settings.ai_key") },
-            &format!("{} \u{2014} {}", t("settings.ai_key.desc"), key_status),
-            &format!(
-                "<input type=\"password\" id=\"aikey\" placeholder=\"sk-ant-\u{2026}\" autocomplete=\"off\" spellcheck=\"false\"> \
-                 <button class=\"btn\" onclick=\"saveKey()\">{}</button> <button class=\"btn ghost\" onclick=\"go('ai-key-clear')\">{}</button>",
-                escape(t("settings.ai_key.save")),
-                escape(t("settings.ai_key.remove"))
-            )
-        ),
-        row(t("settings.ai_model"), "", &select("ai_model", &models, &provider.model_for(&s.ai_model))),
-    );
-
     let body = format!(
         "{head}{a}{b}{c}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
@@ -211,7 +183,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),
-        g = section(t("settings.ai"), &ai),
+        g = "",
         ver = escape(v.version),
     );
 
@@ -224,7 +196,6 @@ document.querySelectorAll('[data-set]').forEach(function(el){
   });
 });
 document.querySelectorAll('[data-ext]').forEach(function(el){el.addEventListener('change',function(){go('ext-toggle/'+el.dataset.ext)})});
-function saveKey(){var i=document.getElementById('aikey');var v=(i.value||'').trim();if(v){go('ai-key-save/'+enc(v));i.value=''}}
 function clearData(){
   var f=(document.getElementById('c-h').checked?'h':'')+(document.getElementById('c-d').checked?'d':'')+(document.getElementById('c-k').checked?'k':'')+(document.getElementById('c-c').checked?'c':'');
   if(!f){toast('Choose what to clear');return}
@@ -245,7 +216,7 @@ mod tests {
         let ctx = PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" };
         settings_page(
             &ctx,
-            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", ai_key_saved: false, is_default: false },
+            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", is_default: false },
         )
     }
 
