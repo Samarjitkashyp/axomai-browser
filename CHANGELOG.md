@@ -1,5 +1,27 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [`v4.0.0`] — Desktop browser, fourth generation (2026-10-05)
+### Added in 4.0
+- **Chrome extensions (Load unpacked)**: Extensions page > Chrome extensions > Load unpacked… copies an unpacked extension folder (one with `manifest.json`, manifest version 2 or 3) into the browser and the web engine loads it. Each one can be switched off or removed; those changes take effect after a restart. Extensions can read the pages you visit, so the page says to add only ones you trust. Tested with a small content-script extension; extensions that depend on Chrome's own services will not work.
+- **Installer and updates**: `installer/build-installer.ps1` builds `Axomai-Setup-<version>.exe` (a small C# setup program compiled with the compiler that ships with Windows, with the application embedded) plus a `.sha256` file. It installs for the current user without administrator rights, adds Start menu and desktop shortcuts and an "Installed apps" entry, and `uninstall.ps1` removes it again (your data is kept). The browser checks GitHub releases once a day (switch in Settings), tells you when a newer release exists and, on "Update now", downloads the installer, **checks its SHA-256 against the published `.sha256`**, closes itself, lets the installer replace the files and starts the new version with your tabs back.
+- **Sync between your computers, without a server**: Settings > Sync through a folder. Choose a folder that OneDrive, Google Drive or Dropbox shares between your PCs and a passphrase (8+ characters). Axomai keeps one end-to-end encrypted file there (AES-256-GCM, key from the passphrase with PBKDF2-SHA256, 200,000 rounds); the passphrase is never stored. Bookmarks, reading list, notes, site rules, sessions and search shortcuts sync, and saved logins too if you switch that on. It adds and combines; deleting something on one PC does not delete it on the others.
+- **Proxy server**: Settings > Network accepts `host:port`, `http://host:port` or `socks5://host:port` for all web pages. It is read when the browser starts, so there is a "Restart browser" button that brings your tabs back. This is a proxy, not a VPN.
+- **Windows Hello for passwords** (Settings > Privacy, off by default): before a saved password is copied or exported, Windows asks for your face, fingerprint or PIN. If Windows Hello is not set up the action is refused with an explanation.
+
+### Fixed in 4.0
+- Release builds failed to compile because the DevTools button used a function that only exists in debug builds; it now asks the web engine directly.
+
+### Not done in 4.0 (and why)
+- **A real VPN** needs servers and a service behind it; code in the browser cannot provide that. The proxy setting is the honest part of it.
+- **AI chat sidebar**: left out on purpose, since you asked for the assistant to be removed; it would also need an API key or a service.
+- **Android app**: a separate project.
+- **Passkeys**: web sites' passkey (WebAuthn) sign-in is handled by the web engine and Windows; it was not tested here because this PC has no Windows Hello hardware.
+
+### Notes for 4.0
+- Tested on this PC: loading an extension and seeing it run, switching it off and restarting, the proxy through a local test proxy, Windows Hello refusal when it is not set up, installing, running and uninstalling the program, the whole update flow against a local test server (including refusing a wrong checksum), and sync between two separate profiles (including refusing a wrong passphrase). Not tested: the positive Windows Hello prompt (no Hello hardware) and the folder pickers' dialogs.
+- The installer is not code-signed, so Windows SmartScreen may warn when it is first run.
+- The engine crate (`native/rust_engine`) is unchanged and keeps its own 1.6.0 version.
+
 ## [`v3.0.0`] — Desktop browser, third generation (2026-10-05)
 ### Added in 3.0
 - **Picture-in-picture**: menu > Picture in picture floats the playing video in a small window; choose it again to leave.
