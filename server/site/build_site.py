@@ -94,6 +94,14 @@ def page(lang, ctx):
 <html lang="{C.HTML_LANG[lang]}">
 <head>
 <meta charset="utf-8">
+<meta name="google-site-verification" content="vb2s-e9DEwQ_fivJ_WerkJU4gMeYINYOq2AQASD0pWc" />
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':
+new Date().getTime(),event:'gtm.js'}});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+}})(window,document,'script','dataLayer','GTM-5JZ6PSJ8');</script>
+<!-- End Google Tag Manager -->
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)}</title>
 <meta name="description" content="{esc(desc)}">
@@ -114,6 +122,10 @@ def page(lang, ctx):
 <script type="application/ld+json">{ld}</script>
 </head>
 <body>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-5JZ6PSJ8"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap nav">
 <a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="34" height="34"><span class="bt">Axomai Browser</span></a>
@@ -147,6 +159,17 @@ def page(lang, ctx):
 <section><div class="wrap"><div class="band"><h2>{esc(t['final_h'])}</h2><p>{esc(t['final_p'])}</p><a class="btn" href="{dl}" data-dl>{esc(t['cta'])}</a></div></div></section>
 </main>
 <footer><div class="wrap cols"><span>{esc(t['footer_note'])}</span><span>{flinks}</span></div></footer>
+<script>
+// Every link and button on the page is reported to Google Tag Manager as an 'axomai_click' event (plus 'download_click' for the installer).
+document.addEventListener('click',function(e){{
+  var el=e.target.closest&&e.target.closest('a,button');if(!el)return;
+  var href=el.getAttribute('href')||'';
+  var area=el.closest('header')?'header':el.closest('footer')?'footer':(el.closest('section')&&el.closest('section').id)||(el.closest('.hero')?'hero':'page');
+  var info={{event:'axomai_click',click_text:(el.textContent||'').replace(/\s+/g,' ').trim().slice(0,80),click_url:href,click_id:el.id||'',click_area:area,click_type:el.hasAttribute('data-dl')?'download':el.tagName==='BUTTON'?'button':/^https?:/.test(href)&&href.indexOf(location.host)<0?'outbound':'link',page_lang:document.documentElement.lang}};
+  window.dataLayer=window.dataLayer||[];window.dataLayer.push(info);
+  if(el.hasAttribute('data-dl'))window.dataLayer.push({{event:'download_click',click_area:area,page_lang:info.page_lang}});
+}},true);
+</script>
 <script>
 // On a phone or a Mac the Windows installer is of no use: offer to send the link to a Windows PC instead.
 (function(){{
