@@ -38,7 +38,7 @@ The browser cannot choose the model, the key or the prompt. Limits (UTC day): `L
 
 ```
 python server/site/make_assets.py                 # only when the artwork changes (needs Pillow)
-python server/site/build_site.py --version 4.1.1 --size 28 --sha <sha256 of the installer>
+python server/site/build_site.py --version 4.1.2 --size 28 --sha <sha256 of the installer>
 scp -r server/site/dist/* admin@<server>:/tmp/axsite/   # then copy into /var/www/axomai-browser/site/
 ```
 

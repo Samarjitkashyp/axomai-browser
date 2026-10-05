@@ -341,13 +341,14 @@ impl App {
 
     fn on_navigating(&mut self, idx: usize, url: &str) {
         let lower = url.to_ascii_lowercase();
+        let plain = web::plain_url(url);
         let prefix = self.hub.ui_prefix.to_string();
         if lower.starts_with("data:") || lower.starts_with("about:blank") {
             return; // our own generated pages: the tab already knows what it is showing
         }
-        if lower.starts_with(&prefix) {
+        if lower.starts_with("file:") && plain.starts_with(&prefix) {
             // One of our own files (home / about): show its friendly name, never the file path.
-            let file = lower.trim_start_matches(&prefix).trim_start_matches('/');
+            let file = plain.trim_start_matches(&prefix).trim_start_matches('/');
             let file = file.split(&['?', '#'][..]).next().unwrap_or("");
             let kind = match file {
                 "home.html" => TabKind::Home,

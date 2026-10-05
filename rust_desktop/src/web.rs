@@ -216,7 +216,27 @@ pub fn file_url_prefix(dir: &std::path::Path) -> String {
 /// Is this URL one of the browser's own pages?
 pub fn is_internal_url(url: &str, ui_prefix: &str) -> bool {
     let l = url.to_ascii_lowercase();
-    l.starts_with("data:") || l.starts_with("about:") || (l.starts_with("file:") && l.starts_with(ui_prefix))
+    l.starts_with("data:") || l.starts_with("about:") || (l.starts_with("file:") && plain_url(url).starts_with(ui_prefix))
+}
+
+/// A `file:` address as plain lower-case text: the engine reports `Axomai%20Browser`, the folder is `Axomai Browser`.
+pub fn plain_url(url: &str) -> String {
+    crate::app_commands::url_decode(url).to_ascii_lowercase()
+}
+
+/// A path as it appears in a `file:///` address (spaces and the characters that would end the path are escaped).
+pub fn file_url_path(path: &std::path::Path) -> String {
+    let mut out = String::new();
+    for c in path.to_string_lossy().replace('\\', "/").chars() {
+        match c {
+            ' ' => out.push_str("%20"),
+            '#' => out.push_str("%23"),
+            '?' => out.push_str("%3F"),
+            '%' => out.push_str("%25"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// An address in the form used to compare "the page we asked for" with "the page that failed".
@@ -1130,6 +1150,24 @@ mod tests {
         let (allow, cmd, _) = route_navigation("axomai://settings", "tok", true, UI);
         assert!(!allow);
         assert_eq!(cmd.as_deref(), Some("axomai://settings"));
+    }
+
+    #[test]
+    fn our_pages_are_recognised_in_a_folder_with_a_space() {
+        // An installed copy lives in ...\Programs\Axomai Browser\ui; the engine reports the space as %20.
+        let dir = std::path::Path::new("C:\\Users\\samar\\AppData\\Local\\Programs\\Axomai Browser\\ui");
+        let prefix = file_url_prefix(dir);
+        let url = format!("file:///{}/home.html?theme=tea-garden&city=jorhat", file_url_path(dir));
+        assert!(url.contains("Axomai%20Browser"));
+        assert!(is_internal_url(&url, &prefix));
+        assert!(is_internal_url("file:///C:/Users/samar/AppData/Local/Programs/Axomai%20Browser/ui/home.html", &prefix));
+        assert!(!is_internal_url("file:///C:/Users/samar/Documents/secret.html", &prefix));
+        assert!(!is_internal_url("file:///C:/Users/samar/AppData/Local/Programs/Axomai%20Browser%20Evil/ui/home.html", &prefix));
+    }
+
+    #[test]
+    fn file_addresses_escape_what_would_break_them() {
+        assert_eq!(file_url_path(std::path::Path::new("C:\\a b\\c#d?e%f.html")), "C:/a%20b/c%23d%3Fe%25f.html");
     }
 
     #[test]
