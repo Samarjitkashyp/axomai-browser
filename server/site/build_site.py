@@ -116,10 +116,10 @@ def page(lang, ctx):
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="wrap nav">
-<a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="34" height="34">Axomai Browser</a>
+<a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="34" height="34"><span class="bt">Axomai Browser</span></a>
 <nav aria-label="Main">{nav}</nav>
 <div class="langs" aria-label="Language">{langs}</div>
-<a class="btn sm" href="{dl}" data-dl>{esc(t['cta'])}</a>
+<a class="btn sm" href="{dl}" data-dl><span class="full">{esc(t['cta'])}</span><span class="short">{esc(t['cta_short'])}</span></a>
 </div></header>
 <main id="main">
 <div class="hero"><div class="wrap">
@@ -128,6 +128,7 @@ def page(lang, ctx):
 <p class="lead">{esc(t['lead'])}</p>
 <div class="ctas"><a class="btn" href="{dl}" data-dl><span aria-hidden="true">⬇</span>{esc(t['cta'])} <small style="opacity:.85;font-weight:600">{esc(cta_meta)}</small></a><a class="btn ghost" href="#ai">{esc(t['secondary'])}</a></div>
 <p class="fine">{fmt(t['fine'], ctx)}</p>
+<div class="nowin-note" role="note"><b>{esc(t['nowin_h'])}</b><br>{esc(t['nowin_p'])}<br><button class="btn sm" type="button" id="share">{esc(t['nowin_btn'])}</button></div>
 <div class="shot" role="img" aria-label="Axomai Browser window with the Axom AI chat open beside a web page">
 <div class="tabs"><div class="tab"><span class="dot"></span>{esc(t['shot_title'])}</div><div class="tab off">New Tab</div></div>
 <div class="addr"><span aria-hidden="true">← → ↻</span><div class="pill">{esc(t['shot_url'])}</div><span class="ai-chip">AI</span></div>
@@ -147,6 +148,17 @@ def page(lang, ctx):
 </main>
 <footer><div class="wrap cols"><span>{esc(t['footer_note'])}</span><span>{flinks}</span></div></footer>
 <script>
+// On a phone or a Mac the Windows installer is of no use: offer to send the link to a Windows PC instead.
+(function(){{
+  if(/Windows NT/.test(navigator.userAgent))return;
+  document.documentElement.classList.add('nowin');
+  var b=document.getElementById('share');if(!b)return;
+  b.addEventListener('click',function(){{
+    var data={{title:document.title,text:'Axomai Browser for Windows',url:location.origin+location.pathname}};
+    if(navigator.share){{navigator.share(data).catch(function(){{}})}}
+    else if(navigator.clipboard){{navigator.clipboard.writeText(data.url).then(function(){{b.textContent='\u2713'}})}}
+  }});
+}})();
 // Keeps the download button and checksum on the newest release without rebuilding this page.
 fetch('/downloads/release.json',{{cache:'no-store'}}).then(function(r){{if(!r.ok)throw 0;return r.json()}}).then(function(j){{
   var exe=(j.assets||[]).filter(function(a){{return /^Axomai-Setup-.*\\.exe$/.test(a.name)}})[0];if(!exe)return;

@@ -1,5 +1,11 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [`v4.1.2`] — Installed copy fixes, icon, mobile landing page (2026-10-05)
+
+- Fixed: after installing (folder `Axomai Browser` has a space) the address bar showed a long `file:///...home.html?...` address and the news stayed on "Loading headlines". Our own pages are now recognised however the engine writes the path.
+- Fixed: the Axomai icon is now inside the program, so Explorer, the Start menu, the taskbar and the window show it after installing.
+- Landing page: properly laid out for phones (short header, stacked buttons, readable tables) and a "this is a Windows browser — share the link" note on phones and Macs.
+
 ## [`v4.1.1`] — No console window (2026-10-05)
 ### Fixed in 4.1.1
 - The installed browser opened a black console (shell) window next to it, because the release build was a console program. It is now a normal Windows program with no console. What it used to print goes to `%APPDATA%\AxomaiBrowser\axomai.log` (restarted when it passes 512 KB); `cargo run` builds still print to the terminal.

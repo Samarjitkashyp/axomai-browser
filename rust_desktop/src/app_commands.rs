@@ -71,7 +71,7 @@ fn tab_arg(cmd: &str, prefix: &str) -> Option<u64> {
 impl App {
     pub fn ui_file(&self, name: &str) -> String {
         let ui = crate::sys::ui_dir();
-        format!("file:///{}", ui.join(name).to_string_lossy().replace('\\', "/"))
+        format!("file:///{}", web::file_url_path(&ui.join(name)))
     }
 
     fn anchor_for(&self, pick: impl Fn(&toolbar::ToolbarLayout) -> toolbar::Rect) -> f32 {

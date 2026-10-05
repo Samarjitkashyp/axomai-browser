@@ -128,16 +128,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_loop = EventLoop::new();
     let proxy = event_loop.create_proxy();
-    let icon = {
-        let path = sys::asset_path("icons/axomai_logo.png");
-        image::open(&path)
-            .ok()
-            .and_then(|img| {
-                let rgba = img.to_rgba8();
-                let (w, h) = (rgba.width(), rgba.height());
-                tao::window::Icon::from_rgba(rgba.into_raw(), w, h).ok()
-            })
-    };
+    // The icon is part of the program, so it also shows on an installed copy that has no assets folder.
+    let icon = image::load_from_memory(include_bytes!("../assets/icon-256.png")).ok().and_then(|img| {
+        let rgba = img.to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        tao::window::Icon::from_rgba(rgba.into_raw(), w, h).ok()
+    });
     let mut wb = WindowBuilder::new()
         .with_title(if private_window { "Axomai Browser (Incognito)" } else { "Axomai Browser" })
         .with_inner_size(LogicalSize::new(1200.0, 700.0))
