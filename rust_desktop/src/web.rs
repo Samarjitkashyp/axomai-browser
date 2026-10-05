@@ -258,6 +258,26 @@ pub fn build_webview(
         Initial::Url(u) => builder.with_url(u),
         Initial::Html(h) => builder.with_html(h),
     };
+    // Chrome extensions: every unpacked extension in the browser's folder is loaded when a view starts.
+    #[cfg(windows)]
+    let builder = {
+        use wry::WebViewBuilderExtWindows;
+        if shared.private {
+            builder
+        } else {
+            let root = crate::chrome_ext::enabled_root();
+            let _ = std::fs::create_dir_all(&root);
+            builder.with_browser_extensions_enabled(true).with_extensions_path(root)
+        }
+    };
+    // The proxy the browser started with (the engine reads it once, so every view must use the same one).
+    let builder = match crate::proxy::startup() {
+        Some(p) => {
+            let ep = wry::ProxyEndpoint { host: p.host.clone(), port: p.port.clone() };
+            builder.with_proxy_config(if p.socks { wry::ProxyConfig::Socks5(ep) } else { wry::ProxyConfig::Http(ep) })
+        }
+        None => builder,
+    };
     let wv = builder
         .with_devtools(true)
         .with_incognito(shared.private)
@@ -1029,6 +1049,15 @@ pub mod com {
         let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_res, _json| Ok(())));
         unsafe {
             let _ = core.CallDevToolsProtocolMethod(&HSTRING::from("Page.reload"), &HSTRING::from(r#"{"ignoreCache":true}"#), &handler);
+        }
+    }
+
+    /// Open the DevTools window (wry only offers this in debug builds, so ask the engine directly).
+    pub fn open_devtools(wv: &WebView) {
+        if let Some(core) = core(wv) {
+            unsafe {
+                let _ = core.OpenDevToolsWindow();
+            }
         }
     }
 

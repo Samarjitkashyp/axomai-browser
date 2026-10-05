@@ -103,7 +103,7 @@ impl App {
     pub fn internal_html(&self, kind: TabKind, shared: &WebShared) -> String {
         let ctx = self.page_ctx(shared);
         match kind {
-            TabKind::Extensions => pages::extensions_page(&ctx, &self.extensions),
+            TabKind::Extensions => pages::extensions_page(&ctx, &self.extensions, &crate::chrome_ext::list_all()),
             TabKind::About => pages::about_page(
                 &ctx,
                 &pages::AboutInfo {
@@ -129,6 +129,10 @@ impl App {
                         version: env!("CARGO_PKG_VERSION"),
                         is_default: crate::launch::is_default(),
                         site_rules: &self.storage.as_ref().map(|s| s.site_rules()).unwrap_or_default(),
+                        sync: {
+                            let g = |k: &str| self.storage.as_ref().and_then(|s| s.get_setting(k).ok().flatten()).unwrap_or_default();
+                            (g("sync_dir"), g("sync_dir_pending"), g("sync_last"))
+                        },
                     },
                 )
             }
@@ -326,6 +330,14 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "sync-folder" {
+            self.sync_folder_chosen(payload);
+        } else if kind == "update" {
+            self.on_update_event(question, payload);
+        } else if kind == "hello" {
+            self.hello_done(question, payload);
+        } else if kind == "cext-folder" {
+            self.chrome_ext_install(payload);
         } else if kind == "voice" {
             self.on_voice_event(question, payload);
         } else if kind == "tts-text" {
@@ -454,6 +466,13 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "sync-folder" => self.pick_sync_folder(),
+            "sync-now" => self.sync_now(true),
+            "sync-off" => self.sync_off(),
+            "update-check" => self.update_check(true),
+            "update-install" => self.update_install(),
+            "cext-load" => self.pick_chrome_ext_folder(),
+            "app-restart" => self.restart_app(),
             "voice-toggle" => self.voice_toggle(),
             "shot-edit" => self.open_screenshot_editor(),
             "site-settings" => self.open_site_settings(),
@@ -464,7 +483,7 @@ impl App {
             "devpanel" => self.open_dev_panel(),
             "devtools" => {
                 if let Some(wv) = &self.webview {
-                    wv.open_devtools();
+                    web::com::open_devtools(wv);
                 }
             }
             "backup-export" => self.backup_export(),
@@ -700,6 +719,11 @@ impl App {
         } else if let Some(p) = cmd.strip_prefix("voice-say/") {
             let p = url_decode(p);
             self.voice_say(&p);
+        } else if let Some((action, id)) = ["toggle", "remove"].iter().find_map(|a| cmd.strip_prefix(&format!("cext-{}/", a)).map(|i| (*a, i))) {
+            self.chrome_ext_command(action, id);
+        } else if let Some((folder, pass)) = cmd.strip_prefix("sync-setup/").and_then(|r| r.split_once('/')) {
+            let (folder, pass) = (url_decode(folder), url_decode(pass));
+            self.sync_setup(&folder, &pass);
         } else if let Some(key) = cmd.strip_prefix("emu/") {
             self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
@@ -809,7 +833,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "sync_passwords", "update_check", "hello_passwords", "proxy", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }

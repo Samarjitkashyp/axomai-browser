@@ -506,6 +506,22 @@ impl BrowserStorage {
         st
     }
 
+    /// `(origin, username, encrypted secret, updated_at in UTC)` of every saved login.
+    pub fn password_rows_full(&self) -> Vec<(String, String, Vec<u8>, String)> {
+        let Ok(mut stmt) = self.conn.prepare("SELECT origin, username, secret, updated_at FROM passwords ORDER BY origin, username") else { return Vec::new() };
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default()
+    }
+
+    /// A login with a given update time (used when merging from another computer).
+    pub fn save_password_at(&self, origin: &str, username: &str, secret: &[u8], updated: &str) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "INSERT INTO passwords (origin, username, secret, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(origin, username) DO UPDATE SET secret = excluded.secret, updated_at = excluded.updated_at",
+            params![origin, username, secret, updated],
+        )?;
+        Ok(())
+    }
+
     pub fn note_add(&self, page: &str, text: &str) -> Result<i64, rusqlite::Error> {
         self.conn.execute("INSERT INTO notes (page, text) VALUES (?1, ?2)", params![page, text])?;
         Ok(self.conn.last_insert_rowid())

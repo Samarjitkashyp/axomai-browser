@@ -517,7 +517,7 @@ pub fn notes_page(ctx: &PageCtx, notes: &[crate::storage::Note]) -> String {
     ui_shell::page(ctx, "notes", "Notes", &body, "")
 }
 
-pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
+pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension], chrome: &[crate::chrome_ext::ChromeExt]) -> String {
     let mut rows = String::new();
     for (i, e) in extensions.iter().enumerate() {
         rows.push_str(&format!(
@@ -538,10 +538,37 @@ pub fn extensions_page(ctx: &PageCtx, extensions: &[Extension]) -> String {
             i = i
         ));
     }
+    let l = ctx.lang;
+    let mut crows = String::new();
+    for c in chrome {
+        crows.push_str(&format!(
+            "<div class=\"row\"><div class=\"l\"><b>{name} <span class=\"pill\">v{version}</span></b><span>{desc}</span></div>\
+             <button class=\"btn ghost\" onclick=\"if(confirm('{rm_q}'))go('cext-remove/{id}')\">{rm}</button>\
+             <label class=\"switch\"><input type=\"checkbox\" {checked} onchange=\"go('cext-toggle/{id}')\"><span class=\"s\"></span></label></div>",
+            name = escape(&c.name),
+            version = escape(&c.version),
+            desc = escape(&c.description),
+            id = escape(&c.id),
+            checked = if c.enabled { "checked" } else { "" },
+            rm = escape(tr(l, "cext.remove")),
+            rm_q = escape(&tr(l, "cext.remove.q").replace('\'', "\u{2019}"))
+        ));
+    }
+    if crows.is_empty() {
+        crows.push_str(&format!("<div class=\"empty\">{}</div>", escape(tr(l, "cext.empty"))));
+    }
     let body = format!(
-        "{head}<div class=\"card\">{rows}</div>",
+        "{head}<div class=\"card\">{rows}</div>\
+         <h2>{ch}</h2><p class=\"sub\">{warn}</p>\
+         <div class=\"bar\" style=\"display:flex;gap:8px\"><button class=\"btn\" onclick=\"go('cext-load')\">{load}</button><button class=\"btn ghost\" onclick=\"go('app-restart')\">{restart}</button></div>\
+         <div class=\"card\">{crows}</div>",
         head = ui_shell::heading(tr(ctx.lang, "extensions.title"), tr(ctx.lang, "extensions.sub")),
-        rows = rows
+        rows = rows,
+        ch = escape(tr(l, "cext.title")),
+        warn = escape(tr(l, "cext.warn")),
+        load = escape(tr(l, "cext.load")),
+        restart = escape(tr(l, "cext.restart")),
+        crows = crows
     );
     ui_shell::page(ctx, "extensions", "Extensions", &body, "")
 }
@@ -683,7 +710,7 @@ mod tests {
     fn extension_rows_reflect_state() {
         let mut exts = crate::extensions::create_extensions();
         exts[1].enabled = false;
-        let html = extensions_page(&ctx(), &exts);
+        let html = extensions_page(&ctx(), &exts, &[]);
         assert!(html.contains("go('ext-toggle/1')"));
         assert!(html.matches("checked").count() >= 5);
         assert!(html.contains("disabled"));

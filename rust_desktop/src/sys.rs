@@ -204,6 +204,10 @@ mod tests {
 }
 
 /// `YYYYMMDD-HHMMSS` in UTC, used for screenshot file names.
+pub fn unix_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
 pub fn timestamp() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -21,9 +21,11 @@ pub struct SettingsView<'a> {
     pub is_default: bool,
     /// `(host, muted, blocked)` of the sites with a rule.
     pub site_rules: &'a [(String, bool, bool)],
+    /// `(sync folder, folder chosen but not yet turned on, last sync time)`.
+    pub sync: (String, String, String),
 }
 
-fn row(label: &str, desc: &str, control: &str) -> String {
+pub(crate) fn row(label: &str, desc: &str, control: &str) -> String {
     format!(
         "<div class=\"row\"><div class=\"l\"><b>{}</b><span>{}</span></div>{}</div>",
         escape(label),
@@ -32,7 +34,7 @@ fn row(label: &str, desc: &str, control: &str) -> String {
     )
 }
 
-fn switch(data: &str, on: bool) -> String {
+pub(crate) fn switch(data: &str, on: bool) -> String {
     format!("<label class=\"switch\"><input type=\"checkbox\" {} {}><span class=\"s\"></span></label>", data, if on { "checked" } else { "" })
 }
 
@@ -126,12 +128,13 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         escape(t("settings.clear.button")),
     );
     let privacy = format!(
-        "{}{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}{}",
         row(t("settings.adblock"), t("settings.adblock.desc"), &switch(&format!("data-ext=\"{}\"", ex::ADBLOCK), v.extensions[ex::ADBLOCK].enabled)),
         row(t("settings.privacy_guard"), t("settings.privacy_guard.desc"), &switch(&format!("data-ext=\"{}\"", ex::PRIVACY), v.extensions[ex::PRIVACY].enabled)),
         row(t("settings.https_only"), t("settings.https_only.desc"), &switch("data-set=\"https_only\"", s.https_only)),
         row(t("settings.tracking"), t("settings.tracking.desc"), &select("tracking", &tracking_opts, s.tracking.key())),
         row(t("settings.passwords"), t("settings.passwords.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('passwords')\">{}</button> {}", escape(t("settings.passwords.manage")), switch("data-set=\"password_manager\"", s.password_manager))),
+        row(t("hello.title"), t("hello.desc"), &switch("data-set=\"hello_passwords\"", s.hello_passwords)),
         row(t("settings.gpc"), t("settings.gpc.desc"), &switch("data-set=\"gpc\"", s.gpc)),
         row(
             t("settings.permissions"),
@@ -188,11 +191,34 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         &format!("<input type=\"text\" id=\"scKw\" placeholder=\"@docs\" style=\"width:90px\"> <input type=\"text\" id=\"scTpl\" placeholder=\"https://example.com/?q=%s\" style=\"width:230px\"> <button class=\"btn ghost keepscroll\" onclick=\"go('shortcut-add/'+enc(document.getElementById('scKw').value)+'/'+enc(document.getElementById('scTpl').value))\">{}</button>", escape(t("shortcuts.save"))),
     ));
 
+    // ---- sync
+    let sync = crate::sync::settings_section(l, &v.sync.0, &v.sync.1, &v.sync.2, s.sync_passwords);
+
     // ---- your data
     let data = format!(
         "{}{}",
         row(t("data.backup"), t("data.backup.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('backup-export')\">{}</button>", escape(t("data.backup.button")))),
         row(t("data.restore"), t("data.restore.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('backup-import')\">{}</button>", escape(t("data.restore.button")))),
+    );
+
+    // ---- network
+    let active = crate::proxy::startup().map(|p| p.display());
+    let saved = crate::proxy::parse(&s.proxy).map(|p| p.display());
+    let status = match (&active, &saved) {
+        (a, b) if a == b => match a {
+            Some(p) => format!("{} {}", t("proxy.active"), p),
+            None => t("proxy.none").to_string(),
+        },
+        _ => t("proxy.restart").to_string(),
+    };
+    let net = format!(
+        "{}{}",
+        row(
+            t("proxy.title"),
+            &format!("{} {}", t("proxy.desc"), status),
+            &format!("<input type=\"text\" data-set=\"proxy\" placeholder=\"127.0.0.1:8080\" value=\"{}\">", escape(&s.proxy))
+        ),
+        row(t("proxy.restart.row"), t("proxy.restart.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('app-restart')\">{}</button>", escape(t("cext.restart")))),
     );
 
     // ---- downloads & performance
@@ -217,7 +243,13 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
 
     // ---- system
     let system = format!(
-        "{}{}",
+        "{}{}{}{}",
+        row(
+            t("update.title"),
+            &format!("{} {}", t("update.version"), crate::update::current_version()),
+            &format!("<button class=\"btn ghost\" onclick=\"go('update-check')\">{}</button>", escape(t("update.check")))
+        ),
+        row(t("update.auto"), t("update.auto.desc"), &switch("data-set=\"update_check\"", s.update_check)),
         row(
             t("settings.default_browser"),
             &if v.is_default { format!("{} \u{2014} {}", t("settings.default_browser.desc"), t("settings.default_browser.yes")) } else { t("settings.default_browser.desc").to_string() },
@@ -231,7 +263,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let body = format!(
-        "{head}{a}{b}{c}{w}{sr}{sh}{dt}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
+        "{head}{a}{b}{c}{w}{sr}{sh}{nt}{sy}{dt}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
         a = section(t("settings.appearance"), &appearance),
         b = section(t("settings.startup"), &format!("{}{}", startup, search)),
@@ -240,6 +272,8 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         sr = section(t("settings.siterules"), &site_rules),
         sh = section(t("settings.shortcuts"), &sc),
         dt = section(t("settings.data"), &data),
+        nt = section(t("settings.network"), &net),
+        sy = section(t("sync.section"), &sync),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),
@@ -278,7 +312,7 @@ mod tests {
         let ctx = PageCtx { theme: crate::theme::by_id("tea-garden"), token: "tok", lang: "en" };
         settings_page(
             &ctx,
-            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", is_default: false, site_rules: &[("a.com".to_string(), true, true)] },
+            &SettingsView { settings: s, engine: SearchEngine::Bing, extensions: &exts, theme_id: "kaziranga", download_dir: "C:\\Users\\x\\Downloads".into(), version: "1.0", is_default: false, site_rules: &[("a.com".to_string(), true, true)], sync: (String::new(), String::new(), String::new()) },
         )
     }
 
@@ -328,6 +362,7 @@ mod tests {
                 "tracking" => "strict",
                 "language" => "en",
                 "weather_city" => "guwahati",
+                "proxy" => "127.0.0.1:8080",
                 "ai_model" => "claude-sonnet-5-5",
                 "ai_provider" => "openai",
                 "download_dir" => "C:\\x",

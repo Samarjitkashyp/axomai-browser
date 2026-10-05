@@ -218,6 +218,9 @@ impl App {
 
     /// `pw-<action>/<row id or origin>` from the Passwords page.
     pub fn password_command(&mut self, action: &str, arg: &str) {
+        if action == "copy" && !self.hello_guard(action, arg) {
+            return;
+        }
         let id: i64 = arg.parse().unwrap_or(-1);
         match action {
             "copy" | "copy-user" => {

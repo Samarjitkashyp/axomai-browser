@@ -1,6 +1,8 @@
-# 🚀 Axomai Browser `v3.0.0`
+# 🚀 Axomai Browser `v4.0.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
+
+**New in 4.0 (desktop app):** Chrome extensions (load unpacked), a Windows installer with checksummed one-click updates, server-less encrypted sync through a shared folder, a proxy setting and Windows Hello for passwords. Build the installer with `installer\build-installer.ps1`.
 
 **New in 3.0 (desktop app):** picture-in-picture, page translate, read aloud, saved sessions, password CSV import / export, data backup, voice commands, screenshot editor, per-site settings, a developer panel (user agent / mobile view) and address-bar search shortcuts (`@yt`, `@wiki`, ...).
 
