@@ -95,6 +95,14 @@ def page(lang, ctx):
 <head>
 <meta charset="utf-8">
 <meta name="google-site-verification" content="vb2s-e9DEwQ_fivJ_WerkJU4gMeYINYOq2AQASD0pWc" />
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-MVY7QW9T02"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){{dataLayer.push(arguments);}}
+  gtag('js', new Date());
+  gtag('config', 'G-MVY7QW9T02');
+</script>
 <!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){{w[l]=w[l]||[];w[l].push({{'gtm.start':
 new Date().getTime(),event:'gtm.js'}});var f=d.getElementsByTagName(s)[0],
@@ -167,7 +175,9 @@ document.addEventListener('click',function(e){{
   var area=el.closest('header')?'header':el.closest('footer')?'footer':(el.closest('section')&&el.closest('section').id)||(el.closest('.hero')?'hero':'page');
   var info={{event:'axomai_click',click_text:(el.textContent||'').replace(/\s+/g,' ').trim().slice(0,80),click_url:href,click_id:el.id||'',click_area:area,click_type:el.hasAttribute('data-dl')?'download':el.tagName==='BUTTON'?'button':/^https?:/.test(href)&&href.indexOf(location.host)<0?'outbound':'link',page_lang:document.documentElement.lang}};
   window.dataLayer=window.dataLayer||[];window.dataLayer.push(info);
+  if(window.gtag)gtag('event','axomai_click',{{click_text:info.click_text,click_url:info.click_url,click_area:info.click_area,click_type:info.click_type,page_lang:info.page_lang}});
   if(el.hasAttribute('data-dl'))window.dataLayer.push({{event:'download_click',click_area:area,page_lang:info.page_lang}});
+  if(el.hasAttribute('data-dl')&&window.gtag)gtag('event','download_click',{{click_area:area,page_lang:info.page_lang}});
 }},true);
 </script>
 <script>
