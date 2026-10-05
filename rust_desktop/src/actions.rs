@@ -379,6 +379,7 @@ impl Core {
         if let Some(wv) = wv {
             let host = shared.shield.page_host.lock().map(|h| h.clone()).unwrap_or_default();
             let host = if host.is_empty() { "this page".to_string() } else { host };
+            let _ = wv.focus();
             let _ = wv.evaluate_script(&overlays::ai_popup(self.theme, &shared.token, right, &host, title));
         }
     }

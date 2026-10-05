@@ -330,41 +330,59 @@ finish(card);
     js
 }
 
+const AI_CHAT_JS: &str = r#"
+var d=__DATA__;
+css('.chat{display:flex;flex-direction:column;height:min(72vh,580px);padding:8px 0}.chat .msgs{flex:1;overflow:auto;padding:6px 12px;display:flex;flex-direction:column;gap:8px}'+
+ '.m{max-width:90%;padding:8px 11px;border-radius:12px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}.m.u{align-self:flex-end;background:var(--primary);color:#fff}'+
+ '.m.a{align-self:flex-start;background:var(--hover);color:var(--text)}.m.e{align-self:flex-start;background:#fee2e2;color:#991b1b}'+
+ '.chips{display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px}.chip{background:var(--primary-light);color:var(--primary);border:0;border-radius:14px;padding:5px 11px;font:600 12px inherit;cursor:pointer}'+
+ '.bar2{display:flex;gap:6px;padding:8px 12px 4px}.bar2 textarea{flex:1;resize:none;height:40px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:transparent;color:var(--heading);font:13px inherit;outline:none}'+
+ '.bar2 textarea:focus{border-color:var(--primary)}.use{display:flex;align-items:center;gap:6px;padding:0 12px 4px;font-size:11.5px;color:var(--muted)}.note2{padding:0 12px 4px;font-size:10.5px;color:var(--muted);line-height:1.4}'+
+ '.hd2{display:flex;align-items:center;gap:8px;padding:2px 12px 2px}.hd2 b{font-size:14px;color:var(--heading);flex:1}.mini{border:0;background:var(--hover);color:var(--heading);border-radius:8px;padding:4px 10px;font:600 11.5px inherit;cursor:pointer}');
+var card=el('div','card chat');
+var hd=el('div','hd2');hd.appendChild(el('b','','\u2728 Axom AI'));
+var nw=el('button','mini','New chat');var cl=el('button','mini','\u2715');cl.title='Close (Esc)';hd.appendChild(nw);hd.appendChild(cl);card.appendChild(hd);
+card.appendChild(el('div','sub',d.title+' \u00b7 '+d.host));
+var list=el('div','msgs');card.appendChild(list);
+var chips=el('div','chips');
+['Summarize this page','Give me the key points','Explain this in simple words'].forEach(function(t){var c=el('button','chip',t);c.onclick=function(){send(t)};chips.appendChild(c)});
+card.appendChild(chips);
+var isWeb=/^https?:$/.test(location.protocol),useBox=null;
+if(isWeb){var u=el('label','use');useBox=document.createElement('input');useBox.type='checkbox';useBox.checked=true;u.appendChild(useBox);u.appendChild(document.createTextNode(' Use this page to answer'));card.appendChild(u)}
+var bar=el('div','bar2');var ta=document.createElement('textarea');ta.placeholder='Ask anything\u2026';ta.maxLength=4000;
+var sb=el('button','btn','Send');bar.appendChild(ta);bar.appendChild(sb);card.appendChild(bar);
+card.appendChild(el('div','note2','Answers come from OpenAI through Axomai\u2019s server. When \u201cUse this page\u201d is on, the page text is sent too. Chats are not saved.'));
+var msgs=[],busy=false,rid='',cur=null,seq=0;
+function add(cls,text){var m=el('div','m '+cls,text);list.appendChild(m);list.scrollTop=list.scrollHeight;return m}
+function done(){busy=false;sb.disabled=false;cur=null;ta.focus()}
+function send(text){
+  text=(text||'').trim();if(!text||busy)return;
+  chips.style.display='none';msgs.push({role:'user',content:text});add('u',text);ta.value='';
+  cur=add('a','\u2026');cur.dataset.empty='1';busy=true;sb.disabled=true;rid='r'+(++seq)+Date.now().toString(36);
+  var payload={messages:msgs.slice(-20)};
+  if(useBox&&useBox.checked){payload.page={url:location.href,title:document.title,text:((document.body&&document.body.innerText)||'').slice(0,12000)}}
+  go('ai-chat/'+rid+'/'+encodeURIComponent(JSON.stringify(payload)));
+}
+host.__axChat=function(r,kind,text){
+  if(r!==rid||!cur)return;
+  if(kind==='chunk'){if(cur.dataset.empty){cur.textContent='';cur.dataset.empty=''}cur.textContent+=text;list.scrollTop=list.scrollHeight}
+  else if(kind==='done'){var t=cur.dataset.empty?'':cur.textContent;if(!t){cur.className='m e';cur.textContent='No answer came back. Please try again.';msgs.pop()}else{msgs.push({role:'assistant',content:t})}done()}
+  else if(kind==='error'){cur.className='m e';cur.textContent=text;msgs.pop();done()}
+};
+nw.onclick=function(){msgs=[];rid='';cur=null;busy=false;sb.disabled=false;list.textContent='';chips.style.display='';ta.focus()};
+cl.onclick=function(){host.remove()};
+sb.onclick=function(){send(ta.value)};
+ta.addEventListener('keydown',function(e){e.stopPropagation();if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send(ta.value)}else if(e.key==='Escape'){host.remove()}},true);
+ta.addEventListener('keyup',function(e){e.stopPropagation()},true);
+root.appendChild(card);document.documentElement.appendChild(host);ta.focus();
+"#;
+
 pub fn ai_popup(theme: &Theme, token: &str, right: f32, host_name: &str, title: &str) -> String {
+    let data = json!({"host": host_name, "title": truncate(title, 50)});
     let mut js = open(theme, token, "__ax_pop_ai");
-    js.push_str(&format!(
-        r#"
-css({css}+'.out{{padding:4px 12px 10px;font-size:12.5px;line-height:1.55;color:var(--text);max-height:42vh;overflow:auto}}.out p{{margin:0 0 8px}}.out h4{{margin:6px 0;color:var(--heading);font-size:12px}}.chips{{display:flex;flex-wrap:wrap;gap:6px}}.chip{{background:var(--primary-light);color:var(--primary);border-radius:12px;padding:3px 10px;font-size:11.5px;font-weight:600}}.ask{{display:flex;gap:6px;padding:4px 12px 10px}}.ask input{{flex:1;border:1px solid var(--border);border-radius:10px;padding:8px 10px;background:transparent;color:var(--heading);font:inherit}}.acts{{display:flex;gap:6px;padding:4px 12px 8px;flex-wrap:wrap}}.muted{{color:var(--muted)}}');
-var card=el('div','card');
-var hd=el('div','hd');hd.appendChild(el('b','','✨ Axomai AI Copilot'));hd.appendChild(el('span','',{badge}));card.appendChild(hd);
-card.appendChild(el('div','sub',{title}+' · '+{host}));
-var acts=el('div','acts');
-function act(t,c){{var b=el('button','btn ghost',t);b.onclick=function(){{busy();go(c)}};acts.appendChild(b)}}
-act('Summarize','ai/summarize');act('Key topics','ai/keywords');act('Reading stats','ai/stats');
-card.appendChild(acts);
-var ask=el('div','ask');var q=document.createElement('input');q.placeholder='Ask about this page…';
-var go2=el('button','btn','Ask');
-function send(){{var v=q.value.trim();if(v){{busy();go('ai/ask/'+encodeURIComponent(v))}}}}
-go2.onclick=send;q.addEventListener('keydown',function(e){{e.stopPropagation();if(e.key==='Enter')send()}},true);
-ask.appendChild(q);ask.appendChild(go2);card.appendChild(ask);
-var out=el('div','out');out.appendChild(el('p','muted',{note}));card.appendChild(out);
-function busy(){{out.textContent='';out.appendChild(el('p','muted','Reading the page…'))}}
-host.__axOut=out;
-host.__axSet=function(r){{
-  out.textContent='';
-  if(r.title)out.appendChild(el('h4','',r.title));
-  (r.paragraphs||[]).forEach(function(t){{out.appendChild(el('p','',t))}});
-  if(r.chips&&r.chips.length){{var c=el('div','chips');r.chips.forEach(function(t){{c.appendChild(el('span','chip',t))}});out.appendChild(c)}}
-  if(!out.firstChild)out.appendChild(el('p','muted','Nothing to show for this page.'));
-}};
-finish(card);
-}})();"#,
-        css = css_literal("", right, 380.0),
-        title = serde_json::to_string(&truncate(title, 60)).unwrap_or_else(|_| "\"\"".into()),
-        host = serde_json::to_string(host_name).unwrap_or_else(|_| "\"\"".into()),
-        badge = serde_json::to_string("on-device").unwrap_or_default(),
-        note = serde_json::to_string("Runs on your device \u{2014} the page text never leaves this computer. Results are extractive (picked from the page itself).").unwrap_or_default(),
-    ));
+    js.push_str(&format!("\ncss({});\n", css_literal("", right, 400.0)));
+    js.push_str(&AI_CHAT_JS.replace("__DATA__", &data.to_string()));
+    js.push_str("})();");
     js
 }
 

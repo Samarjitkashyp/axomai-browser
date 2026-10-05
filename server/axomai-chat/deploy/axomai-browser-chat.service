@@ -1,0 +1,26 @@
+[Unit]
+Description=Axomai Browser chat proxy (OpenAI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=axomai-browser
+Group=axomai-browser
+WorkingDirectory=/var/www/axomai-browser/chat-proxy
+EnvironmentFile=/etc/axomai-browser/chat.env
+Environment=PORT=8011
+Environment=HOST=127.0.0.1
+Environment=DATA_DIR=/var/www/axomai-browser/data
+ExecStart=/usr/bin/node /var/www/axomai-browser/chat-proxy/server.js
+Restart=on-failure
+RestartSec=3
+# keep the service away from everything it does not need
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/axomai-browser/data
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target

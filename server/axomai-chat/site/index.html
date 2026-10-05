@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Axomai Browser</title>
+<style>
+:root{--bg:#f2faf5;--card:#fff;--text:#1e3a2f;--muted:#5d7a6c;--primary:#059669;--border:#cfe9dc}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1f19;--card:#162a22;--text:#e3f3ea;--muted:#9bb8aa;--primary:#10b981;--border:#244538}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 "Segoe UI",system-ui,sans-serif}
+main{max-width:720px;margin:0 auto;padding:48px 20px}
+h1{font-size:2rem;margin:0 0 4px}p.sub{color:var(--muted);margin:0 0 28px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:18px}
+a.btn{display:inline-block;background:var(--primary);color:#fff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:12px}
+a.btn[aria-disabled=true]{opacity:.5;pointer-events:none}
+code{background:rgba(128,128,128,.15);padding:2px 6px;border-radius:6px;word-break:break-all}
+small{color:var(--muted)}ul{padding-left:20px;margin:8px 0}
+</style>
+</head>
+<body>
+<main>
+<h1>Axomai Browser</h1>
+<p class="sub">A fast, private browser made for Assam, with Assamese, Hindi and Bengali menus.</p>
+<div class="card">
+<p><a id="dl" class="btn" href="#" aria-disabled="true">Download for Windows</a></p>
+<p id="info"><small>Looking for the latest version&hellip;</small></p>
+<p><small>Needs Windows 10 or 11. The installer is not code-signed yet, so Windows may show a blue &ldquo;Windows protected your PC&rdquo; screen: choose <b>More info</b>, then <b>Run anyway</b>. To check the download, compare its SHA-256 with the one below.</small></p>
+<p id="sha"></p>
+</div>
+<div class="card">
+<b>What you get</b>
+<ul>
+<li>Tabs, groups, split view, reading list, notes on pages, sessions</li>
+<li>Ad and tracker blocking, HTTPS-only mode, password manager with Windows Hello</li>
+<li>Chrome extensions (load unpacked), page translate, read aloud, voice commands</li>
+<li>Axom AI chat that can answer questions about the page you are reading</li>
+<li>Updates that are checked against a published checksum before they install</li>
+</ul>
+</div>
+<script>
+fetch('/downloads/release.json',{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){
+  var exe=(j.assets||[]).filter(function(a){return /^Axomai-Setup-.*\.exe$/.test(a.name)})[0];
+  var sha=(j.assets||[]).filter(function(a){return /\.sha256$/.test(a.name)})[0];
+  if(!exe)throw 0;
+  var dl=document.getElementById('dl');dl.href=exe.browser_download_url;dl.removeAttribute('aria-disabled');
+  document.getElementById('info').innerHTML='<small>Version '+String(j.tag_name||'').replace(/^v/,'').replace(/[<>&]/g,'')+'</small>';
+  if(sha)fetch(sha.browser_download_url,{cache:'no-store'}).then(function(r){return r.text()}).then(function(t){
+    var h=(t.trim().split(/\s+/)[0]||'').replace(/[^0-9a-f]/gi,'');
+    if(h.length===64)document.getElementById('sha').innerHTML='<small>SHA-256: <code>'+h+'</code></small>';
+  });
+}).catch(function(){document.getElementById('info').innerHTML='<small>The download is not available right now. Please try again later.</small>'});
+</script>
+</main>
+</body>
+</html>

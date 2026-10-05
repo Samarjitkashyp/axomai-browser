@@ -6,7 +6,9 @@ use crate::web::WebEvent;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-pub const DEFAULT_URL: &str = "https://api.github.com/repos/Samarjitkashyp/axomai-browser/releases/latest";
+pub const DEFAULT_URL: &str = "https://axomai-browser.aiaxom.co.in/downloads/release.json";
+/// The only hosts an update may be fetched from (always over https).
+const OWN_HOSTS: [&str; 1] = ["axomai-browser.aiaxom.co.in"];
 const MAX_INSTALLER_BYTES: u64 = 300 * 1024 * 1024;
 const CHECK_EVERY_SECS: u64 = 20 * 3600;
 
@@ -70,8 +72,8 @@ pub fn trusted_url(url: &str, override_url: Option<&str>) -> bool {
     let host_of = |u: &str| u.split("://").nth(1).and_then(|r| r.split(['/', '?', '#']).next()).map(|h| h.to_ascii_lowercase());
     let Some(host) = host_of(url) else { return false };
     if url.starts_with("https://") {
-        let github = host == "github.com" || host == "api.github.com" || host.ends_with(".githubusercontent.com");
-        if github {
+        let known = OWN_HOSTS.contains(&host.as_str()) || host == "github.com" || host == "api.github.com" || host.ends_with(".githubusercontent.com");
+        if known {
             return true;
         }
     }
@@ -256,7 +258,10 @@ mod tests {
     }
 
     #[test]
-    fn only_github_or_the_test_server_is_trusted() {
+    fn only_our_server_github_or_the_test_server_is_trusted() {
+        assert!(trusted_url("https://axomai-browser.aiaxom.co.in/downloads/release.json", None));
+        assert!(!trusted_url("https://axomai-browser.aiaxom.co.in.evil.org/x", None));
+        assert!(!trusted_url("http://axomai-browser.aiaxom.co.in/downloads/x", None), "plain http is refused");
         assert!(trusted_url("https://github.com/a/b/releases/download/v1/x.exe", None));
         assert!(trusted_url("https://objects.githubusercontent.com/x", None));
         assert!(!trusted_url("http://github.com/a", None), "plain http is refused");
