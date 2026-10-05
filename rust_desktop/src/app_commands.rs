@@ -338,6 +338,8 @@ impl App {
             self.hello_done(question, payload);
         } else if kind == "cext-folder" {
             self.chrome_ext_install(payload);
+        } else if kind == "aichat" {
+            self.on_aichat_event(question, payload);
         } else if kind == "voice" {
             self.on_voice_event(question, payload);
         } else if kind == "tts-text" {
@@ -652,6 +654,9 @@ impl App {
         } else if let Some(arg) = cmd.strip_prefix("profile-name/") {
             self.core.set_profile_name(&url_decode(arg), self.storage.as_ref());
             self.redraw = true;
+        } else if let Some((rid, payload)) = cmd.strip_prefix("ai-chat/").and_then(|r| r.split_once('/')) {
+            let payload = url_decode(payload);
+            self.ai_chat_send(rid, &payload);
         } else if let Some(rest) = cmd.strip_prefix("ai/") {
             let (kind, arg) = rest.split_once('/').unwrap_or((rest, ""));
             self.core.ai_request(kind, &url_decode(arg), self.webview.as_ref(), &shared);

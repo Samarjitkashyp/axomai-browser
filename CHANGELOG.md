@@ -1,5 +1,16 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [`v4.1.0`] — Axom AI chat and our own download server (2026-10-05)
+### Added in 4.1
+- **Axom AI chat**: the AI button now opens a real chat. Ask anything, or leave "Use this page to answer" on and ask about the page you are reading; answers stream in word by word. Quick starters: summarize, key points, explain simply. New chat clears it; chats are not saved.
+- **The OpenAI key and the model are on the server, not in the browser.** The browser talks only to `https://axomai-browser.aiaxom.co.in/v1/chat`; that proxy (`server/axomai-chat`) adds the key, a fixed prompt and a fixed model (`gpt-5.4-mini`), so no user can read the key or pick a model. Daily limits: 30 messages per installation, 60 per network address, 500 for everyone together, at most 6 per minute.
+- **Download page and updates from our own server**: `https://axomai-browser.aiaxom.co.in/` has the Windows installer; the browser's update check now reads `/downloads/release.json` there (still checked against the published SHA-256 before anything installs).
+
+### Notes for 4.1
+- The chat needs the OpenAI key to be put in `/etc/axomai-browser/chat.env` on the server and a Cloudflare DNS record for `axomai-browser.aiaxom.co.in`; until then the chat says it is not switched on yet. See `server/README.md`.
+- Tested with a pretend OpenAI behind the real proxy code (streaming, fixed model, page text, limits, wrong requests, upstream errors). It has not been tried with the real OpenAI key yet.
+- What you type, and the page text if you leave that on, goes to OpenAI through the server. The chat box says so.
+
 ## [`v4.0.0`] — Desktop browser, fourth generation (2026-10-05)
 ### Added in 4.0
 - **Chrome extensions (Load unpacked)**: Extensions page > Chrome extensions > Load unpacked… copies an unpacked extension folder (one with `manifest.json`, manifest version 2 or 3) into the browser and the web engine loads it. Each one can be switched off or removed; those changes take effect after a restart. Extensions can read the pages you visit, so the page says to add only ones you trust. Tested with a small content-script extension; extensions that depend on Chrome's own services will not work.

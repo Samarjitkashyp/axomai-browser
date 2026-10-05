@@ -1,6 +1,8 @@
-# 🚀 Axomai Browser `v4.0.0`
+# 🚀 Axomai Browser `v4.1.0`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
+
+**New in 4.1:** Axom AI chat (key and model live on our server, not in the browser) and a download page at https://axomai-browser.aiaxom.co.in/. See `server/README.md`.
 
 **New in 4.0 (desktop app):** Chrome extensions (load unpacked), a Windows installer with checksummed one-click updates, server-less encrypted sync through a shared folder, a proxy setting and Windows Hello for passwords. Build the installer with `installer\build-installer.ps1`.
 
