@@ -114,6 +114,10 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Also sync saved logins (encrypted end to end) through the sync folder.
+    pub sync_passwords: bool,
+    /// Look for a newer version once a day.
+    pub update_check: bool,
     /// Ask Windows Hello before saved passwords are copied or exported.
     pub hello_passwords: bool,
     /// Proxy server for web pages (`host:port`, `socks5://host:port`); empty = the system setting. Needs a restart.
@@ -147,6 +151,8 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            sync_passwords: false,
+            update_check: true,
             hello_passwords: false,
             proxy: String::new(),
             shortcuts: Vec::new(),
@@ -218,7 +224,7 @@ impl Settings {
         if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
             s.password_manager = v;
         }
-        for (k, slot) in [("hello_passwords", &mut s.hello_passwords), ("dark_sites", &mut s.dark_sites), ("cookie_banners", &mut s.cookie_banners), ("youtube_ads", &mut s.youtube_ads), ("print_clean", &mut s.print_clean)] {
+        for (k, slot) in [("sync_passwords", &mut s.sync_passwords), ("update_check", &mut s.update_check), ("hello_passwords", &mut s.hello_passwords), ("dark_sites", &mut s.dark_sites), ("cookie_banners", &mut s.cookie_banners), ("youtube_ads", &mut s.youtube_ads), ("print_clean", &mut s.print_clean)] {
             if let Some(v) = get(k).and_then(|v| truthy(&v)) {
                 *slot = v;
             }
@@ -263,6 +269,8 @@ impl Settings {
             "bookmark_bar" => truthy(value).map(|v| self.bookmark_bar = v).is_some(),
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
+            "sync_passwords" => truthy(value).map(|v| self.sync_passwords = v).is_some(),
+            "update_check" => truthy(value).map(|v| self.update_check = v).is_some(),
             "hello_passwords" => truthy(value).map(|v| self.hello_passwords = v).is_some(),
             "dark_sites" => truthy(value).map(|v| self.dark_sites = v).is_some(),
             "cookie_banners" => truthy(value).map(|v| self.cookie_banners = v).is_some(),

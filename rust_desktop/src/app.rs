@@ -81,6 +81,8 @@ pub struct App {
     pub tts_rate: f32,
     /// Windows Hello just confirmed the action that is being repeated.
     pub hello_ok_once: bool,
+    /// A newer release found by the update check.
+    pub update_release: Option<crate::update::Release>,
     /// The Windows speech recogniser process while voice commands are on.
     pub voice: Option<std::process::Child>,
     /// The site the Site settings page is about.

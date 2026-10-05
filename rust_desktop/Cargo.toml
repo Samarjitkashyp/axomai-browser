@@ -19,6 +19,10 @@ resvg = { version = "0.45", default-features = false }
 qrcode = { version = "0.14", default-features = false }
 ureq = "2.9"
 rfd = { version = "0.14", default-features = false }
+sha2 = "0.10"
+aes-gcm = "0.10"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+getrandom = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.35"

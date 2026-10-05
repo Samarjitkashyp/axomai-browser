@@ -1052,6 +1052,15 @@ pub mod com {
         }
     }
 
+    /// Open the DevTools window (wry only offers this in debug builds, so ask the engine directly).
+    pub fn open_devtools(wv: &WebView) {
+        if let Some(core) = core(wv) {
+            unsafe {
+                let _ = core.OpenDevToolsWindow();
+            }
+        }
+    }
+
     /// Fire-and-forget DevTools-protocol call.
     pub fn cdp(wv: &WebView, method: &str, params: &str) {
         let Some(core) = core(wv) else { return };

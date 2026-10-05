@@ -12,9 +12,11 @@ pub mod pagetools;
 pub mod proxy;
 pub mod portability;
 pub mod sessions;
+pub mod sync;
 pub mod shotedit;
 pub mod sitesettings;
 pub mod tts;
+pub mod update;
 pub mod voice;
 pub mod shortcuts;
 pub mod siterules;
@@ -273,6 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tts: None,
         voice: None,
         hello_ok_once: false,
+        update_release: None,
         site_origin: String::new(),
         tts_rate: 1.0,
         news_cache: Default::default(),
@@ -293,6 +296,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.apply_privacy_settings();
     app.restore_or_start(saved_tabs);
     app.refresh_bar();
+    app.update_check_startup();
+    app.sync_startup();
 
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_millis(16));
