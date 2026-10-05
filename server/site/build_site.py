@@ -87,6 +87,7 @@ def page(lang, ctx):
     steps_html = ''.join('<li><h3>%s</h3><p>%s</p></li>' % (esc(n), fmt(d, ctx)) for n, d in t['steps'])
     req = ''.join('<li>%s</li>' % esc(r) for r in t['req'])
     faq_html = ''.join('<details%s><summary>%s</summary><p>%s</p></details>' % (' open' if i == 0 else '', esc(q), esc(fmt(a, ctx))) for i, (q, a) in enumerate(t['faq']))
+    mlangs = ''.join('<a href="%s" lang="%s"%s>%s</a>' % (p, l, ' aria-current="true"' if l == lang else '', esc(n)) for l, n, p in C.LANGS)
     flinks = ''.join('<a href="%s">%s</a>' % (esc(fmt(h, ctx)), esc(n)) for n, h in t['footer_links'])
     cta_meta = fmt(t['cta_meta'], ctx)
 
@@ -139,8 +140,10 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="34" height="34"><span class="bt">Axomai Browser</span></a>
 <nav aria-label="Main">{nav}</nav>
 <div class="langs" aria-label="Language">{langs}</div>
-<a class="btn sm" href="{dl}" data-dl><span class="full">{esc(t['cta'])}</span><span class="short">{esc(t['cta_short'])}</span></a>
-</div></header>
+<a class="btn sm hdl" href="{dl}" data-dl><span class="full">{esc(t['cta'])}</span><span class="short">{esc(t['cta_short'])}</span></a>
+<button class="burger" type="button" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="menu"><span></span><span></span><span></span></button>
+</div>
+<div class="menu" id="menu" hidden><div class="wrap"><nav aria-label="Menu">{nav}</nav><div class="mlangs" aria-label="Language">{mlangs}</div></div></div></header>
 <main id="main">
 <div class="hero"><div class="wrap">
 <span class="eyebrow">{t['eyebrow']}</span>
@@ -181,6 +184,15 @@ document.addEventListener('click',function(e){{
 }},true);
 </script>
 <script>
+// Menu button on phones and tablets.
+(function(){{
+  var b=document.getElementById('burger'),m=document.getElementById('menu');if(!b||!m)return;
+  function set(o){{b.setAttribute('aria-expanded',o?'true':'false');m.hidden=!o;document.documentElement.classList.toggle('menu-open',o)}}
+  b.addEventListener('click',function(){{set(m.hidden)}});
+  m.addEventListener('click',function(e){{if(e.target.closest('a'))set(false)}});
+  document.addEventListener('keydown',function(e){{if(e.key==='Escape')set(false)}});
+  window.addEventListener('resize',function(){{if(window.innerWidth>860)set(false)}});
+}})();
 // On a phone or a Mac the Windows installer is of no use: offer to send the link to a Windows PC instead.
 (function(){{
   if(/Windows NT/.test(navigator.userAgent))return;

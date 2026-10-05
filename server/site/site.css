@@ -94,3 +94,36 @@ table.facts td,table.facts th{word-break:break-word}
   .strip{grid-template-columns:1fr 1fr}
 }
 @media (max-width:380px){.strip{grid-template-columns:1fr}.eyebrow{font-size:.74rem}}
+/* ---- menu button, safe areas, touch comfort ---- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+.burger,.menu{display:none}
+.burger{width:44px;height:44px;border:1px solid var(--line);background:var(--card);border-radius:12px;cursor:pointer;flex:none;padding:0;align-items:center;justify-content:center;flex-direction:column;gap:5px}
+.burger span{display:block;width:20px;height:2px;background:var(--head);border-radius:2px;transition:transform .2s,opacity .2s}
+.burger[aria-expanded=true] span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+.burger[aria-expanded=true] span:nth-child(2){opacity:0}
+.burger[aria-expanded=true] span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+@media (max-width:860px){
+  .burger{display:inline-flex}
+  .nav .langs{display:none}
+  .nav .hdl{margin-left:auto}
+  .menu:not([hidden]){display:block;border-top:1px solid var(--line);background:var(--bg1);max-height:calc(100vh - 66px);max-height:calc(100dvh - 66px);overflow-y:auto;box-shadow:0 18px 40px rgba(0,0,0,.18)}
+  .menu nav{display:flex;flex-direction:column;padding:10px 0}
+  .menu nav a{display:block;padding:14px 4px;font-weight:700;font-size:1.05rem;color:var(--head);text-decoration:none;border-bottom:1px solid var(--line)}
+  .mlangs{display:flex;flex-wrap:wrap;gap:8px;padding:14px 0 18px}
+  .mlangs a{padding:10px 16px;border:1px solid var(--line);border-radius:999px;font-weight:700;font-size:.95rem;text-decoration:none;color:var(--text);background:var(--card)}
+  .mlangs a[aria-current=true]{background:var(--acc);border-color:var(--acc);color:#fff}
+  html.menu-open{overflow:hidden}
+  a,button,summary{-webkit-tap-highlight-color:transparent}
+  .btn,summary{min-height:44px}
+  section[id],div[id]{scroll-margin-top:72px}
+}
+@media (min-width:641px) and (max-width:860px){
+  .wrap{padding:0 28px}
+  .ctas{flex-direction:row;max-width:none;justify-content:center}.ctas .btn{width:auto}
+  .strip{grid-template-columns:repeat(4,1fr)}
+  .gal{grid-template-columns:repeat(2,1fr)}
+}
+@media (min-width:861px){.menu{display:none!important}}
+@media (hover:none){.btn:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
