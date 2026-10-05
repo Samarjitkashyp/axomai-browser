@@ -79,6 +79,8 @@ pub struct App {
     /// The Windows voice process that is reading a page aloud.
     pub tts: Option<std::process::Child>,
     pub tts_rate: f32,
+    /// Windows Hello just confirmed the action that is being repeated.
+    pub hello_ok_once: bool,
     /// The Windows speech recogniser process while voice commands are on.
     pub voice: Option<std::process::Child>,
     /// The site the Site settings page is about.

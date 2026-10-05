@@ -114,6 +114,8 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Ask Windows Hello before saved passwords are copied or exported.
+    pub hello_passwords: bool,
     /// Proxy server for web pages (`host:port`, `socks5://host:port`); empty = the system setting. Needs a restart.
     pub proxy: String,
     /// Address-bar search shortcuts you added: (`@keyword`, address with `%s`).
@@ -145,6 +147,7 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            hello_passwords: false,
             proxy: String::new(),
             shortcuts: Vec::new(),
             dark_sites: false,
@@ -215,7 +218,7 @@ impl Settings {
         if let Some(v) = get("password_manager").and_then(|v| truthy(&v)) {
             s.password_manager = v;
         }
-        for (k, slot) in [("dark_sites", &mut s.dark_sites), ("cookie_banners", &mut s.cookie_banners), ("youtube_ads", &mut s.youtube_ads), ("print_clean", &mut s.print_clean)] {
+        for (k, slot) in [("hello_passwords", &mut s.hello_passwords), ("dark_sites", &mut s.dark_sites), ("cookie_banners", &mut s.cookie_banners), ("youtube_ads", &mut s.youtube_ads), ("print_clean", &mut s.print_clean)] {
             if let Some(v) = get(k).and_then(|v| truthy(&v)) {
                 *slot = v;
             }
@@ -260,6 +263,7 @@ impl Settings {
             "bookmark_bar" => truthy(value).map(|v| self.bookmark_bar = v).is_some(),
             "https_only" => truthy(value).map(|v| self.https_only = v).is_some(),
             "tracking" => Tracking::parse(value).map(|v| self.tracking = v).is_some(),
+            "hello_passwords" => truthy(value).map(|v| self.hello_passwords = v).is_some(),
             "dark_sites" => truthy(value).map(|v| self.dark_sites = v).is_some(),
             "cookie_banners" => truthy(value).map(|v| self.cookie_banners = v).is_some(),
             "youtube_ads" => truthy(value).map(|v| self.youtube_ads = v).is_some(),

@@ -7,6 +7,7 @@ pub mod app_notes;
 pub mod chrome_ext;
 pub mod app_suggest;
 pub mod site_tweaks;
+pub mod hello;
 pub mod pagetools;
 pub mod proxy;
 pub mod portability;
@@ -271,6 +272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         muted_sites: Default::default(),
         tts: None,
         voice: None,
+        hello_ok_once: false,
         site_origin: String::new(),
         tts_rate: 1.0,
         news_cache: Default::default(),

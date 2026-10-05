@@ -326,6 +326,8 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "hello" {
+            self.hello_done(question, payload);
         } else if kind == "cext-folder" {
             self.chrome_ext_install(payload);
         } else if kind == "voice" {
@@ -815,7 +817,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "proxy", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "hello_passwords", "proxy", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }

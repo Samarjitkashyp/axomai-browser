@@ -177,6 +177,8 @@ pub const EN_MORE: Table = &[
     ("proxy.restart", "Saved. Restart the browser to apply it."),
     ("proxy.restart.row", "Restart the browser"),
     ("proxy.restart.desc", "Needed after changing the proxy. Your tabs come back."),
+    ("hello.title", "Ask Windows Hello for passwords"),
+    ("hello.desc", "Before a saved password is copied or exported, Windows asks for your face, fingerprint or PIN. Needs Windows Hello to be set up."),
 ];
 
 pub const HI: Table = &[
@@ -419,6 +421,8 @@ pub const HI: Table = &[
     ("proxy.restart", "सहेजा गया। लागू करने के लिए ब्राउज़र पुनः शुरू करें।"),
     ("proxy.restart.row", "ब्राउज़र पुनः शुरू करें"),
     ("proxy.restart.desc", "प्रॉक्सी बदलने के बाद ज़रूरी। आपके टैब वापस आ जाएँगे।"),
+    ("hello.title", "पासवर्ड के लिए Windows Hello पूछें"),
+    ("hello.desc", "सहेजा पासवर्ड कॉपी या निर्यात करने से पहले Windows आपका चेहरा, फिंगरप्रिंट या PIN माँगता है। Windows Hello सेट होना ज़रूरी है।"),
 ];
 
 pub const BN: Table = &[
@@ -661,6 +665,8 @@ pub const BN: Table = &[
     ("proxy.restart", "সংরক্ষিত। প্রয়োগ করতে ব্রাউজার রিস্টার্ট করুন।"),
     ("proxy.restart.row", "ব্রাউজার রিস্টার্ট করুন"),
     ("proxy.restart.desc", "প্রক্সি বদলানোর পর দরকার। আপনার ট্যাব ফিরে আসবে।"),
+    ("hello.title", "পাসওয়ার্ডের জন্য Windows Hello জিজ্ঞাসা করুন"),
+    ("hello.desc", "সংরক্ষিত পাসওয়ার্ড কপি বা রপ্তানির আগে Windows আপনার মুখ, আঙুলের ছাপ বা PIN চায়। Windows Hello সেট আপ থাকতে হবে।"),
 ];
 
 pub const AS: Table = &[
@@ -903,4 +909,6 @@ pub const AS: Table = &[
     ("proxy.restart", "সংৰক্ষিত। প্ৰয়োগ কৰিবলৈ ব্ৰাউজাৰ ৰিষ্টাৰ্ট কৰক।"),
     ("proxy.restart.row", "ব্ৰাউজাৰ ৰিষ্টাৰ্ট কৰক"),
     ("proxy.restart.desc", "প্ৰক্সি সলনি কৰাৰ পিছত লাগে। আপোনাৰ টেব ঘূৰি আহিব।"),
+    ("hello.title", "পাছৱৰ্ডৰ বাবে Windows Hello সোধক"),
+    ("hello.desc", "সংৰক্ষিত পাছৱৰ্ড কপি বা ৰপ্তানি কৰাৰ আগতে Windows এ আপোনাৰ মুখ, আঙুলিৰ ছাপ বা PIN বিচাৰে। Windows Hello ছেট আপ থাকিব লাগিব।"),
 ];

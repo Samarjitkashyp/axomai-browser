@@ -254,6 +254,9 @@ impl App {
     }
 
     pub fn passwords_export(&mut self) {
+        if !self.hello_guard("pw-export", "") {
+            return;
+        }
         let Some(st) = &self.storage else { return };
         let logins: Vec<Login> = st
             .list_passwords()
