@@ -114,6 +114,8 @@ pub struct Settings {
     pub gpc: bool,
     /// Offer to save and fill passwords.
     pub password_manager: bool,
+    /// Proxy server for web pages (`host:port`, `socks5://host:port`); empty = the system setting. Needs a restart.
+    pub proxy: String,
     /// Address-bar search shortcuts you added: (`@keyword`, address with `%s`).
     pub shortcuts: Vec<(String, String)>,
     /// Dark mode for websites.
@@ -143,6 +145,7 @@ impl Default for Settings {
             tracking: Tracking::Balanced,
             gpc: true,
             password_manager: true,
+            proxy: String::new(),
             shortcuts: Vec::new(),
             dark_sites: false,
             cookie_banners: true,
@@ -203,6 +206,9 @@ impl Settings {
         if let Some(v) = get("weather_city").filter(|v| CITIES.iter().any(|(k, _)| k == v)) {
             s.weather_city = v;
         }
+        if let Some(v) = get("proxy").filter(|v| crate::proxy::parse(v).is_some()) {
+            s.proxy = v;
+        }
         if let Some(v) = get("shortcuts") {
             s.shortcuts = crate::shortcuts::parse_list(&v);
         }
@@ -259,6 +265,15 @@ impl Settings {
             "youtube_ads" => truthy(value).map(|v| self.youtube_ads = v).is_some(),
             "print_clean" => truthy(value).map(|v| self.print_clean = v).is_some(),
             "gpc" => truthy(value).map(|v| self.gpc = v).is_some(),
+            "proxy" => {
+                let v = value.trim();
+                if v.is_empty() || crate::proxy::parse(v).is_some() {
+                    self.proxy = v.to_string();
+                    true
+                } else {
+                    false
+                }
+            }
             "weather_city" => CITIES.iter().any(|(k, _)| *k == value).then(|| self.weather_city = value.to_string()).is_some(),
             "password_manager" => truthy(value).map(|v| self.password_manager = v).is_some(),
             "language" => {

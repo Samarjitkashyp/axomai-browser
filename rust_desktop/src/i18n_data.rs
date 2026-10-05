@@ -169,6 +169,14 @@ pub const EN_MORE: Table = &[
     ("cext.empty", "No Chrome extensions added yet."),
     ("cext.remove", "Remove"),
     ("cext.remove.q", "Remove this extension and its files?"),
+    ("settings.network", "Network"),
+    ("proxy.title", "Proxy server"),
+    ("proxy.desc", "Sends web pages through a proxy (host:port or socks5://host:port). Leave empty to use the Windows setting. This is not a VPN."),
+    ("proxy.active", "In use:"),
+    ("proxy.none", "Not using a proxy."),
+    ("proxy.restart", "Saved. Restart the browser to apply it."),
+    ("proxy.restart.row", "Restart the browser"),
+    ("proxy.restart.desc", "Needed after changing the proxy. Your tabs come back."),
 ];
 
 pub const HI: Table = &[
@@ -403,6 +411,14 @@ pub const HI: Table = &[
     ("cext.empty", "अभी कोई क्रोम एक्सटेंशन नहीं जोड़ा गया।"),
     ("cext.remove", "हटाएँ"),
     ("cext.remove.q", "इस एक्सटेंशन और उसकी फ़ाइलों को हटाएँ?"),
+    ("settings.network", "नेटवर्क"),
+    ("proxy.title", "प्रॉक्सी सर्वर"),
+    ("proxy.desc", "वेब पेज प्रॉक्सी से भेजता है (host:port या socks5://host:port)। खाली छोड़ें तो विंडोज़ की सेटिंग लगेगी। यह VPN नहीं है।"),
+    ("proxy.active", "उपयोग में:"),
+    ("proxy.none", "प्रॉक्सी का उपयोग नहीं हो रहा।"),
+    ("proxy.restart", "सहेजा गया। लागू करने के लिए ब्राउज़र पुनः शुरू करें।"),
+    ("proxy.restart.row", "ब्राउज़र पुनः शुरू करें"),
+    ("proxy.restart.desc", "प्रॉक्सी बदलने के बाद ज़रूरी। आपके टैब वापस आ जाएँगे।"),
 ];
 
 pub const BN: Table = &[
@@ -637,6 +653,14 @@ pub const BN: Table = &[
     ("cext.empty", "এখনও কোনো ক্রোম এক্সটেনশন যোগ করা হয়নি।"),
     ("cext.remove", "সরান"),
     ("cext.remove.q", "এই এক্সটেনশন ও এর ফাইল সরাবেন?"),
+    ("settings.network", "নেটওয়ার্ক"),
+    ("proxy.title", "প্রক্সি সার্ভার"),
+    ("proxy.desc", "ওয়েব পৃষ্ঠা প্রক্সির মাধ্যমে পাঠায় (host:port বা socks5://host:port)। খালি রাখলে উইন্ডোজের সেটিং ব্যবহৃত হবে। এটি VPN নয়।"),
+    ("proxy.active", "ব্যবহারে:"),
+    ("proxy.none", "প্রক্সি ব্যবহার হচ্ছে না।"),
+    ("proxy.restart", "সংরক্ষিত। প্রয়োগ করতে ব্রাউজার রিস্টার্ট করুন।"),
+    ("proxy.restart.row", "ব্রাউজার রিস্টার্ট করুন"),
+    ("proxy.restart.desc", "প্রক্সি বদলানোর পর দরকার। আপনার ট্যাব ফিরে আসবে।"),
 ];
 
 pub const AS: Table = &[
@@ -871,4 +895,12 @@ pub const AS: Table = &[
     ("cext.empty", "এতিয়ালৈকে কোনো ক্ৰোম এক্সটেনশ্বন যোগ কৰা হোৱা নাই।"),
     ("cext.remove", "আঁতৰাওক"),
     ("cext.remove.q", "এই এক্সটেনশ্বন আৰু ইয়াৰ ফাইল আঁতৰাব?"),
+    ("settings.network", "নেটৱৰ্ক"),
+    ("proxy.title", "প্ৰক্সি ছাৰ্ভাৰ"),
+    ("proxy.desc", "ৱেব পৃষ্ঠা প্ৰক্সিৰ জৰিয়তে পঠায় (host:port বা socks5://host:port)। খালী ৰাখিলে উইণ্ডোজৰ ছেটিং ব্যৱহাৰ হ'ব। ই VPN নহয়।"),
+    ("proxy.active", "ব্যৱহাৰত:"),
+    ("proxy.none", "প্ৰক্সি ব্যৱহাৰ হোৱা নাই।"),
+    ("proxy.restart", "সংৰক্ষিত। প্ৰয়োগ কৰিবলৈ ব্ৰাউজাৰ ৰিষ্টাৰ্ট কৰক।"),
+    ("proxy.restart.row", "ব্ৰাউজাৰ ৰিষ্টাৰ্ট কৰক"),
+    ("proxy.restart.desc", "প্ৰক্সি সলনি কৰাৰ পিছত লাগে। আপোনাৰ টেব ঘূৰি আহিব।"),
 ];

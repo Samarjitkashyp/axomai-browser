@@ -815,7 +815,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "proxy", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }

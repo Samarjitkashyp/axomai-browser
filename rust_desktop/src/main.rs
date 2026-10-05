@@ -8,6 +8,7 @@ pub mod chrome_ext;
 pub mod app_suggest;
 pub mod site_tweaks;
 pub mod pagetools;
+pub mod proxy;
 pub mod portability;
 pub mod sessions;
 pub mod shotedit;
@@ -108,6 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let setting = |key: &str| storage.as_ref().and_then(|s| s.get_setting(key).ok().flatten());
     let settings = settings::Settings::load(storage.as_ref());
+    proxy::init(&settings.proxy);
     let search_engine = match setting("search_engine").as_deref() {
         Some("Bing") => SearchEngine::Bing,
         Some("Yahoo") => SearchEngine::Yahoo,
@@ -190,7 +192,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         hub.shield.total_blocked.store(saved, std::sync::atomic::Ordering::Relaxed);
     }
     // What the first window opens, according to "On startup".
+    // "Restart browser" asks for the tabs to come back once, whatever "On startup" says.
+    let restore_once = !private_window && setting("restore_once").as_deref() == Some("1");
+    if restore_once {
+        if let Some(st) = storage.as_ref() {
+            let _ = st.delete_setting("restore_once");
+        }
+    }
     let mut saved_tabs: Vec<storage::SavedTab> = match settings.startup {
+        _ if restore_once => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
         settings::Startup::Restore if !private_window => storage.as_ref().and_then(|s| s.get_tabs().ok()).unwrap_or_default(),
         settings::Startup::HomePage if !settings.home_url.is_empty() => vec![storage::SavedTab { position: 0, url: settings.home_url.clone(), title: String::new(), is_active: true, group: String::new() }],
         _ => Vec::new(),

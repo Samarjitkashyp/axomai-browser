@@ -270,6 +270,14 @@ pub fn build_webview(
             builder.with_browser_extensions_enabled(true).with_extensions_path(root)
         }
     };
+    // The proxy the browser started with (the engine reads it once, so every view must use the same one).
+    let builder = match crate::proxy::startup() {
+        Some(p) => {
+            let ep = wry::ProxyEndpoint { host: p.host.clone(), port: p.port.clone() };
+            builder.with_proxy_config(if p.socks { wry::ProxyConfig::Socks5(ep) } else { wry::ProxyConfig::Http(ep) })
+        }
+        None => builder,
+    };
     let wv = builder
         .with_devtools(true)
         .with_incognito(shared.private)

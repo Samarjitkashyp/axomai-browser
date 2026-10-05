@@ -196,6 +196,9 @@ impl App {
     /// Save the session, start a fresh copy of the program and quit this one.
     pub fn restart_app(&mut self) {
         self.save_session();
+        if let Some(st) = &self.storage {
+            let _ = st.set_setting("restore_once", "1");
+        }
         let dir = crate::storage::data_dir().join("handoff");
         let _ = std::fs::remove_dir_all(&dir); // so the new copy does not hand its work to this one
         if let Ok(exe) = std::env::current_exe() {

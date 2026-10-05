@@ -195,6 +195,26 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         row(t("data.restore"), t("data.restore.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('backup-import')\">{}</button>", escape(t("data.restore.button")))),
     );
 
+    // ---- network
+    let active = crate::proxy::startup().map(|p| p.display());
+    let saved = crate::proxy::parse(&s.proxy).map(|p| p.display());
+    let status = match (&active, &saved) {
+        (a, b) if a == b => match a {
+            Some(p) => format!("{} {}", t("proxy.active"), p),
+            None => t("proxy.none").to_string(),
+        },
+        _ => t("proxy.restart").to_string(),
+    };
+    let net = format!(
+        "{}{}",
+        row(
+            t("proxy.title"),
+            &format!("{} {}", t("proxy.desc"), status),
+            &format!("<input type=\"text\" data-set=\"proxy\" placeholder=\"127.0.0.1:8080\" value=\"{}\">", escape(&s.proxy))
+        ),
+        row(t("proxy.restart.row"), t("proxy.restart.desc"), &format!("<button class=\"btn ghost\" onclick=\"go('app-restart')\">{}</button>", escape(t("cext.restart")))),
+    );
+
     // ---- downloads & performance
     let downloads = format!(
         "{}{}",
@@ -231,7 +251,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
     );
 
     let body = format!(
-        "{head}{a}{b}{c}{w}{sr}{sh}{dt}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
+        "{head}{a}{b}{c}{w}{sr}{sh}{nt}{dt}{d}{e}{f}{g}<p class=\"sub\" style=\"margin-top:28px\">Axomai Browser {ver}</p>",
         head = ui_shell::heading(t("settings.title"), ""),
         a = section(t("settings.appearance"), &appearance),
         b = section(t("settings.startup"), &format!("{}{}", startup, search)),
@@ -240,6 +260,7 @@ pub fn settings_page(ctx: &PageCtx, v: &SettingsView) -> String {
         sr = section(t("settings.siterules"), &site_rules),
         sh = section(t("settings.shortcuts"), &sc),
         dt = section(t("settings.data"), &data),
+        nt = section(t("settings.network"), &net),
         d = section(t("settings.downloads"), &downloads),
         e = section(t("settings.performance"), &performance),
         f = section(t("settings.browser"), &system),
@@ -328,6 +349,7 @@ mod tests {
                 "tracking" => "strict",
                 "language" => "en",
                 "weather_city" => "guwahati",
+                "proxy" => "127.0.0.1:8080",
                 "ai_model" => "claude-sonnet-5-5",
                 "ai_provider" => "openai",
                 "download_dir" => "C:\\x",
