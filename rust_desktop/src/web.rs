@@ -258,6 +258,18 @@ pub fn build_webview(
         Initial::Url(u) => builder.with_url(u),
         Initial::Html(h) => builder.with_html(h),
     };
+    // Chrome extensions: every unpacked extension in the browser's folder is loaded when a view starts.
+    #[cfg(windows)]
+    let builder = {
+        use wry::WebViewBuilderExtWindows;
+        if shared.private {
+            builder
+        } else {
+            let root = crate::chrome_ext::enabled_root();
+            let _ = std::fs::create_dir_all(&root);
+            builder.with_browser_extensions_enabled(true).with_extensions_path(root)
+        }
+    };
     let wv = builder
         .with_devtools(true)
         .with_incognito(shared.private)

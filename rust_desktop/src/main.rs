@@ -4,6 +4,7 @@ pub mod app;
 pub mod app_commands;
 pub mod app_input;
 pub mod app_notes;
+pub mod chrome_ext;
 pub mod app_suggest;
 pub mod site_tweaks;
 pub mod pagetools;

@@ -103,7 +103,7 @@ impl App {
     pub fn internal_html(&self, kind: TabKind, shared: &WebShared) -> String {
         let ctx = self.page_ctx(shared);
         match kind {
-            TabKind::Extensions => pages::extensions_page(&ctx, &self.extensions),
+            TabKind::Extensions => pages::extensions_page(&ctx, &self.extensions, &crate::chrome_ext::list_all()),
             TabKind::About => pages::about_page(
                 &ctx,
                 &pages::AboutInfo {
@@ -326,6 +326,8 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "cext-folder" {
+            self.chrome_ext_install(payload);
         } else if kind == "voice" {
             self.on_voice_event(question, payload);
         } else if kind == "tts-text" {
@@ -454,6 +456,8 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "cext-load" => self.pick_chrome_ext_folder(),
+            "app-restart" => self.restart_app(),
             "voice-toggle" => self.voice_toggle(),
             "shot-edit" => self.open_screenshot_editor(),
             "site-settings" => self.open_site_settings(),
@@ -700,6 +704,8 @@ impl App {
         } else if let Some(p) = cmd.strip_prefix("voice-say/") {
             let p = url_decode(p);
             self.voice_say(&p);
+        } else if let Some((action, id)) = ["toggle", "remove"].iter().find_map(|a| cmd.strip_prefix(&format!("cext-{}/", a)).map(|i| (*a, i))) {
+            self.chrome_ext_command(action, id);
         } else if let Some(key) = cmd.strip_prefix("emu/") {
             self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {

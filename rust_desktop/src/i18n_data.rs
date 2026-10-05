@@ -162,6 +162,13 @@ pub const EN_MORE: Table = &[
     ("sitesettings.clear.desc", "Signs you out of this site and removes what it stored on this computer."),
     ("sitesettings.clear.button", "Clear"),
     ("menu.voice", "Voice commands (on / off)"),
+    ("cext.title", "Chrome extensions"),
+    ("cext.warn", "Add an unpacked Chrome extension (a folder with manifest.json). Extensions can read the pages you visit, so add only ones you trust. Some extensions that need Chrome's own services will not work."),
+    ("cext.load", "Load unpacked…"),
+    ("cext.restart", "Restart browser"),
+    ("cext.empty", "No Chrome extensions added yet."),
+    ("cext.remove", "Remove"),
+    ("cext.remove.q", "Remove this extension and its files?"),
 ];
 
 pub const HI: Table = &[
@@ -389,6 +396,13 @@ pub const HI: Table = &[
     ("sitesettings.clear.desc", "आपको इस साइट से साइन आउट करता है और इसने इस कंप्यूटर पर जो रखा है उसे हटाता है।"),
     ("sitesettings.clear.button", "साफ़ करें"),
     ("menu.voice", "वॉइस कमांड (चालू / बंद)"),
+    ("cext.title", "क्रोम एक्सटेंशन"),
+    ("cext.warn", "अनपैक्ड क्रोम एक्सटेंशन जोड़ें (manifest.json वाला फ़ोल्डर)। एक्सटेंशन आपके देखे पेज पढ़ सकते हैं, इसलिए केवल भरोसेमंद जोड़ें। जिन्हें क्रोम की अपनी सेवाएँ चाहिए वे काम नहीं करेंगे।"),
+    ("cext.load", "अनपैक्ड लोड करें…"),
+    ("cext.restart", "ब्राउज़र पुनः शुरू करें"),
+    ("cext.empty", "अभी कोई क्रोम एक्सटेंशन नहीं जोड़ा गया।"),
+    ("cext.remove", "हटाएँ"),
+    ("cext.remove.q", "इस एक्सटेंशन और उसकी फ़ाइलों को हटाएँ?"),
 ];
 
 pub const BN: Table = &[
@@ -616,6 +630,13 @@ pub const BN: Table = &[
     ("sitesettings.clear.desc", "আপনাকে এই সাইট থেকে সাইন আউট করে এবং এটি এই কম্পিউটারে যা রেখেছে তা সরায়।"),
     ("sitesettings.clear.button", "মুছুন"),
     ("menu.voice", "ভয়েস কমান্ড (চালু / বন্ধ)"),
+    ("cext.title", "ক্রোম এক্সটেনশন"),
+    ("cext.warn", "আনপ্যাকড ক্রোম এক্সটেনশন যোগ করুন (manifest.json সহ ফোল্ডার)। এক্সটেনশন আপনার দেখা পৃষ্ঠা পড়তে পারে, তাই শুধু বিশ্বস্ত যোগ করুন। যেগুলোর ক্রোমের নিজস্ব পরিষেবা লাগে সেগুলো কাজ করবে না।"),
+    ("cext.load", "আনপ্যাকড লোড করুন…"),
+    ("cext.restart", "ব্রাউজার রিস্টার্ট করুন"),
+    ("cext.empty", "এখনও কোনো ক্রোম এক্সটেনশন যোগ করা হয়নি।"),
+    ("cext.remove", "সরান"),
+    ("cext.remove.q", "এই এক্সটেনশন ও এর ফাইল সরাবেন?"),
 ];
 
 pub const AS: Table = &[
@@ -843,4 +864,11 @@ pub const AS: Table = &[
     ("sitesettings.clear.desc", "আপোনাক এই ছাইটৰ পৰা চাইন আউট কৰে আৰু ই এই কম্পিউটাৰত যি ৰাখিছে তাক আঁতৰায়।"),
     ("sitesettings.clear.button", "মচক"),
     ("menu.voice", "ভইচ কমাণ্ড (চালু / বন্ধ)"),
+    ("cext.title", "ক্ৰোম এক্সটেনশ্বন"),
+    ("cext.warn", "আনপেক্ড ক্ৰোম এক্সটেনশ্বন যোগ কৰক (manifest.json থকা ফোল্ডাৰ)। এক্সটেনশ্বনে আপুনি চোৱা পৃষ্ঠা পঢ়িব পাৰে, গতিকে কেৱল বিশ্বাসযোগ্য যোগ কৰক। যিবোৰৰ ক্ৰোমৰ নিজা সেৱা লাগে সেইবোৰ কাম নকৰিব।"),
+    ("cext.load", "আনপেক্ড লোড কৰক…"),
+    ("cext.restart", "ব্ৰাউজাৰ ৰিষ্টাৰ্ট কৰক"),
+    ("cext.empty", "এতিয়ালৈকে কোনো ক্ৰোম এক্সটেনশ্বন যোগ কৰা হোৱা নাই।"),
+    ("cext.remove", "আঁতৰাওক"),
+    ("cext.remove.q", "এই এক্সটেনশ্বন আৰু ইয়াৰ ফাইল আঁতৰাব?"),
 ];
