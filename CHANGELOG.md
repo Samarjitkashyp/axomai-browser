@@ -1,5 +1,9 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [`v4.1.1`] — No console window (2026-10-05)
+### Fixed in 4.1.1
+- The installed browser opened a black console (shell) window next to it, because the release build was a console program. It is now a normal Windows program with no console. What it used to print goes to `%APPDATA%\AxomaiBrowser\axomai.log` (restarted when it passes 512 KB); `cargo run` builds still print to the terminal.
+
 ## [`v4.1.0`] — Axom AI chat and our own download server (2026-10-05)
 ### Added in 4.1
 - **Axom AI chat**: the AI button now opens a real chat. Ask anything, or leave "Use this page to answer" on and ask about the page you are reading; answers stream in word by word. Quick starters: summarize, key points, explain simply. New chat clears it; chats are not saved.

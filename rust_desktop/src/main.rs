@@ -1,9 +1,13 @@
+// No console window in the release build; what it prints goes to %APPDATA%\AxomaiBrowser\axomai.log (see applog.rs).
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 pub mod actions;
 pub mod ai;
 pub mod app;
 pub mod app_commands;
 pub mod app_input;
 pub mod aichat;
+pub mod applog;
 pub mod app_notes;
 pub mod chrome_ext;
 pub mod app_suggest;
@@ -69,6 +73,7 @@ use tao::{
 use types::SearchEngine;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    applog::init();
     let args: Vec<String> = std::env::args().collect();
     if args.len() >= 3 && args[1] == "--subprocess" {
         axomai_engine::run_subprocess(&args[2]);
