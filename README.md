@@ -1,4 +1,4 @@
-# 🚀 Axomai Browser `v4.1.0`
+# 🚀 Axomai Browser `v4.1.1`
 
 > **Fast. Private. AI-Powered. Built for Everyone.**
 
