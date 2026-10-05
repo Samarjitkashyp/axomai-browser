@@ -57,6 +57,8 @@ pub fn internal_page_for_title(t: &str) -> Option<(&'static str, TabKind)> {
         "Permissions" => ("axomai://permissions", TabKind::Page("permissions")),
         "Reading list" => ("axomai://readinglist", TabKind::Page("readinglist")),
         "Notes" => ("axomai://notes", TabKind::Page("notes")),
+        "Sessions" => ("axomai://sessions", TabKind::Page("sessions")),
+        "Site settings" => ("axomai://sitesettings", TabKind::Page("sitesettings")),
         _ => return None,
     })
 }
@@ -148,6 +150,8 @@ impl App {
                 let icons = self.icon_map(&urls);
                 pages::reading_list_page(&ctx, &items, &icons)
             }
+            TabKind::Page("sitesettings") => crate::sitesettings::site_settings_page(&ctx, &self.site_view()),
+            TabKind::Page("sessions") => pages::sessions_page(&ctx, &self.storage.as_ref().map(|s| s.sessions()).unwrap_or_default()),
             TabKind::Page("notes") => pages::notes_page(&ctx, &self.storage.as_ref().map(|s| s.notes_all()).unwrap_or_default()),
             TabKind::Page("passwords") => {
                 let (logins, never) = self.storage.as_ref().map(|s| (s.list_passwords(), s.pw_never_list())).unwrap_or_default();
@@ -273,6 +277,8 @@ impl App {
             "permissions" => TabKind::Page("permissions"),
             "readinglist" => TabKind::Page("readinglist"),
             "notes" => TabKind::Page("notes"),
+            "sessions" => TabKind::Page("sessions"),
+            "sitesettings" => TabKind::Page("sitesettings"),
             "about" => TabKind::About,
             _ => return,
         };
@@ -320,6 +326,14 @@ impl App {
             self.redraw = true;
         } else if kind == "pdf" {
             self.on_pdf_done(question, payload == "1");
+        } else if kind == "voice" {
+            self.on_voice_event(question, payload);
+        } else if kind == "tts-text" {
+            self.tts_text(payload);
+        } else if kind == "backup-file" {
+            self.backup_import(payload);
+        } else if kind == "passwords-file" {
+            self.passwords_import(payload);
         } else if kind == "bookmark-file" {
             self.import_bookmark_file(payload);
         } else if kind == "download-target" {
@@ -440,6 +454,24 @@ impl App {
             "focus-url" => self.focus_address(),
             "split-view" => self.toggle_split(),
             "reading-add" => self.reading_add(),
+            "voice-toggle" => self.voice_toggle(),
+            "shot-edit" => self.open_screenshot_editor(),
+            "site-settings" => self.open_site_settings(),
+            "site-clear-data" => self.site_clear_data(),
+            "tts-toggle" => self.tts_toggle(1.0),
+            "tts-stop" => self.tts_stop(),
+            "pip" => self.toggle_pip(),
+            "devpanel" => self.open_dev_panel(),
+            "devtools" => {
+                if let Some(wv) = &self.webview {
+                    wv.open_devtools();
+                }
+            }
+            "backup-export" => self.backup_export(),
+            "backup-import" => self.pick_backup_file(),
+            "pw-export" => self.passwords_export(),
+            "pw-import" => self.pick_passwords_file(),
+            "session-prompt" => self.open_session_prompt(),
             "site-mute" => self.site_mute_current(),
             "site-block-current" => self.site_block_current(),
             "note-new" => self.note_new(),
@@ -507,7 +539,7 @@ impl App {
             }
 
             // ---- browser pages
-            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" => {
+            "home" | "extensions" | "settings" | "themes" | "about" | "history" | "bookmarks" | "downloads" | "passwords" | "permissions" | "readinglist" | "notes" | "sessions" | "sitesettings" => {
                 self.open_internal(cmd)
             }
 
@@ -646,6 +678,30 @@ impl App {
         } else if let Some((action, host)) = ["block", "unblock", "mute", "unmute"].iter().find_map(|a| cmd.strip_prefix(&format!("site-{}/", a)).map(|h| (*a, h))) {
             let host = url_decode(host);
             self.site_rule_command(action, &host);
+        } else if let Some((kw, tpl)) = cmd.strip_prefix("shortcut-add/").and_then(|r| r.split_once('/')) {
+            let (kw, tpl) = (url_decode(kw), url_decode(tpl));
+            self.shortcut_add(&kw, &tpl);
+        } else if let Some(kw) = cmd.strip_prefix("shortcut-del/") {
+            let kw = url_decode(kw);
+            self.shortcut_remove(&kw);
+        } else if let Some(name) = cmd.strip_prefix("session-save/") {
+            let name = url_decode(name);
+            self.session_save(&name);
+        } else if let Some(id) = cmd.strip_prefix("session-open/").and_then(|v| v.parse::<i64>().ok()) {
+            self.session_open(id);
+        } else if let Some(id) = cmd.strip_prefix("session-delete/").and_then(|v| v.parse::<i64>().ok()) {
+            self.session_delete(id);
+        } else if let Some(r) = cmd.strip_prefix("tts-toggle/") {
+            self.tts_toggle(r.parse().unwrap_or(1.0));
+        } else if let Some(p) = cmd.strip_prefix("site-zoom/").and_then(|v| v.parse::<u32>().ok()) {
+            self.site_zoom_set(p);
+        } else if let Some((id, action)) = cmd.strip_prefix("site-perm/").and_then(|r| r.split_once('/')).and_then(|(i, a)| i.parse::<i64>().ok().map(|i| (i, a))) {
+            self.site_perm_command(id, action);
+        } else if let Some(p) = cmd.strip_prefix("voice-say/") {
+            let p = url_decode(p);
+            self.voice_say(&p);
+        } else if let Some(key) = cmd.strip_prefix("emu/") {
+            self.set_emulation(key);
         } else if let Some(id) = cmd.strip_prefix("note-delete/").and_then(|v| v.parse::<i64>().ok()) {
             self.note_command("delete", id);
         } else if let Some(cat) = cmd.strip_prefix("news/") {
@@ -662,8 +718,9 @@ impl App {
         } else if let Some(row) = cmd.strip_prefix("suggest/").and_then(|v| v.parse::<usize>().ok()) {
             self.open_suggestion(row);
         } else if let Some(q) = cmd.strip_prefix("search/") {
-            let url = format!("{}{}", self.search_engine.js_search_template(), q);
-            self.navigate_active(&url);
+            // The home page search box: same rules as the address bar (shortcuts like @yt, localhost, ...).
+            self.addr_text = url_decode(q);
+            self.submit_address();
         } else if let Some(id) = cmd.strip_prefix("remove-bookmark/").and_then(|v| v.parse::<i64>().ok()) {
             if let Some(s) = &self.storage {
                 let _ = s.remove_bookmark(id);
@@ -752,7 +809,7 @@ impl App {
         if let Some(s) = &self.storage {
             for key in [
                 "startup", "restore_session", "home_url", "password_manager", "weather_city", "sleep_minutes", "download_dir", "ask_download", "bookmark_bar",
-                "https_only", "tracking", "gpc", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
+                "https_only", "tracking", "gpc", "shortcuts", "dark_sites", "cookie_banners", "youtube_ads", "print_clean", "language", "search_engine", "theme", "ext_enabled",
             ] {
                 let _ = s.delete_setting(key);
             }
@@ -760,6 +817,7 @@ impl App {
         self.settings = crate::settings::Settings::default();
         self.core.set_passwords(true);
         self.core.set_gpc(true);
+        self.settings.shortcuts.clear();
         self.core.set_tweaks(self.settings.tweaks());
         self.apply_privacy_settings();
         self.search_engine = SearchEngine::Google;

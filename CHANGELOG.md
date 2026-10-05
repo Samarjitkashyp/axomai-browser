@@ -1,5 +1,30 @@
 # 📜 Axomai Browser Engine — Full Release Changelog
 
+## [`v3.0.0`] — Desktop browser, third generation (2026-10-05)
+### Added in 3.0
+- **Picture-in-picture**: menu > Picture in picture floats the playing video in a small window; choose it again to leave.
+- **Translate page**: menu > Translate page… (also the Auto-Translate extension) opens the page through Google Translate in Assamese, Hindi, Bengali and nine other languages.
+- **Read aloud**: menu > Read aloud, and a Listen button with a speed switch in Reader Mode, read the page (or your selection) with the Windows voices.
+- **Sessions**: menu > Save tabs as a session… names the open tabs; the Sessions page opens a whole set again.
+- **Password import / export**: Chrome-compatible CSV on the Passwords page. Export is plain text and the page warns about it first.
+- **Backup and restore** (Settings > Your data): bookmarks, history, settings, reading list, notes, site rules and sessions in one JSON file; restoring only adds, it never deletes. Passwords are not in the backup.
+- **Voice commands**: menu > Voice commands listens with the Windows speech recogniser for about 45 phrases ("new tab", "go back", "zoom in", "scroll down", "read aloud", and a few Hindi / Assamese phrases written in English letters).
+- **Screenshot editor**: after a capture, the Edit button on the toast opens pen, arrow, box, highlight, blur (pixelate) and text tools; Save PNG downloads the result.
+- **Site settings**: menu > Site settings gathers zoom, always-mute, block, saved permissions, saved logins and "clear cookies and site data" for the open site.
+- **Developer panel**: menu > Developer panel switches this tab's user agent (iPhone, Android, iPad, Firefox, Safari) and mobile / tablet view, and opens DevTools or the page source.
+- **Search shortcuts**: `@yt`, `@wiki`, `@as`, `@gh`, `@maps`, `@news`, `@amazon`, `@g`, `@bing`, `@ddg` in the address bar and the New Tab search box, plus your own under Settings > Search shortcuts.
+
+### Fixed in 3.0
+- The New Tab search box now follows the address-bar rules (`localhost:8765/page` used to become a web search).
+
+### Notes for 3.0
+- Read aloud uses the voices Windows has installed; this PC has English voices only, so other languages are refused with a message instead of being read wrongly. If Windows has no working audio output the browser says so.
+- Voice commands need a microphone. They were tested with synthesised speech fed to the recogniser, not with a live microphone. The recogniser is English (US); the Hindi / Assamese phrases match by sound.
+- Translate depends on Google Translate's page proxy; picture-in-picture depends on the page's video.
+- The backup file picker and the CSV file picker were not driven in a live run (their file handling is unit-tested).
+- Site rules (mute, block) and the site-settings toggles need an address with a dot (`example.com`), not `localhost`.
+- The engine crate (`native/rust_engine`) is unchanged and keeps its own 1.6.0 version.
+
 ## [`v2.0.0`] — Desktop browser, second generation (2026-10-04)
 ### Added in 2.0
 - **Tab search** (Ctrl+Shift+A): a popup that filters every open tab by title or address; Enter switches to it.

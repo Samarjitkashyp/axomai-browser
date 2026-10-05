@@ -49,6 +49,10 @@ impl App {
             Some(_) => ("\u{1F4C4}".to_string(), typed.to_string(), "Open Axomai page".to_string()),
             None => (String::new(), String::new(), String::new()),
         };
+        let first = match crate::shortcuts::expand(typed, &self.settings.shortcuts) {
+            Some((_, name)) => ("\u{1F50D}".to_string(), typed.to_string(), format!("Search {}", name)),
+            None => first,
+        };
         let mut rows = vec![first];
         for s in &self.suggestions {
             let icon = if s.kind == Kind::Bookmark { "\u{2B50}" } else { "\u{1F552}" };

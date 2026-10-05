@@ -108,8 +108,8 @@ function css(t){{var s=document.createElement('style');s.textContent=t;root.appe
 }
 
 /// Reader Mode: strips the page to its article and shows it with typography controls.
-pub fn reader(theme: &Theme) -> String {
-    let mut js = String::from("(function(){");
+pub fn reader(theme: &Theme, token: &str) -> String {
+    let mut js = format!("(function(){{var TOKEN='{}';", token);
     js.push_str(&shell(theme, "__ax_pop_reader"));
     js.push_str(
         r#"
@@ -159,7 +159,12 @@ btn('A+',function(){size=Math.min(30,size+2);apply()},'Larger text');
 btn('Paper',function(){theme='paper';apply()});
 btn('Sepia',function(){theme='sepia';apply()});
 btn('Dark',function(){theme='dark';apply()});
-var x=btn('Exit',function(){host.remove()},'Close Reader Mode (Esc)');x.className='exit';
+var rate=1,lb;
+window.__axTts=function(on){if(lb)lb.textContent=on?'\u23f9 Stop':'\ud83d\udd0a Listen'};
+function tts(){try{window.chrome.webview.postMessage(TOKEN+'/tts-toggle/'+rate)}catch(e){}}
+lb=btn('\ud83d\udd0a Listen',tts,'Read the article aloud with the Windows voice');
+btn('1x',function(){rate=rate===1?1.25:rate===1.25?1.5:rate===1.5?0.8:1;this.textContent=rate+'x'},'Reading speed');
+var x=btn('Exit',function(){try{window.chrome.webview.postMessage(TOKEN+'/tts-stop')}catch(e){}host.remove()},'Close Reader Mode (Esc)');x.className='exit';
 box.appendChild(bar);box.appendChild(art);
 css('.wrap{position:fixed;inset:0;overflow:auto;padding:0 0 80px;font-family:Georgia,"Times New Roman",serif;line-height:1.85}'+
 '.wrap.paper{background:#faf9f6;color:#1a1a1a}.wrap.sepia{background:#f4ecd8;color:#433422}.wrap.dark{background:#16181d;color:#d7dae0}'+
@@ -173,7 +178,7 @@ css('.wrap{position:fixed;inset:0;overflow:auto;padding:0 0 80px;font-family:Geo
 'article pre{overflow:auto;background:rgba(128,128,128,.15);padding:12px;border-radius:8px}article p{margin:0 0 1em}');
 root.appendChild(box);
 document.documentElement.appendChild(host);
-document.addEventListener('keydown',function k(e){if(e.key==='Escape'){host.remove();document.removeEventListener('keydown',k,true)}},true);
+document.addEventListener('keydown',function k(e){if(e.key==='Escape'){try{window.chrome.webview.postMessage(TOKEN+'/tts-stop')}catch(x){}host.remove();document.removeEventListener('keydown',k,true)}},true);
 })();"#,
     );
     js
@@ -305,7 +310,7 @@ mod tests {
     #[test]
     fn generated_scripts_are_balanced() {
         let t = crate::theme::by_id("tea-garden");
-        for js in [reader(t), translate(t), capture_menu(t, "tok")] {
+        for js in [reader(t, "tok"), translate(t), capture_menu(t, "tok")] {
             assert_eq!(js.matches('{').count(), js.matches('}').count(), "unbalanced braces");
             assert_eq!(js.matches('(').count(), js.matches(')').count(), "unbalanced parens");
         }

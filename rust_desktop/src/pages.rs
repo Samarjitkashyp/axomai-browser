@@ -322,8 +322,11 @@ pub fn passwords_page(ctx: &PageCtx, logins: &[(i64, String, String, String)], n
         never_html.push_str("</div>");
     }
     let body = format!(
-        "{head}<div class=\"card\">{rows}</div>{never}",
+        "{head}<div class=\"bar\" style=\"display:flex;gap:8px\"><span style=\"flex:1\"></span><button class=\"btn ghost\" onclick=\"go('pw-import')\">{imp}</button><button class=\"btn ghost\" onclick=\"if(confirm('{warn}'))go('pw-export')\">{exp}</button></div><div class=\"card\">{rows}</div>{never}",
         head = ui_shell::heading(tr(ctx.lang, "passwords.title"), tr(ctx.lang, "passwords.sub")),
+        imp = escape(tr(ctx.lang, "pw.import")),
+        exp = escape(tr(ctx.lang, "pw.export")),
+        warn = escape(&tr(ctx.lang, "pw.export.warn").replace('\'', "\u{2019}")),
         rows = rows,
         never = never_html
     );
@@ -459,6 +462,37 @@ pub fn reading_list_page(ctx: &PageCtx, items: &[crate::storage::ReadingItem], i
         rows = rows
     );
     ui_shell::page(ctx, "readinglist", "Reading list", &body, "")
+}
+
+pub fn sessions_page(ctx: &PageCtx, sessions: &[crate::storage::SavedSession]) -> String {
+    let l = ctx.lang;
+    let mut rows = String::new();
+    for s in sessions {
+        let first: Vec<String> = s.urls.iter().take(3).map(|u| crate::blocklist::host_of(u)).collect();
+        rows.push_str(&format!(
+            "<div class=\"item\"><div class=\"ic\">\u{1F4BE}</div><div class=\"t\"><b>{name}</b><span>{count} {tabs} \u{b7} {first}</span></div><div class=\"m\">{time}</div>\
+             <button class=\"btn\" onclick=\"go('session-open/{id}')\">{open}</button>\
+             <button class=\"x\" title=\"{del}\" onclick=\"go('session-delete/{id}')\">\u{2715}</button></div>",
+            name = escape(&s.name),
+            count = s.urls.len(),
+            tabs = escape(tr(l, "sessions.tabs")),
+            first = escape(&first.join(", ")),
+            time = escape(&s.created_at.chars().take(10).collect::<String>()),
+            open = escape(tr(l, "sessions.open")),
+            del = escape(tr(l, "common.delete")),
+            id = s.id
+        ));
+    }
+    if rows.is_empty() {
+        rows.push_str(&format!("<div class=\"empty\">{}</div>", escape(tr(l, "sessions.empty"))));
+    }
+    let body = format!(
+        "{head}<div class=\"bar\" style=\"display:flex\"><span style=\"flex:1\"></span><button class=\"btn\" onclick=\"go('session-prompt')\">{save}</button></div><div class=\"card\">{rows}</div>",
+        head = ui_shell::heading(tr(l, "sessions.title"), tr(l, "sessions.sub")),
+        save = escape(tr(l, "sessions.save")),
+        rows = rows
+    );
+    ui_shell::page(ctx, "sessions", "Sessions", &body, "")
 }
 
 pub fn notes_page(ctx: &PageCtx, notes: &[crate::storage::Note]) -> String {
@@ -615,6 +649,14 @@ mod tests {
         let html = site_blocked_page(&ctx(), "ex<b>.com");
         assert!(html.contains("ex&lt;b&gt;.com") && !html.contains("ex<b>.com"));
         assert!(html.contains("site-unblock/") && html.contains("go('https-back')"));
+    }
+
+    #[test]
+    fn sessions_page_lists_open_and_delete() {
+        let s = crate::storage::SavedSession { id: 3, name: "<Work>".into(), urls: vec!["https://a.test/x".into(), "https://b.test".into()], created_at: "2026-10-05 09:00:00".into() };
+        let html = sessions_page(&ctx(), &[s]);
+        assert!(html.contains("go('session-open/3')") && html.contains("go('session-delete/3')") && html.contains("&lt;Work&gt;") && html.contains("a.test, b.test"));
+        assert!(sessions_page(&ctx(), &[]).contains("No saved sessions yet"));
     }
 
     #[test]

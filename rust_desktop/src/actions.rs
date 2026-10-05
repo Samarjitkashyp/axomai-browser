@@ -187,7 +187,7 @@ impl Core {
             ex::ADBLOCK | ex::PRIVACY => self.open_shield(Some(wv), shared, exts, right),
             ex::READER => {
                 if remote {
-                    let _ = wv.evaluate_script(&ext_scripts::reader(self.theme));
+                    let _ = wv.evaluate_script(&ext_scripts::reader(self.theme, &shared.token));
                 } else {
                     self.toast(wv, "Open an article page to use Reader Mode", None, shared);
                 }
@@ -498,7 +498,7 @@ impl Core {
         match result {
             Ok(path) => {
                 let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                self.toast(wv, &format!("📸 Saved {}", name), Some(("Show in folder", &shared.token, "open-folder")), shared);
+                self.toast(wv, &format!("📸 Saved {}", name), Some(("Edit", &shared.token, "shot-edit")), shared);
             }
             Err(e) => self.toast(wv, &format!("Screenshot failed: {}", e), None, shared),
         }
@@ -591,10 +591,18 @@ pub fn menu_key(cmd: &str) -> &'static str {
         "tab-search" => "menu.tab-search",
         "reading-add" => "menu.reading-add",
         "site-mute" => "menu.site-mute",
+        "site-settings" => "menu.site-settings",
         "site-block-current" => "menu.site-block-current",
         "note-new" => "menu.note-new",
         "readinglist" => "menu.readinglist",
         "notes" => "menu.notes",
+        "ext-run/2" => "menu.translate",
+        "pip" => "menu.pip",
+        "tts-toggle" => "menu.tts",
+        "voice-toggle" => "menu.voice",
+        "devpanel" => "menu.devpanel",
+        "sessions" => "menu.sessions",
+        "session-prompt" => "menu.session-prompt",
         "print" => "menu.print",
         "save-pdf" => "menu.save-pdf",
         "clear-ram" => "menu.clear-ram",
@@ -616,11 +624,19 @@ pub const MENU: &[overlays::MenuEntry] = &[
     overlays::MenuEntry { emoji: "🧩", label: "Extensions", cmd: "extensions", danger: false },
     overlays::MenuEntry { emoji: "📚", label: "Reading list", cmd: "readinglist", danger: false },
     overlays::MenuEntry { emoji: "🗒️", label: "Notes", cmd: "notes", danger: false },
+    overlays::MenuEntry { emoji: "🗂️", label: "Sessions", cmd: "sessions", danger: false },
     overlays::MenuEntry { emoji: "", label: "-", cmd: "", danger: false },
     overlays::MenuEntry { emoji: "📖", label: "Add to reading list", cmd: "reading-add", danger: false },
     overlays::MenuEntry { emoji: "📝", label: "Add note to this page", cmd: "note-new", danger: false },
+    overlays::MenuEntry { emoji: "⚙️", label: "Site settings", cmd: "site-settings", danger: false },
     overlays::MenuEntry { emoji: "🔇", label: "Mute / unmute this site", cmd: "site-mute", danger: false },
     overlays::MenuEntry { emoji: "⛔", label: "Block this site", cmd: "site-block-current", danger: true },
+    overlays::MenuEntry { emoji: "💾", label: "Save tabs as a session…", cmd: "session-prompt", danger: false },
+    overlays::MenuEntry { emoji: "🌐", label: "Translate page…", cmd: "ext-run/2", danger: false },
+    overlays::MenuEntry { emoji: "🎤", label: "Voice commands (on / off)", cmd: "voice-toggle", danger: false },
+    overlays::MenuEntry { emoji: "🔊", label: "Read aloud", cmd: "tts-toggle", danger: false },
+    overlays::MenuEntry { emoji: "🖼️", label: "Picture in picture", cmd: "pip", danger: false },
+    overlays::MenuEntry { emoji: "🛠️", label: "Developer panel", cmd: "devpanel", danger: false },
     overlays::MenuEntry { emoji: "🔎", label: "Search tabs", cmd: "tab-search", danger: false },
     overlays::MenuEntry { emoji: "◫", label: "Split view", cmd: "split-view", danger: false },
     overlays::MenuEntry { emoji: "🎨", label: "Heritage Themes", cmd: "theme-menu", danger: false },
