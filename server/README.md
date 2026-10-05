@@ -31,3 +31,19 @@ The browser cannot choose the model, the key or the prompt. Limits (UTC day): `L
 
 `node server/axomai-chat/test.js` runs the proxy's tests against a pretend OpenAI; `node server/axomai-chat/mock-openai.js` is that pretend OpenAI for trying the browser without a key
 (start the proxy with `OPENAI_API_KEY=x OPENAI_BASE=http://127.0.0.1:9100` and the browser with `AXOMAI_CHAT_URL=http://127.0.0.1:8011/v1/chat`).
+
+## The landing page (`site/`)
+
+`server/site/` builds the page at https://axomai-browser.aiaxom.co.in/ (and `/as/`, `robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt`, the web manifest and icons):
+
+```
+python server/site/make_assets.py                 # only when the artwork changes (needs Pillow)
+python server/site/build_site.py --version 4.1.0 --size 28 --sha <sha256 of the installer>
+scp -r server/site/dist/* admin@<server>:/tmp/axsite/   # then copy into /var/www/axomai-browser/site/
+```
+
+Words live in `server/site/content.py`; colours and fonts are the browser's own (Plus Jakarta Sans, the Assam Tea Garden palette, dark mode follows the system).
+The page has one H1, answer-first text and a fact table (for answer engines), an FAQ with FAQPage / HowTo / SoftwareApplication / Organization structured data (JSON-LD), canonical and hreflang links,
+Open Graph / Twitter cards, `llms.txt` for AI assistants, and a robots.txt that welcomes search and AI crawlers.
+The Assamese page is written but marked `noindex` (see `REVIEWED` in `content.py`) until a native speaker has read it; set `'as': True` and rebuild to publish it.
+After a new release, rebuild with the new version and checksum so the static text matches (the download button and checksum also refresh themselves from `release.json`).
