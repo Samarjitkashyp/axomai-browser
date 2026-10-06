@@ -1,0 +1,30 @@
+[Unit]
+Description=Axomai Browser admin panel (landing page editor)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=axomai-browser
+Group=axomai-browser
+WorkingDirectory=/var/www/axomai-browser/admin
+EnvironmentFile=-/etc/axomai-browser/admin.env
+Environment=PORT=8012
+Environment=HOST=127.0.0.1
+Environment=SRC_DIR=/var/www/axomai-browser/site-src
+Environment=SITE_DIR=/var/www/axomai-browser/site
+Environment=DOWNLOADS_DIR=/var/www/axomai-browser/downloads
+Environment=DATA_DIR=/var/www/axomai-browser/data
+Environment=COOKIE_PATH=/admin-browser-axom/
+ExecStart=/usr/bin/node /var/www/axomai-browser/admin/server.js
+Restart=on-failure
+RestartSec=3
+# keep the service away from everything it does not need
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/axomai-browser/site /var/www/axomai-browser/data
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

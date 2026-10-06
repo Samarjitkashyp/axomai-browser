@@ -47,3 +47,7 @@ The page has one H1, answer-first text and a fact table (for answer engines), an
 Open Graph / Twitter cards, `llms.txt` for AI assistants, and a robots.txt that welcomes search and AI crawlers.
 The Assamese page is written but marked `noindex` (see `REVIEWED` in `content.py`) until a native speaker has read it; set `'as': True` and rebuild to publish it.
 After a new release, rebuild with the new version and checksum so the static text matches (the download button and checksum also refresh themselves from `release.json`).
+
+## Admin panel
+
+The landing page text, header menu and footer links are edited at `/admin-browser-axom/` (login, preview, publish, backups). See `server/axomai-admin/README.md`; the service is `axomai-browser-admin` on `127.0.0.1:8012`, and the page generator it runs lives in `/var/www/axomai-browser/site-src/`.

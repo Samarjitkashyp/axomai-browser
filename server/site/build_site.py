@@ -229,9 +229,18 @@ fetch('/downloads/release.json',{{cache:'no-store'}}).then(function(r){{if(!r.ok
 </html>
 '''
 
+def preview_page(h):
+    """The admin preview: no Google tags (so editing does not count as visits), noindex, and a banner."""
+    h = re.sub(r'<!-- Google tag \(gtag\.js\) -->.*?<!-- End Google Tag Manager -->', '', h, flags=re.S)
+    h = re.sub(r'<!-- Google Tag Manager \(noscript\) -->.*?<!-- End Google Tag Manager \(noscript\) -->', '', h, flags=re.S)
+    h = re.sub(r'<meta name="robots" content="[^"]*">', '<meta name="robots" content="noindex,nofollow">', h, count=1)
+    banner = '<div style="position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9999;background:#111;color:#fff;font:600 13px sans-serif;padding:8px 16px;border-radius:999px;opacity:.92;pointer-events:none">PREVIEW - not published yet</div>'
+    return h.replace('</body>', banner + '</body>', 1)
+
+
 def robots():
     bots = ['GPTBot', 'ChatGPT-User', 'OAI-SearchBot', 'ClaudeBot', 'Claude-User', 'Claude-SearchBot', 'PerplexityBot', 'Perplexity-User', 'Google-Extended', 'Applebot-Extended', 'CCBot', 'Bytespider', 'Amazonbot']
-    out = 'User-agent: *\nAllow: /\nDisallow: /v1/\n\n'
+    out = 'User-agent: *\nAllow: /\nDisallow: /v1/\nDisallow: /admin-browser-axom/\n\n'
     out += ''.join('User-agent: %s\nAllow: /\n\n' % b for b in bots)
     return out + 'Sitemap: %s/sitemap.xml\n' % C.SITE
 
@@ -264,7 +273,22 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--version', default='4.1.0'); ap.add_argument('--size', default='28'); ap.add_argument('--date', default='2026-10-05')
     ap.add_argument('--sha', default='see the .sha256 file next to the installer'); ap.add_argument('--out', default=os.path.join(HERE, 'dist'))
+    ap.add_argument('--overrides', default='', help='JSON file written by the admin panel: text that replaces the defaults')
+    ap.add_argument('--dump-content', action='store_true', help='print every editable text as JSON and exit')
+    ap.add_argument('--preview', action='store_true', help='build for the admin preview: no tracking code, marked as a preview')
     a = ap.parse_args()
+    if a.dump_content:
+        print(json.dumps({'en': C.EN, 'as': C.AS, 'about': about.ABOUT, 'settings': {'as_reviewed': bool(C.REVIEWED['as'])}}, ensure_ascii=False))
+        return
+    A = about.ABOUT
+    if a.overrides and os.path.isfile(a.overrides):
+        ov = json.load(open(a.overrides, encoding='utf-8-sig'))
+        for lang, d in (('en', C.EN), ('as', C.AS), ('about', about.ABOUT)):
+            for k, v in (ov.get(lang) or {}).items():
+                if k in d:
+                    d[k] = v
+        C.REVIEWED['as'] = bool((ov.get('settings') or {}).get('as_reviewed', C.REVIEWED['as']))
+        A = about.ABOUT
     ctx = dict(version=a.version, size=a.size, sha=a.sha, date=a.date)
     out = a.out
     if os.path.isdir(out):
@@ -274,9 +298,12 @@ def main():
     shutil.copy(os.path.join(HERE, 'favicon.ico'), out)
     w = lambda p, s: open(os.path.join(out, p), 'w', encoding='utf-8', newline='\n').write(s)
     home = page('en', ctx)
+    pages = {}
     os.makedirs(os.path.join(out, 'about'))
-    w('index.html', home); w('as/index.html', page('as', ctx))
-    w('about/index.html', about.build(home, C.SITE, ctx, C.GITHUB, '/downloads/Axomai-Setup-%s.exe' % ctx['version']))
+    pages = {'index.html': home, 'as/index.html': page('as', ctx),
+             'about/index.html': about.build(home, C.SITE, ctx, C.GITHUB, '/downloads/Axomai-Setup-%s.exe' % ctx['version'], A)}
+    for name, text in pages.items():
+        w(name, preview_page(text) if a.preview else text)
     shutil.copy(os.path.join(HERE, 'sitemap.xsl'), out)
     w('robots.txt', robots()); w('sitemap.xml', sitemap(a.date)); w('llms.txt', llms(ctx, False)); w('llms-full.txt', llms(ctx, True))
     w('site.webmanifest', json.dumps({'name': 'Axomai Browser', 'short_name': 'Axomai', 'description': 'The free AI browser made in Assam', 'start_url': '/', 'display': 'browser', 'background_color': '#f0fdf4', 'theme_color': '#059669',
