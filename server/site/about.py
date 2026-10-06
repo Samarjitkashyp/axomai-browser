@@ -1,30 +1,99 @@
 # -*- coding: utf-8 -*-
 """The About page (English): who is behind Axomai Browser, the parent company Axom AI (aiaxom.co.in) and what the browser is.
 
-`build()` takes the finished English landing page and swaps in the About content, title, description, canonical address
-and structured data, so the header, footer, menu and tracking stay identical on every page.
+`ABOUT` holds every piece of text on the page (the admin panel edits it). `build()` takes the finished English landing page
+and swaps in the About content, title, description, canonical address and structured data, so the header, footer, menu and
+tracking stay identical on every page.
+
+In text fields, `{parent}` becomes a link to Axom AI and `{version}` the current browser version.
 """
 import html
 import json
 import re
 
 PARENT_URL = 'https://aiaxom.co.in/'
-TITLE = 'About Axomai Browser and Axom AI | Made in Assam'
-DESC = ('Axomai Browser is a free Windows browser with a built-in AI assistant, a product of Axom AI (aiaxom.co.in), '
-        "Assam's own artificial intelligence company based in Hajo, Guwahati.")
 
-FAQ = [
-    ('Who makes Axomai Browser?',
-     "Axomai Browser is made by Samarjit Kashyap, lead AI researcher at Axom AI, with Axom AI's founder Debajit Malakar. Axom AI (aiaxom.co.in) is an Assam-based artificial intelligence company."),
-    ('Is Axomai Browser part of Axom AI?',
-     'Yes. Axom AI (https://aiaxom.co.in/) is the parent company. Axomai Browser is one of its products, and it brings the Axom AI assistant into everyday web browsing.'),
-    ('What is Axom AI?',
-     "Axom AI is an Assam-based artificial intelligence platform in Guwahati built for Assamese speakers. Its website lists an Assamese chatbot, document and PDF tools, image generation, file utilities, web search, data analysis and translation, in Assamese, English and Hindi."),
-    ('Is Axomai Browser free and open source?',
-     'Yes. Axomai Browser is free to download and use, needs no account, and its source code is published on GitHub under the MIT licence.'),
-    ('Where can I download Axomai Browser?',
-     'From https://axomai-browser.aiaxom.co.in/. It runs on Windows 10 and Windows 11 (64-bit).'),
-]
+ABOUT = dict(
+    title='About Axomai Browser and Axom AI | Made in Assam',
+    desc=('Axomai Browser is a free Windows browser with a built-in AI assistant, a product of Axom AI (aiaxom.co.in), '
+          "Assam's own artificial intelligence company based in Hajo, Guwahati."),
+    crumb='About',
+    eyebrow='ABOUT US',
+    h1_pre='Built in Assam by ',
+    h1_em='Axom AI',
+    lead='Axomai Browser is a free Windows web browser with a built-in AI assistant. It is a product of {parent} (aiaxom.co.in), an artificial intelligence company from Assam, India.',
+    chips=['Free', 'Windows 10 & 11', 'Open source', 'Assamese · Hindi · Bengali · English'],
+    btn_download='Download for Windows',
+    btn_visit='Visit aiaxom.co.in',
+    fam_parent_label='Parent company',
+    fam_parent_p="Assam's own artificial intelligence platform, at aiaxom.co.in.",
+    fam_product_label='Product',
+    fam_product_p='The Axom AI assistant, inside a free Windows browser.',
+    company_kicker='THE COMPANY',
+    company_h='The company behind it: Axom AI',
+    company_p1="{parent} is Assam's own artificial intelligence platform, built in Guwahati for people who speak Assamese. Its goal is simple: AI that understands Assamese language and culture, instead of treating Assamese as an afterthought.",
+    company_p2='According to its website, Axom AI offers an Assamese chatbot, document and PDF reading, image generation, more than twenty file tools, live web search, spreadsheet analysis and translation. It works in Assamese, English and Hindi, and has a free plan.',
+    people=[['DM', 'Debajit Malakar', 'Founder, Axom AI'], ['SK', 'Samarjit Kashyap', 'Lead AI researcher, author of Axomai Browser']],
+    glance_h='Axom AI at a glance',
+    glance=[['Website', 'aiaxom.co.in'], ['Based in', 'Hajo, Guwahati, Assam, India'], ['Languages', 'Assamese, English, Hindi'], ['Product from Axom AI', 'Axomai Browser']],
+    product_kicker='THE PRODUCT',
+    product_h='What Axomai Browser is',
+    product_p="A desktop browser for Windows 10 and 11. Web pages run on the Microsoft Edge WebView2 (Chromium) engine, so websites work the way they do in other modern browsers. The tabs, toolbar, settings and built-in pages are Axomai's own.",
+    features=[['\U0001F916', 'Axom AI built in', 'Ask anything, or ask about the page you are reading. Answers stream in and chats are not saved.'],
+              ['\U0001F5E3\uFE0F', 'Speaks your language', 'Menus and settings in Assamese, Hindi, Bengali and English, plus page translation and read-aloud.'],
+              ['\U0001F33F', 'Made for Assam', 'Headlines from Assamese and North-East news sources, weather for 35 towns and five Assam-inspired themes.'],
+              ['\U0001F6E1\uFE0F', 'Private by default', 'Ad and tracker blocking, HTTPS-only mode, per-site permissions and no account. The AI key stays on our server.'],
+              ['\U0001F9F0', 'Everyday tools', 'Tab groups and search, split view, bookmarks, downloads, Chrome extensions (load unpacked) and encrypted folder sync.'],
+              ['\U0001F513', 'Free and open', 'No price and no sign-in. Source code on GitHub under the MIT licence; updates are checked against a SHA-256 checksum.']],
+    why_kicker='THE IDEA',
+    why_h='Why Axom AI made a browser',
+    why_p='Most people meet AI inside a browser tab. Putting Axom AI inside the browser means a student in Jorhat or a shopkeeper in Guwahati can ask a question in Assamese about the page in front of them, without copying text into another app.',
+    why_quote='Axomai Browser is how Axom AI reaches everyday browsing: in your language, private by default, and free.',
+    facts_kicker='AT A GLANCE',
+    facts_h='Quick facts',
+    facts=[['Product', 'Axomai Browser (also written Axom AI Browser)'], ['Parent company', 'Axom AI (aiaxom.co.in)'],
+           ['Author', 'Samarjit Kashyap, lead AI researcher at Axom AI'], ['Platform', 'Windows 10 and 11 (64-bit)'], ['Version', '{version}'],
+           ['Price', 'Free'], ['Licence', 'MIT, open source'], ['Interface languages', 'Assamese, Hindi, Bengali, English']],
+    faq_kicker='FAQ',
+    faq_h='Questions about us',
+    faq=[
+        ['Who makes Axomai Browser?',
+         "Axomai Browser is made by Samarjit Kashyap, lead AI researcher at Axom AI, with Axom AI's founder Debajit Malakar. Axom AI (aiaxom.co.in) is an Assam-based artificial intelligence company."],
+        ['Is Axomai Browser part of Axom AI?',
+         'Yes. Axom AI (https://aiaxom.co.in/) is the parent company. Axomai Browser is one of its products, and it brings the Axom AI assistant into everyday web browsing.'],
+        ['What is Axom AI?',
+         "Axom AI is an Assam-based artificial intelligence platform in Guwahati built for Assamese speakers. Its website lists an Assamese chatbot, document and PDF tools, image generation, file utilities, web search, data analysis and translation, in Assamese, English and Hindi."],
+        ['Is Axomai Browser free and open source?',
+         'Yes. Axomai Browser is free to download and use, needs no account, and its source code is published on GitHub under the MIT licence.'],
+        ['Where can I download Axomai Browser?',
+         'From https://axomai-browser.aiaxom.co.in/. It runs on Windows 10 and Windows 11 (64-bit).'],
+    ],
+    band_h='Try Axomai Browser',
+    band_p='Free for Windows 10 and 11. No account needed.',
+    band_btn='Download for Windows',
+)
+
+# kept for the callers that import the old names
+TITLE = ABOUT['title']
+DESC = ABOUT['desc']
+FAQ = ABOUT['faq']
+
+
+def _e(s):
+    return html.escape(s, quote=True)
+
+
+def _rich(s, ctx):
+    """Escapes text, then turns {parent} into a link to Axom AI and {version} into the version."""
+    s = _e(s).replace('{version}', _e(ctx['version']))
+    return s.replace('{parent}', '<a href="%s" rel="noopener">Axom AI</a>' % PARENT_URL)
+
+
+def _linked(s, ctx):
+    """Like _rich, and the text aiaxom.co.in becomes a link."""
+    s = _rich(s, ctx)
+    return s.replace('aiaxom.co.in', '<a href="%s" rel="noopener">aiaxom.co.in</a>' % PARENT_URL, 1) if '<a ' not in s else s
+
 
 CSS = """
 .about{overflow-x:clip}
@@ -73,85 +142,69 @@ CSS = """
 """
 
 
-def body(ctx, dl):
-    faq = ''.join('<details%s><summary>%s</summary><p>%s</p></details>' % (' open' if i == 0 else '', html.escape(q), html.escape(a)) for i, (q, a) in enumerate(FAQ))
-    feats = [('🤖', 'Axom AI built in', 'Ask anything, or ask about the page you are reading. Answers stream in and chats are not saved.'),
-             ('🗣️', 'Speaks your language', 'Menus and settings in Assamese, Hindi, Bengali and English, plus page translation and read-aloud.'),
-             ('🌿', 'Made for Assam', 'Headlines from Assamese and North-East news sources, weather for 35 towns and five Assam-inspired themes.'),
-             ('🛡️', 'Private by default', 'Ad and tracker blocking, HTTPS-only mode, per-site permissions and no account. The AI key stays on our server.'),
-             ('🧰', 'Everyday tools', 'Tab groups and search, split view, bookmarks, downloads, Chrome extensions (load unpacked) and encrypted folder sync.'),
-             ('🔓', 'Free and open', 'No price and no sign-in. Source code on GitHub under the MIT licence; updates are checked against a SHA-256 checksum.')]
-    fc = ''.join('<div class="fcard"><span aria-hidden="true">%s</span><b>%s</b><p>%s</p></div>' % (e, html.escape(t), html.escape(d)) for e, t, d in feats)
+def body(ctx, dl, A):
+    r = lambda k: _rich(A[k], ctx)
+    faq = ''.join('<details%s><summary>%s</summary><p>%s</p></details>' % (' open' if i == 0 else '', _e(q), _e(a)) for i, (q, a) in enumerate(A['faq']))
+    fc = ''.join('<div class="fcard"><span aria-hidden="true">%s</span><b>%s</b><p>%s</p></div>' % (_e(e), _e(t), _e(d)) for e, t, d in A['features'])
+    chips = ''.join('<li>%s</li>' % _e(c) for c in A['chips'])
+    people = ''.join('<div class="person"><i aria-hidden="true">%s</i><div><b>%s</b><span>%s</span></div></div>' % (_e(i), _e(n), _e(role)) for i, n, role in A['people'])
+    glance = ''.join('<div><dt>%s</dt><dd>%s</dd></div>' % (_e(k), _linked(v, ctx)) for k, v in A['glance'])
+    facts = ''.join('<tr><th scope="row">%s</th><td>%s</td></tr>' % (_e(k), _linked(v, ctx)) for k, v in A['facts'])
     return f'''<main id="main" class="about">
 <div class="ahero"><div class="wrap"><div class="hgrid"><div>
-<p class="crumbs"><a href="/">Axomai Browser</a> &nbsp;/&nbsp; About</p>
-<span class="eyebrow">ABOUT US</span>
-<h1>Built in Assam by <em>Axom AI</em></h1>
-<p class="lead">Axomai Browser is a free Windows web browser with a built-in AI assistant. It is a product of <a href="{PARENT_URL}" rel="noopener">Axom AI</a> (aiaxom.co.in), an artificial intelligence company from Assam, India.</p>
-<ul class="chips"><li>Free</li><li>Windows 10 &amp; 11</li><li>Open source</li><li>Assamese · Hindi · Bengali · English</li></ul>
-<div class="acts"><a class="btn" href="{dl}" data-dl>Download for Windows</a><a class="btn ghost" href="{PARENT_URL}" rel="noopener">Visit aiaxom.co.in</a></div>
+<p class="crumbs"><a href="/">Axomai Browser</a> &nbsp;/&nbsp; {_e(A['crumb'])}</p>
+<span class="eyebrow">{_e(A['eyebrow'])}</span>
+<h1>{_e(A['h1_pre'])}<em>{_e(A['h1_em'])}</em></h1>
+<p class="lead">{r('lead')}</p>
+<ul class="chips">{chips}</ul>
+<div class="acts"><a class="btn" href="{dl}" data-dl>{_e(A['btn_download'])}</a><a class="btn ghost" href="{PARENT_URL}" rel="noopener">{_e(A['btn_visit'])}</a></div>
 </div>
 <div class="family" aria-label="How Axom AI and Axomai Browser are related">
-<div class="fam"><small>Parent company</small><b>Axom AI</b><p>Assam's own artificial intelligence platform, at aiaxom.co.in.</p></div>
+<div class="fam"><small>{_e(A['fam_parent_label'])}</small><b>Axom AI</b><p>{_e(A['fam_parent_p'])}</p></div>
 <div class="arrow" aria-hidden="true">&rarr;</div>
-<div class="fam main"><small>Product</small><b>Axomai Browser</b><p>The Axom AI assistant, inside a free Windows browser.</p></div>
+<div class="fam main"><small>{_e(A['fam_product_label'])}</small><b>Axomai Browser</b><p>{_e(A['fam_product_p'])}</p></div>
 </div></div></div></div>
 
 <section id="parent" aria-labelledby="parent-h"><div class="wrap">
-<div class="shead"><div class="kicker">THE COMPANY</div><h2 id="parent-h">The company behind it: Axom AI</h2></div>
+<div class="shead"><div class="kicker">{_e(A['company_kicker'])}</div><h2 id="parent-h">{_e(A['company_h'])}</h2></div>
 <div class="parent">
 <div>
-<p><a href="{PARENT_URL}" rel="noopener">Axom AI</a> is Assam's own artificial intelligence platform, built in Guwahati for people who speak Assamese. Its goal is simple: AI that understands Assamese language and culture, instead of treating Assamese as an afterthought.</p>
-<p>According to its website, Axom AI offers an Assamese chatbot, document and PDF reading, image generation, more than twenty file tools, live web search, spreadsheet analysis and translation. It works in Assamese, English and Hindi, and has a free plan.</p>
-<div class="people">
-<div class="person"><i aria-hidden="true">DM</i><div><b>Debajit Malakar</b><span>Founder, Axom AI</span></div></div>
-<div class="person"><i aria-hidden="true">SK</i><div><b>Samarjit Kashyap</b><span>Lead AI researcher, author of Axomai Browser</span></div></div>
+<p>{r('company_p1')}</p>
+<p>{r('company_p2')}</p>
+<div class="people">{people}</div>
 </div>
-</div>
-<aside class="pcard" aria-label="Axom AI at a glance"><h3>Axom AI at a glance</h3>
-<dl><div><dt>Website</dt><dd><a href="{PARENT_URL}" rel="noopener">aiaxom.co.in</a></dd></div>
-<div><dt>Based in</dt><dd>Hajo, Guwahati, Assam, India</dd></div>
-<div><dt>Languages</dt><dd>Assamese, English, Hindi</dd></div>
-<div><dt>Product from Axom AI</dt><dd>Axomai Browser</dd></div></dl></aside>
+<aside class="pcard" aria-label="{_e(A['glance_h'])}"><h3>{_e(A['glance_h'])}</h3>
+<dl>{glance}</dl></aside>
 </div>
 </div></section>
 
 <section id="browser" class="alt" aria-labelledby="browser-h"><div class="wrap">
-<div class="shead"><div class="kicker">THE PRODUCT</div><h2 id="browser-h">What Axomai Browser is</h2>
-<p>A desktop browser for Windows 10 and 11. Web pages run on the Microsoft Edge WebView2 (Chromium) engine, so websites work the way they do in other modern browsers. The tabs, toolbar, settings and built-in pages are Axomai's own.</p></div>
+<div class="shead"><div class="kicker">{_e(A['product_kicker'])}</div><h2 id="browser-h">{_e(A['product_h'])}</h2>
+<p>{r('product_p')}</p></div>
 <div class="fgrid2">{fc}</div>
 </div></section>
 
 <section id="why" class="slim" aria-labelledby="why-h"><div class="wrap"><div class="why">
-<div><div class="shead" style="margin:0"><div class="kicker">THE IDEA</div><h2 id="why-h">Why Axom AI made a browser</h2>
-<p>Most people meet AI inside a browser tab. Putting Axom AI inside the browser means a student in Jorhat or a shopkeeper in Guwahati can ask a question in Assamese about the page in front of them, without copying text into another app.</p></div></div>
-<div class="quote">Axomai Browser is how Axom AI reaches everyday browsing: in your language, private by default, and free.</div>
+<div><div class="shead" style="margin:0"><div class="kicker">{_e(A['why_kicker'])}</div><h2 id="why-h">{_e(A['why_h'])}</h2>
+<p>{r('why_p')}</p></div></div>
+<div class="quote">{r('why_quote')}</div>
 </div></div></section>
 
 <section id="facts" class="alt" aria-labelledby="facts-h"><div class="wrap"><div class="duo">
-<div><div class="shead"><div class="kicker">AT A GLANCE</div><h2 id="facts-h">Quick facts</h2></div>
-<table class="facts"><tbody>
-<tr><th scope="row">Product</th><td>Axomai Browser (also written Axom AI Browser)</td></tr>
-<tr><th scope="row">Parent company</th><td><a href="{PARENT_URL}" rel="noopener">Axom AI (aiaxom.co.in)</a></td></tr>
-<tr><th scope="row">Author</th><td>Samarjit Kashyap, lead AI researcher at Axom AI</td></tr>
-<tr><th scope="row">Platform</th><td>Windows 10 and 11 (64-bit)</td></tr>
-<tr><th scope="row">Version</th><td>{ctx['version']}</td></tr>
-<tr><th scope="row">Price</th><td>Free</td></tr>
-<tr><th scope="row">Licence</th><td>MIT, open source</td></tr>
-<tr><th scope="row">Interface languages</th><td>Assamese, Hindi, Bengali, English</td></tr>
-</tbody></table>
+<div><div class="shead"><div class="kicker">{_e(A['facts_kicker'])}</div><h2 id="facts-h">{_e(A['facts_h'])}</h2></div>
+<table class="facts"><tbody>{facts}</tbody></table>
 </div>
 
-<div id="faq"><div class="shead"><div class="kicker">FAQ</div><h2 id="faq-h">Questions about us</h2></div>
+<div id="faq"><div class="shead"><div class="kicker">{_e(A['faq_kicker'])}</div><h2 id="faq-h">{_e(A['faq_h'])}</h2></div>
 {faq}
 </div>
 </div></div></section>
 
-<section class="slim"><div class="wrap"><div class="band"><h2>Try Axomai Browser</h2><p>Free for Windows 10 and 11. No account needed.</p><a class="btn" href="{dl}" data-dl>Download for Windows</a></div></div></section>
+<section class="slim"><div class="wrap"><div class="band"><h2>{_e(A['band_h'])}</h2><p>{r('band_p')}</p><a class="btn" href="{dl}" data-dl>{_e(A['band_btn'])}</a></div></div></section>
 </main>'''
 
 
-def graph(site, ctx, github):
+def graph(site, ctx, github, A):
     about_url = site + '/about/'
     parent = {'@type': 'Organization', '@id': PARENT_URL + '#org', 'name': 'Axom AI', 'alternateName': ['AIAXOM', 'Axom AI Assam'], 'url': PARENT_URL,
               'description': "Assam's own artificial intelligence platform for Assamese speakers, based in Guwahati.",
@@ -163,21 +216,22 @@ def graph(site, ctx, github):
         parent,
         {'@type': 'Organization', '@id': site + '/#org', 'name': 'Axomai', 'url': site + '/', 'parentOrganization': {'@id': PARENT_URL + '#org'},
          'logo': {'@type': 'ImageObject', 'url': site + '/assets/logo-512.png', 'width': 512, 'height': 512}, 'sameAs': [github, PARENT_URL]},
-        {'@type': 'AboutPage', '@id': about_url + '#webpage', 'url': about_url, 'name': TITLE, 'description': DESC, 'inLanguage': 'en-IN',
+        {'@type': 'AboutPage', '@id': about_url + '#webpage', 'url': about_url, 'name': A['title'], 'description': A['desc'], 'inLanguage': 'en-IN',
          'isPartOf': {'@id': site + '/#website'}, 'mainEntity': {'@id': PARENT_URL + '#org'}, 'dateModified': ctx['date'],
          'primaryImageOfPage': {'@type': 'ImageObject', 'url': site + '/assets/og-image.jpg'}},
         {'@type': 'WebSite', '@id': site + '/#website', 'url': site + '/', 'name': 'Axomai Browser', 'publisher': {'@id': site + '/#org'}},
         {'@type': 'SoftwareApplication', '@id': site + '/#app', 'name': 'Axomai Browser', 'applicationCategory': 'BrowserApplication', 'operatingSystem': 'Windows 10, Windows 11',
          'url': site + '/', 'author': {'@id': site + '/#org'}, 'publisher': {'@id': PARENT_URL + '#org'}, 'isAccessibleForFree': True,
          'offers': {'@type': 'Offer', 'price': '0', 'priceCurrency': 'INR'}},
-        {'@type': 'FAQPage', '@id': about_url + '#faq', 'mainEntity': [{'@type': 'Question', 'name': q, 'acceptedAnswer': {'@type': 'Answer', 'text': a}} for q, a in FAQ]},
+        {'@type': 'FAQPage', '@id': about_url + '#faq', 'mainEntity': [{'@type': 'Question', 'name': q, 'acceptedAnswer': {'@type': 'Answer', 'text': a}} for q, a in A['faq']]},
         {'@type': 'BreadcrumbList', 'itemListElement': [{'@type': 'ListItem', 'position': 1, 'name': 'Axomai Browser', 'item': site + '/'},
-                                                         {'@type': 'ListItem', 'position': 2, 'name': 'About', 'item': about_url}]},
+                                                         {'@type': 'ListItem', 'position': 2, 'name': A['crumb'], 'item': about_url}]},
     ]
 
 
-def build(home_html, site, ctx, github, dl):
+def build(home_html, site, ctx, github, dl, A=None):
     """Turns the rendered English landing page into the About page."""
+    A = A or ABOUT
     about_url = site + '/about/'
     h = home_html
     e = html.escape
@@ -188,21 +242,21 @@ def build(home_html, site, ctx, github, dl):
         assert n == 1, pattern
         h = new
 
-    sub(r'<title>.*?</title>', '<title>%s</title>' % e(TITLE))
-    sub(r'<meta name="description" content="[^"]*">', '<meta name="description" content="%s">' % e(DESC))
+    sub(r'<title>.*?</title>', '<title>%s</title>' % e(A['title']))
+    sub(r'<meta name="description" content="[^"]*">', '<meta name="description" content="%s">' % e(A['desc']))
     sub(r'<link rel="canonical" href="[^"]*">', '<link rel="canonical" href="%s">' % about_url)
     h = re.sub(r'<link rel="alternate" hreflang="[^"]*" href="[^"]*">', '', h)
-    sub(r'<meta property="og:title" content="[^"]*">', '<meta property="og:title" content="%s">' % e(TITLE))
-    sub(r'<meta property="og:description" content="[^"]*">', '<meta property="og:description" content="%s">' % e(DESC))
+    sub(r'<meta property="og:title" content="[^"]*">', '<meta property="og:title" content="%s">' % e(A['title']))
+    sub(r'<meta property="og:description" content="[^"]*">', '<meta property="og:description" content="%s">' % e(A['desc']))
     sub(r'<meta property="og:url" content="[^"]*">', '<meta property="og:url" content="%s">' % about_url)
-    sub(r'<meta name="twitter:title" content="[^"]*">', '<meta name="twitter:title" content="%s">' % e(TITLE))
-    sub(r'<meta name="twitter:description" content="[^"]*">', '<meta name="twitter:description" content="%s">' % e(DESC))
-    ld = json.dumps({'@context': 'https://schema.org', '@graph': graph(site, ctx, github)}, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
+    sub(r'<meta name="twitter:title" content="[^"]*">', '<meta name="twitter:title" content="%s">' % e(A['title']))
+    sub(r'<meta name="twitter:description" content="[^"]*">', '<meta name="twitter:description" content="%s">' % e(A['desc']))
+    ld = json.dumps({'@context': 'https://schema.org', '@graph': graph(site, ctx, github, A)}, ensure_ascii=False, separators=(',', ':')).replace('</', '<\\/')
     sub(r'<script type="application/ld\+json">.*?</script>', '<script type="application/ld+json">%s</script>' % ld, re.S)
     sub(r'</style>', CSS + '</style>')
-    sub(r'<main id="main">.*?</main>', body(ctx, dl), re.S)
+    sub(r'<main id="main">.*?</main>', body(ctx, dl, A), re.S)
     # the header, menu and footer links point at sections of the home page
-    h = h.replace('<a href="/about/">About</a>', '<a href="/about/" aria-current="page">About</a>')
+    h = h.replace('<a href="/about/">', '<a href="/about/" aria-current="page">')
     h = h.replace('href="#', 'href="/#')
     h = h.replace('href="/#main"', 'href="#main"')
     return h

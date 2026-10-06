@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Axomai admin</title>
+<style>
+:root{--acc:#10b981;--acc2:#059669;--bg:#f4f7f6;--card:#fff;--text:#0f2a22;--muted:#5b6b66;--line:#d6e3dd;--danger:#dc2626;--soft:#e6f7ef}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#111c2e;--text:#e2e8f0;--muted:#94a3b8;--line:#22324a;--soft:#12302a}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text)}
+button,input,textarea{font:inherit;color:inherit}
+.hide{display:none!important}
+.btn{border:0;border-radius:10px;padding:9px 16px;font-weight:700;cursor:pointer;background:var(--acc);color:#fff}
+.btn:hover{background:var(--acc2)}.btn.alt{background:transparent;color:var(--text);border:1px solid var(--line)}.btn.alt:hover{background:var(--soft)}
+.btn.sm{padding:5px 10px;font-size:.82rem}.btn:disabled{opacity:.5;cursor:default}
+.btn.danger{background:transparent;color:var(--danger);border:1px solid var(--line)}
+#login{max-width:380px;margin:12vh auto;padding:28px;background:var(--card);border:1px solid var(--line);border-radius:18px}
+#login h1{margin:0 0 4px;font-size:1.3rem}#login p{margin:0 0 18px;color:var(--muted)}
+#login input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);margin-bottom:12px}
+.err{color:var(--danger);min-height:1.4em;margin:6px 0}
+header.bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line)}
+header.bar h1{font-size:1.05rem;margin:0 auto 0 0}
+#dirty{font-size:.85rem;color:var(--muted)}#dirty.on{color:#b45309;font-weight:700}
+.layout{display:grid;grid-template-columns:230px 1fr;gap:20px;max-width:1300px;margin:0 auto;padding:18px}
+nav.tabs{display:flex;flex-direction:column;gap:4px;position:sticky;top:70px;align-self:start}
+nav.tabs button{text-align:left;padding:10px 12px;border:0;border-radius:10px;background:transparent;cursor:pointer;font-weight:600;color:var(--muted)}
+nav.tabs button:hover{background:var(--soft)}nav.tabs button.on{background:var(--acc);color:#fff}
+nav.tabs hr{border:0;border-top:1px solid var(--line);width:100%;margin:6px 0}
+main{min-width:0}
+main h2{margin:0 0 4px}.sub{color:var(--muted);margin:0 0 16px}
+.field{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px}
+.field>label,.flabel{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-weight:700;margin-bottom:6px}
+.flabel small,.field>label small{font-weight:400;color:var(--muted)}
+.field.changed{border-left:4px solid var(--acc)}
+textarea,input.t{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--bg);resize:vertical;min-height:38px;line-height:1.45}
+textarea:focus,input:focus{outline:2px solid var(--acc);outline-offset:-1px}
+textarea[disabled]{opacity:.6}
+.row{display:grid;gap:8px;align-items:start;padding:8px;border:1px dashed var(--line);border-radius:10px;margin-bottom:8px}
+.row .tools{display:flex;gap:4px;justify-content:flex-end}
+.cols1{grid-template-columns:1fr}.cols2{grid-template-columns:1fr 1.6fr}.cols3{grid-template-columns:1fr 1fr 1.6fr}
+.card{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px;background:var(--bg)}
+.card h4{margin:0 0 8px}
+.mini{font-size:.8rem;color:var(--muted);margin:0 0 4px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#111;color:#fff;padding:10px 18px;border-radius:999px;z-index:50;max-width:90vw}
+.toast.bad{background:var(--danger)}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);max-width:520px;width:92vw}
+dialog button.item{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:transparent;border-radius:8px;cursor:pointer}
+dialog button.item:hover{background:var(--soft)}
+@media (max-width:820px){.flabel,.field>label{flex-direction:column;gap:2px}.layout{grid-template-columns:1fr}nav.tabs{position:static;flex-direction:row;flex-wrap:wrap}nav.tabs hr{display:none}.cols2,.cols3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<section id="login" class="hide">
+  <h1>Axomai admin</h1>
+  <p>Landing page editor</p>
+  <form id="loginForm">
+    <input id="pw" type="password" placeholder="Password" autocomplete="current-password" required>
+    <div class="err" id="loginErr"></div>
+    <button class="btn" style="width:100%">Log in</button>
+  </form>
+</section>
+
+<div id="app" class="hide">
+  <header class="bar">
+    <h1>Axomai admin</h1>
+    <span id="dirty"></span>
+    <button class="btn alt" id="restoreBtn">Restore an older version</button>
+    <button class="btn alt" id="previewBtn">Preview</button>
+    <button class="btn" id="publishBtn">Publish</button>
+    <button class="btn alt" id="logoutBtn">Log out</button>
+  </header>
+  <div class="layout">
+    <nav class="tabs" id="tabs"></nav>
+    <main id="main"></main>
+  </div>
+</div>
+
+<dialog id="restoreDlg">
+  <h3 style="margin-top:0">Restore an older version</h3>
+  <p class="mini">Every publish keeps a copy of the version it replaced. Pick one to load it into the editor; nothing goes live until you press Publish.</p>
+  <div id="backupList"></div>
+  <div style="text-align:right;margin-top:10px"><button class="btn alt" id="closeDlg">Close</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const HEADERS = { 'Content-Type': 'application/json', 'X-Axomai-Admin': '1' };
+async function api(path, body) {
+  const r = await fetch('api/' + path, body === undefined ? { credentials: 'same-origin' } : { method: 'POST', headers: HEADERS, body: JSON.stringify(body), credentials: 'same-origin' });
+  let j = {};
+  try { j = await r.json(); } catch (e) { /* not JSON */ }
+  if (r.status === 401 && path !== 'login') { showLogin(); throw new Error('Please log in again.'); }
+  if (!r.ok) throw new Error(j.error || ('Error ' + r.status));
+  return j;
+}
+function toast(msg, bad) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (bad ? ' bad' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), bad ? 7000 : 2600);
+}
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v === true) e.setAttribute(k, ''); else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
+  return e;
+}
+
+// ---------------------------------------------------------------- what each field is called
+const HF = ['nav', 'cta', 'cta_short', 'footer_note', 'foot_menu', 'foot_links', 'foot_lang', 'foot_rights', 'footer_links'];
+const TABS = [
+  { id: 'en', label: 'Home page - English', lang: 'en', keys: (k) => !HF.includes(k), page: 'en' },
+  { id: 'as', label: 'Home page - Assamese', lang: 'as', keys: (k) => !HF.includes(k), page: 'as' },
+  { id: 'about', label: 'About page', lang: 'about', keys: () => true, page: 'about' },
+  { sep: true },
+  { id: 'hf-en', label: 'Header & footer - English', lang: 'en', keys: (k) => HF.includes(k), page: 'en' },
+  { id: 'hf-as', label: 'Header & footer - Assamese', lang: 'as', keys: (k) => HF.includes(k), page: 'as' },
+  { sep: true },
+  { id: 'settings', label: 'Settings' },
+];
+const L = {
+  title: ['Browser tab title', 'Shown in the tab and in Google results (SEO). Keep it under about 60 characters.'],
+  desc: ['Search result description', 'Shown under the title in Google (SEO). About 150 characters.'],
+  nav: ['Header menu links', 'The links at the top. Use #section for a part of the home page, /about/ for another page, or a full https:// address.'],
+  cta: ['Download button text'], cta_short: ['Download button text on phones (short)'],
+  eyebrow: ['Small label above the heading', 'Write & as &amp; in this one.'], h1: ['Main heading', 'You can colour a word with <em>word</em>.'], lead: ['Intro paragraph'],
+  nowin_h: ['Note for phones and Macs: heading'], nowin_p: ['Note for phones and Macs: text'], nowin_btn: ['Note for phones and Macs: button'],
+  cta_meta: ['Small text on the download button', 'Placeholders: {version} {size}'], secondary: ['Second button text'],
+  fine: ['Small print under the buttons', 'Placeholders: {sha}. You can use <b> and <code>.'],
+  shot_url: ['Demo window: address bar text'], shot_title: ['Demo window: title'], shot_sub: ['Demo window: subtitle'],
+  chat: ['Demo chat messages', 'The first box says who speaks (user or ai).'], strip: ['Four small boxes under the demo'],
+  def_kicker: ['"What is it" section: small label'], def_h: ['"What is it" section: heading'], def_p: ['"What is it" section: answer', 'You can use <b>bold</b>.'],
+  facts_h: ['Facts table: heading'], facts: ['Facts table rows', 'Placeholders: {version} {size}'],
+  features: ['Feature blocks', 'Edit the text. The blocks themselves are fixed.'],
+  themes_h: ['Themes: heading'], themes_p: ['Themes: text'], themes: ['Theme names'],
+  gallery_h: ['Pictures: heading'], gallery_note: ['Pictures: note'], gallery: ['Pictures: captions'],
+  install_h: ['Install section: heading'], steps: ['Install steps', 'Placeholders: {version} {size}'], req_h: ['"Good to know": heading'], req: ['"Good to know" points'],
+  faq_h: ['FAQ: heading'], faq: ['Questions and answers', 'Placeholders: {version} {size} {sha}'],
+  final_h: ['Last banner: heading'], final_p: ['Last banner: text'],
+  footer_note: ['Footer: short description'], foot_menu: ['Footer: menu column title'], foot_links: ['Footer: links column title'], foot_lang: ['Footer: language column title'],
+  foot_rights: ['Footer: bottom line'], footer_links: ['Footer links column', 'Text, then the link address. {version} works in the download address.'],
+  howto_name: ['Install steps title for search engines (SEO)'],
+  // About page
+  crumb: ['Breadcrumb name'], h1_pre: ['Heading: normal part'], h1_em: ['Heading: coloured part'],
+  chips: ['Small badges under the intro'], btn_download: ['Download button'], btn_visit: ['Second button (visit parent company)'],
+  fam_parent_label: ['Parent card: label'], fam_parent_p: ['Parent card: text'], fam_product_label: ['Product card: label'], fam_product_p: ['Product card: text'],
+  company_kicker: ['Company section: small label'], company_h: ['Company section: heading'], company_p1: ['Company paragraph 1', '{parent} turns into a link to Axom AI.'], company_p2: ['Company paragraph 2'],
+  people: ['People cards', 'Initials, name, role.'], glance_h: ['"At a glance" card: heading'], glance: ['"At a glance" rows', 'aiaxom.co.in turns into a link.'],
+  product_kicker: ['Product section: small label'], product_h: ['Product section: heading'], product_p: ['Product section: text'],
+  why_kicker: ['"Why" section: small label'], why_h: ['"Why" section: heading'], why_p: ['"Why" section: text'], why_quote: ['"Why" section: quote'],
+  facts_kicker: ['Facts: small label'], faq_kicker: ['FAQ: small label'], band_h: ['Last banner: heading'], band_p: ['Last banner: text'], band_btn: ['Last banner: button'],
+};
+const ROWS = {
+  nav: ['Link address', 'Text'], footer_links: ['Text', 'Link address'], chat: ['Speaker', 'Message'], strip: ['Big text', 'Small text'], facts: ['Label', 'Value'],
+  themes: ['Name', 'Colours (fixed)'], gallery: ['Image (fixed)', 'Picture description', 'Caption'], steps: ['Title', 'Text'], faq: ['Question', 'Answer'],
+  vis: ['Icon', 'Text'], people: ['Initials', 'Name', 'Role'], glance: ['Label', 'Value'], features: ['Icon', 'Title', 'Text'],
+};
+const FIXED_LIST = new Set(['strip', 'themes', 'gallery', 'features', 'chat', 'steps']); // tied to the design: edit the text, not the number of items
+const locked = (key, col) => (key === 'themes' && col === 1) || (key === 'gallery' && col === 0) || key === 'id';
+const humanize = (k) => k.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+// ---------------------------------------------------------------- state
+let S = { def: null, cur: null, published: '', tab: 'en', release: null, backups: [] };
+const clone = (x) => JSON.parse(JSON.stringify(x));
+const snap = () => JSON.stringify(S.cur);
+function refreshDirty() {
+  const on = snap() !== S.published;
+  const d = $('dirty');
+  d.textContent = on ? 'Unpublished changes' : 'Everything is published';
+  d.className = on ? 'on' : '';
+  document.querySelectorAll('.field[data-key]').forEach((f) => f._sync && f._sync());
+}
+
+// ---------------------------------------------------------------- editor widgets
+function textBox(get, set, opts) {
+  const t = el('textarea', { rows: 1, disabled: !!(opts && opts.locked) });
+  t.value = get();
+  const fit = () => { t.style.height = 'auto'; t.style.height = Math.min(Math.max(t.scrollHeight + 2, 38), 420) + 'px'; };
+  t.addEventListener('input', () => { set(t.value); fit(); refreshDirty(); });
+  setTimeout(fit, 0);
+  return t;
+}
+function markChanged(node) { refreshDirty(); }
+function listTools(arr, i, redraw, fixed) {
+  const b = (txt, fn, cls, dis) => el('button', { class: 'btn sm ' + (cls || 'alt'), type: 'button', onclick: () => { fn(); refreshDirty(); }, disabled: dis, title: txt }, txt);
+  return el('div', { class: 'tools' },
+    b('Up', () => { [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; redraw(); }, 'alt', i === 0),
+    b('Down', () => { [arr[i + 1], arr[i]] = [arr[i], arr[i + 1]]; redraw(); }, 'alt', i === arr.length - 1),
+    fixed ? null : b('Delete', () => { if (arr.length > 1 && confirm('Delete this item?')) { arr.splice(i, 1); redraw(); } }, 'danger', arr.length < 2));
+}
+function blank(tpl) {
+  if (typeof tpl === 'string') return '';
+  if (Array.isArray(tpl)) return tpl.map(blank);
+  return Object.fromEntries(Object.entries(tpl).map(([k, v]) => [k, blank(v)]));
+}
+// One list of items (text lines, rows of columns, or cards of fields).
+function listEditor(arr, key, tpl, container) {
+  const fixed = FIXED_LIST.has(key);
+  const draw = () => {
+    container.textContent = '';
+    arr.forEach((item, i) => {
+      let body;
+      if (Array.isArray(item)) {
+        const labels = ROWS[key] || [];
+        body = el('div', { class: 'row cols' + Math.min(item.length, 3) }, item.map((v, c) => el('div', {}, el('div', { class: 'mini', text: labels[c] || '' }),
+          textBox(() => item[c], (x) => { item[c] = x; }, { locked: locked(key, c) }))));
+        body.append(listTools(arr, i, draw, fixed));
+        body.style.gridTemplateColumns = '';
+        container.append(body);
+      } else if (item && typeof item === 'object') {
+        const card = el('div', { class: 'card' }, el('h4', { text: (item.h || item.title || (key + ' ' + (i + 1))) }));
+        for (const [fk, fv] of Object.entries(item)) card.append(fieldBlock(item, fk, fv, key, true));
+        card.append(listTools(arr, i, draw, fixed));
+        container.append(card);
+      } else {
+        const row = el('div', { class: 'row cols1' }, textBox(() => arr[i], (x) => { arr[i] = x; }), listTools(arr, i, draw, fixed));
+        container.append(row);
+      }
+    });
+    if (!fixed) container.append(el('button', { class: 'btn alt sm', type: 'button', onclick: () => { arr.push(blank(tpl)); draw(); refreshDirty(); } }, '+ Add'));
+  };
+  draw();
+}
+// A labelled block for one value inside an object.
+function fieldBlock(obj, key, tplValue, topKey, nested) {
+  const val = obj[key];
+  const [label, hint] = (!nested && L[topKey]) ? L[topKey] : [humanize(key)];
+  const wrap = el('div', { class: nested ? '' : 'field' });
+  if (typeof val === 'string') {
+    wrap.append(el('div', { class: 'flabel' }, nested ? humanize(key) : label, nested ? null : (hint ? el('small', { text: hint }) : null)));
+    wrap.append(textBox(() => obj[key], (x) => { obj[key] = x; }, { locked: locked(key, -1) }));
+  } else if (Array.isArray(val)) {
+    wrap.append(el('div', { class: 'flabel' }, nested ? humanize(key) : label, nested ? null : (hint ? el('small', { text: hint }) : null)));
+    const box = el('div');
+    listEditor(val, nested ? (key === 'vis' ? 'vis' : key) : topKey, tplValue[0], box);
+    wrap.append(box);
+  }
+  return wrap;
+}
+
+// ---------------------------------------------------------------- pages
+function renderTab() {
+  const main = $('main');
+  main.textContent = '';
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.id === S.tab));
+  const tab = TABS.find((t) => t.id === S.tab);
+  if (tab.id === 'settings') return renderSettings(main);
+  main.append(el('h2', { text: tab.label }), el('p', { class: 'sub', text: 'Edit the text, press Preview to see it, then Publish. The design stays the same.' }));
+  const obj = S.cur[tab.lang], def = S.def[tab.lang];
+  for (const key of Object.keys(def).filter(tab.keys)) {
+    const f = fieldBlock(obj, key, def[key], key, false);
+    f.dataset.key = key;
+    f._isChanged = () => JSON.stringify(obj[key]) !== JSON.stringify(def[key]);
+    const reset = el('button', { class: 'btn alt sm', type: 'button', onclick: () => { obj[key] = clone(def[key]); renderTab(); refreshDirty(); } }, 'Reset to original');
+    const resetRow = el('div', { style: 'text-align:right;margin-top:6px' }, reset);
+    f.append(resetRow);
+    f._sync = () => { const c = f._isChanged(); f.classList.toggle('changed', c); resetRow.classList.toggle('hide', !c); };
+    f._sync();
+    main.append(f);
+  }
+}
+function renderSettings(main) {
+  main.append(el('h2', { text: 'Settings' }));
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = !!S.cur.settings.as_reviewed;
+  cb.addEventListener('change', () => { S.cur.settings.as_reviewed = cb.checked; refreshDirty(); });
+  main.append(el('div', { class: 'field' },
+    el('label', { class: 'flabel' }, el('span', {}, cb, ' Let search engines index the Assamese page (/as/)'), null),
+    el('p', { class: 'mini', text: 'Leave this off until a native Assamese speaker has read the page. When it is on, the page is added to the sitemap and the noindex tag is removed.' })));
+  const r = S.release || {};
+  main.append(el('div', { class: 'field' }, el('div', { class: 'flabel', text: 'Download details (automatic)' }),
+    el('p', { class: 'mini', text: `Version ${r.version}, about ${r.size} MB. These come from the file release.json on the server, so they update on their own when you upload a new installer. Press Publish after uploading to refresh the pages.` })));
+}
+
+// ---------------------------------------------------------------- actions
+function content() { return { en: S.cur.en, as: S.cur.as, about: S.cur.about, settings: S.cur.settings }; }
+function busy(on, label) {
+  for (const id of ['previewBtn', 'publishBtn', 'restoreBtn']) $(id).disabled = on;
+  $('publishBtn').textContent = on && label === 'publish' ? 'Publishing...' : 'Publish';
+  $('previewBtn').textContent = on && label === 'preview' ? 'Building...' : 'Preview';
+}
+async function preview() {
+  const tab = TABS.find((t) => t.id === S.tab);
+  const page = (tab && tab.page) || 'en';
+  const win = window.open('about:blank', '_blank');
+  busy(true, 'preview');
+  try {
+    await api('preview', { content: content() });
+    if (win) win.location = 'preview/' + page; else toast('Allow pop-ups for this page to see the preview.', true);
+  } catch (e) { if (win) win.close(); toast(e.message, true); } finally { busy(false); }
+}
+async function publish() {
+  if (!confirm('Publish these changes to the live website now?')) return;
+  busy(true, 'publish');
+  try {
+    const r = await api('publish', { content: content() });
+    S.published = snap(); S.backups = r.backups || S.backups; refreshDirty();
+    toast('Published. The website is updated.');
+  } catch (e) { toast(e.message, true); } finally { busy(false); }
+}
+function openRestore() {
+  const list = $('backupList');
+  list.textContent = '';
+  if (!S.backups.length) list.append(el('p', { class: 'mini', text: 'No older versions yet. They appear after your first publish.' }));
+  for (const name of S.backups) {
+    const when = name.replace(/^overrides-/, '').replace(/\.json$/, '').replace(/T(\d\d)-(\d\d)-(\d\d).*/, ' $1:$2:$3 (UTC)');
+    list.append(el('button', { class: 'item', type: 'button', onclick: async () => {
+      try {
+        const r = await api('backup?name=' + encodeURIComponent(name));
+        S.cur = r.current; renderTab(); refreshDirty(); $('restoreDlg').close();
+        toast('Loaded. Press Preview or Publish.');
+      } catch (e) { toast(e.message, true); }
+    } }, when));
+  }
+  $('restoreDlg').showModal();
+}
+
+// ---------------------------------------------------------------- start
+function showLogin() { $('app').classList.add('hide'); $('login').classList.remove('hide'); $('pw').value = ''; $('pw').focus(); }
+async function showApp() {
+  const d = await api('content');
+  S = Object.assign(S, { def: d.defaults, cur: d.current, release: d.release, backups: d.backups });
+  S.published = snap();
+  $('login').classList.add('hide'); $('app').classList.remove('hide');
+  const tabs = $('tabs');
+  tabs.textContent = '';
+  for (const t of TABS) {
+    if (t.sep) { tabs.append(el('hr')); continue; }
+    tabs.append(el('button', { 'data-id': t.id, type: 'button', onclick: () => { S.tab = t.id; renderTab(); } }, t.label));
+  }
+  renderTab(); refreshDirty();
+}
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginErr').textContent = '';
+  try { await api('login', { password: $('pw').value }); await showApp(); } catch (err) { $('loginErr').textContent = err.message; }
+});
+$('previewBtn').onclick = preview;
+$('publishBtn').onclick = publish;
+$('restoreBtn').onclick = openRestore;
+$('closeDlg').onclick = () => $('restoreDlg').close();
+$('logoutBtn').onclick = async () => { try { await api('logout', {}); } catch (e) { /* ignore */ } showLogin(); };
+window.addEventListener('beforeunload', (e) => { if (S.cur && snap() !== S.published) { e.preventDefault(); e.returnValue = ''; } });
+(async () => {
+  try {
+    const s = await api('status');
+    if (!s.configured) { showLogin(); $('loginErr').textContent = 'The password has not been set yet.'; return; }
+    if (s.authed) await showApp(); else showLogin();
+  } catch (e) { showLogin(); }
+})();
+</script>
+</body>
+</html>
