@@ -4,7 +4,7 @@ Everything the browser needs from a server lives under `/var/www/axomai-browser/
 
 | Folder | What it holds |
 | --- | --- |
-| `downloads/` | `Axomai-Setup-<version>.exe`, its `.sha256`, and `release.json` (what the browser's update check reads) |
+| `downloads/` | `Axomai-Setup-<version>.exe`, its `.sha256`, and `release.json` (what the browser's update check reads). For the Android app: `Axomai-Browser-<version>.apk`, its `.sha256` and `android.json` (version, file, size, sha256; the landing page and its generator read it) |
 | `site/` | the download page (`server/axomai-chat/site/index.html`) |
 | `chat-proxy/` | the chat proxy (`server/axomai-chat/server.js`), a Node service on `127.0.0.1:8011` |
 | `data/` | daily-limit counters only (`usage.json`); chat text is never stored |

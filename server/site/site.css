@@ -223,3 +223,20 @@ section .band{padding:40px 28px}
 @media (max-width:980px){.faqcols{column-count:1}}
 
 @media (max-width:640px){.ctas .btn{flex-wrap:wrap;row-gap:2px}.ctas .btn small{flex-basis:100%;text-align:center;font-size:.8rem}}
+
+/* ---- Android app: hero button, section, phones ---- */
+.ctas .btn.link{background:none;box-shadow:none;color:var(--acc2)!important;padding-left:14px;padding-right:14px}
+.ctas .btn.link:hover{transform:none;text-decoration:underline}
+.ctas.left{justify-content:flex-start;margin:0 0 14px}
+.appcard{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:26px;padding:34px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.appcard::before{content:"";position:absolute;inset:0 0 auto 0;height:5px;background:linear-gradient(90deg,var(--acc),var(--amber))}
+.appcopy .fine{margin:6px 0 0;text-align:left}
+.appsteps .steps.vs{grid-template-columns:1fr;margin-top:0}
+.appsteps .steps.vs li{padding:16px 18px}
+.appsteps .steps.vs li h3{margin:6px 0 2px;font-size:1.05rem}.appsteps .steps.vs li p{margin:0}
+.appsteps .fh{margin-top:18px}
+.android .ctas [data-apk]{order:-1;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff!important;box-shadow:0 10px 26px rgba(5,150,105,.32)}
+.android .ctas [data-dl]{background:transparent;color:var(--acc2)!important;box-shadow:inset 0 0 0 2px var(--acc)}
+@media (max-width:980px){.appcard{grid-template-columns:1fr;gap:22px;padding:26px 22px}}
+@media (max-width:640px){.appcard{padding:22px 16px;border-radius:20px}.ctas.left .btn{width:100%}.ctas .btn.link{padding:10px}}
+.android .hero .fine{display:none}
