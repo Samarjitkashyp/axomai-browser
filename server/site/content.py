@@ -13,7 +13,7 @@ OG_LOCALE = {'en': 'en_IN', 'as': 'as_IN'}
 EN = dict(
     title='Axomai Browser – Free AI Browser for Windows, Made in Assam',
     desc='Axomai Browser is a free Windows browser with built-in AI chat, Assamese, Hindi and Bengali menus, ad blocking and Assam-inspired themes. Download v{version}.',
-    nav=[('#ai', 'AI chat'), ('#assam', 'Made in Assam'), ('#privacy', 'Privacy'), ('#more', 'Features'), ('#faq', 'FAQ')],
+    nav=[('#ai', 'AI chat'), ('#assam', 'Made in Assam'), ('#privacy', 'Privacy'), ('#more', 'Features'), ('#faq', 'FAQ'), ('/about/', 'About')],
     eyebrow='Free · Made in Assam · Windows 10 &amp; 11',
     h1='Axomai Browser: the free <em>AI browser</em> made in Assam',
     lead='Browse the web with artificial intelligence built in. Ask Axom AI about the page you are reading, in Assamese, Hindi, Bengali or English, and keep your browsing private.',
@@ -65,7 +65,7 @@ EN = dict(
         ('How is it different from Chrome or Edge?', 'It runs on the same Chromium-based engine as Microsoft Edge, so websites work the same way. The differences are the built-in AI chat, the Assamese-first interface and news, the Assam-inspired themes and that no sign-in is needed.'),
     ],
     final_h='Try the free AI browser made in Assam', final_p='Download Axomai Browser for Windows and ask Axom AI about the next page you read.',
-    footer_note='Axomai Browser is made by Samarjit Kashyap in Assam, India.', footer_links=[('Download', '/downloads/Axomai-Setup-{version}.exe'), ('Source code', GITHUB), ('FAQ', '#faq')],
+    footer_note='Axomai Browser is made by Samarjit Kashyap in Assam, India.', foot_menu='Menu', foot_links='Links', foot_lang='Language', foot_rights='Free and open source under the MIT licence.', footer_links=[('Download', '/downloads/Axomai-Setup-{version}.exe'), ('About us', '/about/'), ('Axom AI (parent company)', 'https://aiaxom.co.in/'), ('Source code', GITHUB), ('FAQ', '#faq')],
     howto_name='How to install Axomai Browser on Windows',
 )
 
@@ -118,6 +118,6 @@ AS = dict(
         ('Chrome extension ব্যৱহাৰ কৰিব পাৰিনে?', 'পাৰি। Extensions পৃষ্ঠাত Load unpacked বাছি unpacked Chrome extension যোগ কৰক।'),
     ],
     final_h='অসমত বনাৱা নিঃশুল্ক AI ব্ৰাউজাৰ ব্যৱহাৰ কৰক', final_p='Windows-ৰ বাবে Axomai Browser ডাউনলোড কৰক আৰু আপোনাৰ পৰৱৰ্তী পৃষ্ঠাৰ বাবে Axom AI-ক সোধক।',
-    footer_note='Axomai Browser Samarjit Kashyap-র দ্ৱাৰা অসম, ভাৰতত বনাৱা।', footer_links=[('ডাউনলোড', '/downloads/Axomai-Setup-{version}.exe'), ('Source code', GITHUB), ('FAQ', '#faq')],
+    footer_note='Axomai Browser Samarjit Kashyap-র দ্ৱাৰা অসম, ভাৰতত বনাৱা।', foot_menu='\u09ae\u09c7\u09a8\u09c1', foot_links='\u09b2\u09bf\u0982\u0995', foot_lang='\u09ad\u09be\u09b7\u09be', foot_rights='MIT \u09b2\u09be\u0987\u099a\u09c7\u09a8\u09cd\u09b8\u09f0 \u0985\u09a7\u09c0\u09a8\u09a4 \u09ac\u09bf\u09a8\u09be\u09ae\u09c2\u09b2\u09c0\u09af\u09bc\u09be \u0986\u09f0\u09c1 \u09ae\u09c1\u0995\u09b2\u09bf \u0989\u09ce\u09b8\u0964', footer_links=[('ডাউনলোড', '/downloads/Axomai-Setup-{version}.exe'), ('Source code', GITHUB), ('FAQ', '#faq')],
     howto_name='Windows-ত Axomai Browser কেনেকৈ ইনষ্টল কৰিব',
 )
