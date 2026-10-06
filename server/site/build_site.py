@@ -2,7 +2,8 @@
 """Builds the Axomai Browser landing page (English and Assamese), robots.txt, sitemap.xml, llms.txt and the web manifest.
    python build_site.py [--version 4.1.0] [--size 28] [--sha <sha256>] [--out <folder>]
 The output folder is what gets uploaded to /var/www/axomai-browser/site/ on the server."""
-import argparse, html, json, os, re, shutil
+import argparse
+import about, html, json, os, re, shutil
 import content as C
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -53,7 +54,7 @@ def page(lang, ctx):
     features_flat = [b for f in t['features'] for b in f['bullets']]
     graph = [
         {'@type': 'Organization', '@id': C.SITE + '/#org', 'name': 'Axomai', 'url': C.SITE + '/', 'logo': {'@type': 'ImageObject', 'url': C.SITE + '/assets/logo-512.png', 'width': 512, 'height': 512},
-         'founder': {'@type': 'Person', 'name': 'Samarjit Kashyap'}, 'sameAs': [C.GITHUB], 'areaServed': {'@type': 'AdministrativeArea', 'name': 'Assam, India'}},
+         'founder': {'@type': 'Person', 'name': 'Samarjit Kashyap'}, 'parentOrganization': {'@type': 'Organization', 'name': 'Axom AI', 'url': 'https://aiaxom.co.in/'}, 'sameAs': [C.GITHUB, 'https://aiaxom.co.in/'], 'areaServed': {'@type': 'AdministrativeArea', 'name': 'Assam, India'}},
         {'@type': 'WebSite', '@id': C.SITE + '/#website', 'url': C.SITE + '/', 'name': 'Axomai Browser', 'publisher': {'@id': C.SITE + '/#org'}, 'inLanguage': [l for l, _, _ in C.LANGS if C.REVIEWED[l]]},
         {'@type': 'WebPage', '@id': url + '#webpage', 'url': url, 'name': title, 'description': desc, 'isPartOf': {'@id': C.SITE + '/#website'}, 'about': {'@id': C.SITE + '/#app'},
          'primaryImageOfPage': {'@type': 'ImageObject', 'url': C.SITE + '/assets/og-image.jpg'}, 'inLanguage': C.HTML_LANG[lang], 'dateModified': ctx['date']},
@@ -159,17 +160,27 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 </div>
 <div class="strip">{strip}</div>
 </div></div>
-<section class="alt"><div class="wrap"><div class="kicker">{esc(t['def_kicker'])}</div><h2>{esc(t['def_h'])}</h2><p class="answer">{t['def_p']}</p>
-<h3 style="margin:26px 0 0;color:var(--head)">{esc(t['facts_h'])}</h3><table class="facts"><tbody>{facts}</tbody></table></div></section>
+<section class="alt"><div class="wrap"><div class="duo"><div><div class="kicker">{esc(t['def_kicker'])}</div><h2>{esc(t['def_h'])}</h2><p class="answer">{t['def_p']}</p></div>
+<div><h3 class="fh">{esc(t['facts_h'])}</h3><table class="facts"><tbody>{facts}</tbody></table></div></div></div></section>
 <section><div class="wrap">{feats}</div></section>
 <section class="alt"><div class="wrap"><h2>{esc(t['themes_h'])}</h2><p>{esc(t['themes_p'])}</p><div class="sw">{themes}</div>
-<h2 style="margin-top:56px">{esc(t['gallery_h'])}</h2><p><small>{esc(t['gallery_note'])}</small></p><div class="gal">{gallery}</div></div></section>
+<h2 class="gh">{esc(t['gallery_h'])}</h2><p><small>{esc(t['gallery_note'])}</small></p><div class="gal">{gallery}</div></div></section>
 <section id="install"><div class="wrap"><h2>{esc(t['install_h'])}</h2><ol class="steps">{steps_html}</ol>
-<h3 style="margin-top:34px;color:var(--head)">{esc(t['req_h'])}</h3><ul>{req}</ul></div></section>
-<section class="alt" id="faq"><div class="wrap"><h2>{esc(t['faq_h'])}</h2>{faq_html}</div></section>
+<h3 class="fh" style="margin-top:26px">{esc(t['req_h'])}</h3><ul>{req}</ul></div></section>
+<section class="alt" id="faq"><div class="wrap"><h2>{esc(t['faq_h'])}</h2><div class="faqcols">{faq_html}</div></div></section>
 <section><div class="wrap"><div class="band"><h2>{esc(t['final_h'])}</h2><p>{esc(t['final_p'])}</p><a class="btn" href="{dl}" data-dl>{esc(t['cta'])}</a></div></div></section>
 </main>
-<footer><div class="wrap cols"><span>{esc(t['footer_note'])}</span><span>{flinks}</span></div></footer>
+<footer class="site-foot"><div class="wrap">
+<div class="fgrid">
+<div class="fbrand"><a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="40" height="40" loading="lazy"><span>Axomai Browser</span></a>
+<p>{esc(t['footer_note'])}</p>
+<a class="btn sm" href="{dl}" data-dl>{esc(t['cta'])}</a></div>
+<div class="fcol"><h3>{esc(t['foot_menu'])}</h3>{nav}</div>
+<div class="fcol"><h3>{esc(t['foot_links'])}</h3>{flinks}<a href="/sitemap.xml">Sitemap</a></div>
+<div class="fcol"><h3>{esc(t['foot_lang'])}</h3>{mlangs}</div>
+</div>
+<div class="fbar"><span>&copy; 2026 Axomai Browser</span><span>{esc(t['foot_rights'])}</span></div>
+</div></footer>
 <script>
 // Every link and button on the page is reported to Google Tag Manager as an 'axomai_click' event (plus 'download_click' for the installer).
 document.addEventListener('click',function(e){{
@@ -184,6 +195,8 @@ document.addEventListener('click',function(e){{
 }},true);
 </script>
 <script>
+// Shadow under the header once the page is scrolled.
+(function(){{var h=document.querySelector('header.top');if(!h)return;function f(){{h.classList.toggle('scrolled',window.scrollY>8)}}f();window.addEventListener('scroll',f,{{passive:true}})}})();
 // Menu button on phones and tablets.
 (function(){{
   var b=document.getElementById('burger'),m=document.getElementById('menu');if(!b||!m)return;
@@ -228,14 +241,15 @@ def sitemap(date):
     for l, p in live:
         alts = ''.join('<xhtml:link rel="alternate" hreflang="%s" href="%s%s"/>' % (l2, C.SITE, p2) for l2, p2 in live) + '<xhtml:link rel="alternate" hreflang="x-default" href="%s/"/>' % C.SITE
         urls += '<url><loc>%s%s</loc><lastmod>%s</lastmod><changefreq>weekly</changefreq><priority>%s</priority>%s</url>' % (C.SITE, p, date, '1.0' if p == '/' else '0.8', alts)
-    return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">%s</urlset>\n' % urls
+    urls += '<url><loc>%s/about/</loc><lastmod>%s</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>' % (C.SITE, date)
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">%s</urlset>\n' % urls
 
 def llms(ctx, full):
     t = C.EN
     lines = ['# Axomai Browser', '', '> ' + strip_tags(t['def_p']), '',
              'Axomai Browser (also written Axom AI Browser) is a free Windows web browser with a built-in AI assistant, made in Assam, India by Samarjit Kashyap.', '', '## Facts']
     lines += ['- %s: %s' % (k, fmt(v, ctx)) for k, v in t['facts']]
-    lines += ['', '## Links', '- Download page: %s/' % C.SITE, '- Installer (Windows, %s MB): %s/downloads/Axomai-Setup-%s.exe' % (ctx['size'], C.SITE, ctx['version']), '- SHA-256 checksum: %s/downloads/Axomai-Setup-%s.exe.sha256' % (C.SITE, ctx['version']), '- Source code: ' + C.GITHUB]
+    lines += ['', '## Links', '- About Axomai Browser and its parent company Axom AI: %s/about/' % C.SITE, '- Parent company Axom AI: https://aiaxom.co.in/', '- Download page: %s/' % C.SITE, '- Installer (Windows, %s MB): %s/downloads/Axomai-Setup-%s.exe' % (ctx['size'], C.SITE, ctx['version']), '- SHA-256 checksum: %s/downloads/Axomai-Setup-%s.exe.sha256' % (C.SITE, ctx['version']), '- Source code: ' + C.GITHUB]
     if full:
         lines += ['', '## Features']
         for f in t['features']:
@@ -259,7 +273,11 @@ def main():
     shutil.copytree(os.path.join(HERE, 'assets'), os.path.join(out, 'assets'))
     shutil.copy(os.path.join(HERE, 'favicon.ico'), out)
     w = lambda p, s: open(os.path.join(out, p), 'w', encoding='utf-8', newline='\n').write(s)
-    w('index.html', page('en', ctx)); w('as/index.html', page('as', ctx))
+    home = page('en', ctx)
+    os.makedirs(os.path.join(out, 'about'))
+    w('index.html', home); w('as/index.html', page('as', ctx))
+    w('about/index.html', about.build(home, C.SITE, ctx, C.GITHUB, '/downloads/Axomai-Setup-%s.exe' % ctx['version']))
+    shutil.copy(os.path.join(HERE, 'sitemap.xsl'), out)
     w('robots.txt', robots()); w('sitemap.xml', sitemap(a.date)); w('llms.txt', llms(ctx, False)); w('llms-full.txt', llms(ctx, True))
     w('site.webmanifest', json.dumps({'name': 'Axomai Browser', 'short_name': 'Axomai', 'description': 'The free AI browser made in Assam', 'start_url': '/', 'display': 'browser', 'background_color': '#f0fdf4', 'theme_color': '#059669',
                                       'icons': [{'src': '/assets/logo-192.png', 'sizes': '192x192', 'type': 'image/png'}, {'src': '/assets/logo-512.png', 'sizes': '512x512', 'type': 'image/png'}]}, indent=2))
