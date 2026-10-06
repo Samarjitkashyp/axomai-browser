@@ -201,6 +201,8 @@ async function build(outDir, overridesFile, preview) {
   try {
     const i = releaseInfo();
     const args = ['build_site.py', '--version', i.version, '--size', i.size, '--sha', i.sha, '--out', outDir, '--overrides', overridesFile];
+    const android = path.join(DOWNLOADS_DIR, 'android.json');
+    if (fs.existsSync(android)) args.push('--android', android);
     if (preview) args.push('--preview');
     await runPython(args);
   } finally { building = false; }

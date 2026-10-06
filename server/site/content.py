@@ -121,3 +121,49 @@ AS = dict(
     footer_note='Axomai Browser Samarjit Kashyap-র দ্ৱাৰা অসম, ভাৰতত বনাৱা।', foot_menu='\u09ae\u09c7\u09a8\u09c1', foot_links='\u09b2\u09bf\u0982\u0995', foot_lang='\u09ad\u09be\u09b7\u09be', foot_rights='MIT \u09b2\u09be\u0987\u099a\u09c7\u09a8\u09cd\u09b8\u09f0 \u0985\u09a7\u09c0\u09a8\u09a4 \u09ac\u09bf\u09a8\u09be\u09ae\u09c2\u09b2\u09c0\u09af\u09bc\u09be \u0986\u09f0\u09c1 \u09ae\u09c1\u0995\u09b2\u09bf \u0989\u09ce\u09b8\u0964', footer_links=[('ডাউনলোড', '/downloads/Axomai-Setup-{version}.exe'), ('Source code', GITHUB), ('FAQ', '#faq')],
     howto_name='Windows-ত Axomai Browser কেনেকৈ ইনষ্টল কৰিব',
 )
+
+
+# ---- Android app (added with the APK download) ------------------------------------------------------------------
+EN.update(
+    title='Axomai Browser \u2013 Free AI Browser for Windows and Android, Made in Assam',
+    desc='Axomai Browser is a free browser for Windows and Android with built-in AI chat, Assamese, Hindi and Bengali menus, ad blocking and Assam-inspired themes. Download v{version}.',
+    nowin_p='Axomai Browser installs on Windows 10 and 11 PCs and on Android phones. There is no iPhone or Mac version yet. Open this page on a Windows PC, or send yourself the link.',
+    cta_android='Download for Android', cta_android_short='Android', android_meta='APK \u00b7 v{apk_version} \u00b7 {apk_size} MB',
+    android_kicker='ANDROID APP', android_h='Axomai Browser for Android',
+    android_p='Take Axom AI and the Assam New Tab page with you. The Android app brings tabs, bookmarks, history, an AI chat panel and the same five Assam themes to your phone.',
+    android_steps=[('Download the APK', 'Tap Download for Android. The file is about {apk_size} MB.'),
+                   ('Allow the install', 'Open the file. If Android asks, allow installs from this source (your browser or the Files app) for this one time.'),
+                   ('Start browsing', 'Open Axomai Browser from your app drawer. Pick your language and theme in Settings.')],
+    android_note_h='Good to know',
+    android_note=['Android 7.0 or newer.',
+                  'The app is not on Google Play yet, so Android may show a Play Protect or "unknown app" message. If you downloaded it from this page, choose Install anyway.',
+                  'You can compare the SHA-256 shown here with the downloaded file.',
+                  'There is no iPhone version yet.'],
+    android_sha='SHA-256 of the APK:',
+)
+EN['req'][0] = 'Windows 10 or 11, 64-bit, or Android 7.0 or newer. Mac, Linux and iPhone are not available yet.'
+EN['faq'] = [q if 'Android' not in q[0] else ('Is there a version for Android, Mac, Linux or iPhone?', 'Android: yes, download the APK from this page. A Mac, Linux or iPhone version is not available yet.') for q in EN['faq']] + [
+    ('How do I install the Android app?', 'Download the APK from this page and open it. If Android asks, allow installs from your browser or Files app once. Because the app is not on Google Play yet, Android may show a warning: choose Install anyway if you downloaded it from this page.')]
+EN['facts'] = [(k, 'Windows 10 and Windows 11 (64-bit), Android 7.0 or newer') if k == 'Platform' else (k, v) for k, v in EN['facts']]
+EN['footer_links'] = [EN['footer_links'][0], ('Android app', '/downloads/{apk_file}')] + list(EN['footer_links'][1:])
+
+
+AS.update(
+    cta_android='Android-\u09f0 \u09ac\u09be\u09ac\u09c7 \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u0995\u09f0\u0995',
+    cta_android_short='Android',
+    android_meta='APK \u00b7 v{apk_version} \u00b7 {apk_size} MB',
+    android_kicker='ANDROID \u098f\u09aa',
+    android_h='Android-\u09f0 \u09ac\u09be\u09ac\u09c7 Axomai Browser',
+    android_p='Axom AI \u0986\u09f0\u09c1 \u0985\u09b8\u09ae\u09f0 New Tab \u09aa\u09c3\u09b7\u09cd\u09a0\u09be \u0986\u09aa\u09cb\u09a8\u09be\u09f0 \u09ab\u09cb\u09a8\u09a4\u09cb \u09b2\u0993\u0995\u0964 Android \u098f\u09aa\u09a4 \u099f\u09cd\u09af\u09be\u09ac, \u09ac\u09c1\u0995\u09ae\u09be\u09f0\u09cd\u0995, \u0987\u09a4\u09bf\u09b9\u09be\u09b8, AI \u099a\u09cd\u09af\u09be\u099f \u0986\u09f0\u09c1 \u0985\u09b8\u09ae\u09f0 \u098f\u0995\u09c7 \u09aa\u09be\u0981\u099a\u099f\u09be \u09a5\u09bf\u09ae \u0986\u099b\u09c7\u0964',
+    android_note_h='\u099c\u09be\u09a8\u09bf \u09a5\u09cb\u09f1\u09be \u09ad\u09be\u09b2',
+    android_sha='APK-\u09f0 SHA-256:',
+    nowin_p='Axomai Browser Windows 10 \u0986\u09f0\u09c1 11 PC-\u09a4 \u0986\u09f0\u09c1 Android \u09ab\u09cb\u09a8\u09a4 \u0987\u09a8\u09b7\u09cd\u099f\u09b2 \u09b9\u09af\u09bc\u0964 iPhone \u09ac\u09be Mac \u09b8\u0982\u09b8\u09cd\u0995\u09f0\u09a3 \u098f\u09a4\u09bf\u09af\u09bc\u09be\u09b2\u09c8 \u09a8\u09be\u0987\u0964 \u0986\u09aa\u09cb\u09a8\u09be\u09f0 Windows \u0995\u09ae\u09cd\u09aa\u09bf\u0989\u099f\u09be\u09f0\u09a4 \u098f\u0987 \u09aa\u09c3\u09b7\u09cd\u09a0\u09be \u0996\u09cb\u09b2\u0995, \u09ac\u09be \u09b2\u09bf\u0982\u0995\u099f\u09cb \u09a8\u09bf\u099c\u0995\u09c7 \u09aa\u09a0\u09be\u0993\u0995\u0964',
+)
+AS.update(
+    android_steps=[('APK \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u0995\u09f0\u0995', 'Android-\u09f0 \u09ac\u09be\u09ac\u09c7 \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u099f\u09bf\u09aa\u0995\u0964 \u09ab\u09be\u0987\u09b2\u099f\u09cb \u09aa\u09cd\u09f0\u09be\u09af\u09bc {apk_size} MB\u0964'), ('\u0987\u09a8\u09b7\u09cd\u099f\u09b2\u09f0 \u0985\u09a8\u09c1\u09ae\u09a4\u09bf \u09a6\u09bf\u09af\u09bc\u0995', '\u09ab\u09be\u0987\u09b2\u099f\u09cb \u0996\u09cb\u09b2\u0995\u0964 Android-\u098f \u09b8\u09c1\u09a7\u09bf\u09b2\u09c7, \u098f\u0987\u09ac\u09be\u09f0\u09f0 \u09ac\u09be\u09ac\u09c7 \u098f\u0987 \u0989\u09ce\u09b8\u09f0 (\u0986\u09aa\u09cb\u09a8\u09be\u09f0 \u09ac\u09cd\u09f0\u09be\u0989\u099c\u09be\u09f0 \u09ac\u09be Files \u098f\u09aa) \u09aa\u09f0\u09be \u0987\u09a8\u09b7\u09cd\u099f\u09b2 \u0995\u09f0\u09be\u09f0 \u0985\u09a8\u09c1\u09ae\u09a4\u09bf \u09a6\u09bf\u09af\u09bc\u0995\u0964'), ('\u09ac\u09cd\u09f0\u09be\u0989\u099c\u09bf\u0982 \u0986\u09f0\u09ae\u09cd\u09ad \u0995\u09f0\u0995', '\u098f\u09aa \u09a1\u09cd\u09f0\u09af\u09bc\u09be\u09f0\u09f0 \u09aa\u09f0\u09be Axomai Browser \u0996\u09cb\u09b2\u0995\u0964 Settings-\u09a4 \u0986\u09aa\u09cb\u09a8\u09be\u09f0 \u09ad\u09be\u09b7\u09be \u0986\u09f0\u09c1 \u09a5\u09bf\u09ae \u09ac\u09be\u099b\u09bf \u09b2\u0993\u0995\u0964')],
+    android_note=['Android 7.0 \u09ac\u09be \u09a4\u09be\u09a4\u0995\u09c8 \u09a8\u09a4\u09c1\u09a8\u0964', '\u098f\u09aa\u099f\u09cb \u098f\u09a4\u09bf\u09af\u09bc\u09be\u09b2\u09c8 Google Play-\u09a4 \u09a8\u09be\u0987, \u0997\u09a4\u09bf\u0995\u09c7 Android-\u098f Play Protect \u09ac\u09be "\u0985\u099c\u09cd\u099e\u09be\u09a4 \u098f\u09aa"\u09f0 \u09ac\u09be\u09f0\u09cd\u09a4\u09be \u09a6\u09c7\u0996\u09c1\u09f1\u09be\u09ac \u09aa\u09be\u09f0\u09c7\u0964 \u0986\u09aa\u09c1\u09a8\u09bf \u09af\u09a6\u09bf \u098f\u0987 \u09aa\u09c3\u09b7\u09cd\u09a0\u09be\u09f0 \u09aa\u09f0\u09be\u0987 \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u0995\u09f0\u09bf\u099b\u09c7, \u09a4\u09c7\u09a8\u09cd\u09a4\u09c7 Install anyway \u09ac\u09be\u099b\u0995\u0964', '\u0987\u09af\u09bc\u09be\u09a4 \u09a6\u09c7\u0996\u09c1\u0993\u09f1\u09be SHA-256\u09f0 \u09b8\u09c8\u09a4\u09c7 \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u0995\u09f0\u09be \u09ab\u09be\u0987\u09b2 \u09a4\u09c1\u09b2\u09a8\u09be \u0995\u09f0\u09bf\u09ac \u09aa\u09be\u09f0\u09c7\u0964', 'iPhone \u09b8\u0982\u09b8\u09cd\u0995\u09f0\u09a3 \u098f\u09a4\u09bf\u09af\u09bc\u09be\u09b2\u09c8 \u09a8\u09be\u0987\u0964'],
+)
+AS['req'][0] = 'Windows 10 \u09ac\u09be 11 (64-bit) \u09ac\u09be Android 7.0 \u09ac\u09be \u09a4\u09be\u09a4\u0995\u09c8 \u09a8\u09a4\u09c1\u09a8\u0964 Mac, Linux \u0986\u09f0\u09c1 iPhone \u098f\u09a4\u09bf\u09af\u09bc\u09be\u09b2\u09c8 \u09a8\u09be\u0987\u0964'
+AS['faq'] = [q if 'Android' not in q[0] else ('Android, Mac, Linux \u09ac\u09be iPhone-\u09f0 \u09b8\u0982\u09b8\u09cd\u0995\u09f0\u09a3 \u0986\u099b\u09c7\u09a8\u09c7?', 'Android-\u09f0 \u09ac\u09be\u09ac\u09c7 \u0986\u099b\u09c7: \u098f\u0987 \u09aa\u09c3\u09b7\u09cd\u09a0\u09be\u09f0 \u09aa\u09f0\u09be APK \u09a1\u09be\u0989\u09a8\u09b2\u09cb\u09a1 \u0995\u09f0\u0995\u0964 Mac, Linux \u09ac\u09be iPhone \u09b8\u0982\u09b8\u09cd\u0995\u09f0\u09a3 \u098f\u09a4\u09bf\u09af\u09bc\u09be\u09b2\u09c8 \u09a8\u09be\u0987\u0964') for q in AS['faq']]
+AS['footer_links'] = [AS['footer_links'][0], ('Android \u098f\u09aa', '/downloads/{apk_file}')] + list(AS['footer_links'][1:])
+EN['eyebrow'] = 'Free \u00b7 Made in Assam \u00b7 Windows &amp; Android'

@@ -30,7 +30,8 @@ def localised(lang):
     return d
 
 def fmt(s, ctx):
-    return s.replace('{version}', ctx['version']).replace('{size}', ctx['size']).replace('{sha}', ctx['sha'])
+    s = s.replace('{version}', ctx['version']).replace('{size}', ctx['size']).replace('{sha}', ctx['sha'])
+    return s.replace('{apk_version}', ctx['apk_version']).replace('{apk_size}', ctx['apk_size']).replace('{apk_file}', ctx['apk_file'])
 
 def strip_tags(s):
     return re.sub(r'<[^>]+>', '', html.unescape(s))
@@ -40,6 +41,11 @@ def page(lang, ctx):
     css = open(os.path.join(HERE, 'site.css'), encoding='utf-8').read()
     url = C.SITE + ('/' if lang == 'en' else '/as/')
     dl = '/downloads/Axomai-Setup-%s.exe' % ctx['version']
+    apk = '/downloads/' + ctx['apk_file']
+    apk_meta = fmt(t['android_meta'], ctx)
+    apk_steps = ''.join('<li><h3>%s</h3><p>%s</p></li>' % (esc(n), esc(fmt(d, ctx))) for n, d in t['android_steps'])
+    apk_notes = ''.join('<li>%s</li>' % esc(x) for x in t['android_note'])
+    android_js = json.dumps({'full': t['cta_android'], 'short': t['cta_android_short']}, ensure_ascii=False)
     title, desc = fmt(t['title'], ctx), fmt(t['desc'], ctx)
     reviewed = C.REVIEWED[lang]
     robots = 'index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1' if reviewed else 'noindex,follow'
@@ -64,6 +70,11 @@ def page(lang, ctx):
          'inLanguage': ['as', 'hi', 'bn', 'en'], 'datePublished': '2026-10-05', 'dateModified': ctx['date'], 'isAccessibleForFree': True,
          'offers': {'@type': 'Offer', 'price': '0', 'priceCurrency': 'INR', 'availability': 'https://schema.org/InStock', 'url': C.SITE + '/'},
          'author': {'@id': C.SITE + '/#org'}, 'publisher': {'@id': C.SITE + '/#org'}, 'featureList': features_flat, 'codeRepository': C.GITHUB},
+        {'@type': 'MobileApplication', '@id': C.SITE + '/#android-app', 'name': 'Axomai Browser for Android', 'alternateName': 'Axom AI Browser for Android',
+         'applicationCategory': 'BrowserApplication', 'operatingSystem': 'Android 7.0 and newer', 'softwareVersion': ctx['apk_version'], 'fileSize': ctx['apk_size'] + ' MB',
+         'downloadUrl': C.SITE + apk, 'installUrl': C.SITE + apk, 'url': C.SITE + '/#android', 'inLanguage': ['as', 'hi', 'bn', 'en'], 'isAccessibleForFree': True,
+         'offers': {'@type': 'Offer', 'price': '0', 'priceCurrency': 'INR', 'availability': 'https://schema.org/InStock', 'url': C.SITE + '/#android'},
+         'author': {'@id': C.SITE + '/#org'}, 'publisher': {'@id': C.SITE + '/#org'}, 'isBasedOn': {'@id': C.SITE + '/#app'}},
         {'@type': 'FAQPage', '@id': url + '#faq', 'mainEntity': [{'@type': 'Question', 'name': q, 'acceptedAnswer': {'@type': 'Answer', 'text': a}} for q, a in faq]},
         {'@type': 'HowTo', '@id': url + '#howto', 'name': t['howto_name'], 'totalTime': 'PT2M', 'tool': [{'@type': 'HowToTool', 'name': 'Windows 10 or 11 PC'}],
          'step': [{'@type': 'HowToStep', 'position': i + 1, 'name': n, 'text': d} for i, (n, d) in enumerate(steps)]},
@@ -141,7 +152,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="34" height="34"><span class="bt">Axomai Browser</span></a>
 <nav aria-label="Main">{nav}</nav>
 <div class="langs" aria-label="Language">{langs}</div>
-<a class="btn sm hdl" href="{dl}" data-dl><span class="full">{esc(t['cta'])}</span><span class="short">{esc(t['cta_short'])}</span></a>
+<a class="btn sm hdl" href="{dl}" data-dl data-auto><span class="full">{esc(t['cta'])}</span><span class="short">{esc(t['cta_short'])}</span></a>
 <button class="burger" type="button" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="menu"><span></span><span></span><span></span></button>
 </div>
 <div class="menu" id="menu" hidden><div class="wrap"><nav aria-label="Menu">{nav}</nav><div class="mlangs" aria-label="Language">{mlangs}</div></div></div></header>
@@ -150,7 +161,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <span class="eyebrow">{t['eyebrow']}</span>
 <h1>{t['h1']}</h1>
 <p class="lead">{esc(t['lead'])}</p>
-<div class="ctas"><a class="btn" href="{dl}" data-dl><span aria-hidden="true">⬇</span>{esc(t['cta'])} <small style="opacity:.85;font-weight:600">{esc(cta_meta)}</small></a><a class="btn ghost" href="#ai">{esc(t['secondary'])}</a></div>
+<div class="ctas"><a class="btn" href="{dl}" data-dl><span aria-hidden="true">⬇</span>{esc(t['cta'])} <small style="opacity:.85;font-weight:600">{esc(cta_meta)}</small></a><a class="btn ghost" href="{apk}" data-apk><span aria-hidden="true">📱</span>{esc(t['cta_android'])} <small style="opacity:.85;font-weight:600">{esc(apk_meta)}</small></a><a class="btn link" href="#ai">{esc(t['secondary'])}</a></div>
 <p class="fine">{fmt(t['fine'], ctx)}</p>
 <div class="nowin-note" role="note"><b>{esc(t['nowin_h'])}</b><br>{esc(t['nowin_p'])}<br><button class="btn sm" type="button" id="share">{esc(t['nowin_btn'])}</button></div>
 <div class="shot" role="img" aria-label="Axomai Browser window with the Axom AI chat open beside a web page">
@@ -163,18 +174,22 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <section class="alt"><div class="wrap"><div class="duo"><div><div class="kicker">{esc(t['def_kicker'])}</div><h2>{esc(t['def_h'])}</h2><p class="answer">{t['def_p']}</p></div>
 <div><h3 class="fh">{esc(t['facts_h'])}</h3><table class="facts"><tbody>{facts}</tbody></table></div></div></div></section>
 <section><div class="wrap">{feats}</div></section>
+<section id="android"><div class="wrap"><div class="appcard"><div class="appcopy"><div class="kicker">{esc(t['android_kicker'])}</div><h2>{esc(t['android_h'])}</h2><p class="answer">{esc(t['android_p'])}</p>
+<div class="ctas left"><a class="btn" href="{apk}" data-apk><span aria-hidden="true">📱</span>{esc(t['cta_android'])} <small style="opacity:.85;font-weight:600">{esc(apk_meta)}</small></a></div>
+<p class="fine">{esc(t['android_sha'])} <code id="apk-sha">{esc(ctx['apk_sha'])}</code></p></div>
+<div class="appsteps"><ol class="steps vs">{apk_steps}</ol><h3 class="fh">{esc(t['android_note_h'])}</h3><ul>{apk_notes}</ul></div></div></div></section>
 <section class="alt"><div class="wrap"><h2>{esc(t['themes_h'])}</h2><p>{esc(t['themes_p'])}</p><div class="sw">{themes}</div>
 <h2 class="gh">{esc(t['gallery_h'])}</h2><p><small>{esc(t['gallery_note'])}</small></p><div class="gal">{gallery}</div></div></section>
 <section id="install"><div class="wrap"><h2>{esc(t['install_h'])}</h2><ol class="steps">{steps_html}</ol>
 <h3 class="fh" style="margin-top:26px">{esc(t['req_h'])}</h3><ul>{req}</ul></div></section>
 <section class="alt" id="faq"><div class="wrap"><h2>{esc(t['faq_h'])}</h2><div class="faqcols">{faq_html}</div></div></section>
-<section><div class="wrap"><div class="band"><h2>{esc(t['final_h'])}</h2><p>{esc(t['final_p'])}</p><a class="btn" href="{dl}" data-dl>{esc(t['cta'])}</a></div></div></section>
+<section><div class="wrap"><div class="band"><h2>{esc(t['final_h'])}</h2><p>{esc(t['final_p'])}</p><a class="btn" href="{dl}" data-dl data-auto>{esc(t['cta'])}</a></div></div></section>
 </main>
 <footer class="site-foot"><div class="wrap">
 <div class="fgrid">
 <div class="fbrand"><a class="brand" href="{'/' if lang == 'en' else '/as/'}"><img src="/assets/logo-192.png" alt="Axomai Browser logo" width="40" height="40" loading="lazy"><span>Axomai Browser</span></a>
 <p>{esc(t['footer_note'])}</p>
-<a class="btn sm" href="{dl}" data-dl>{esc(t['cta'])}</a></div>
+<a class="btn sm" href="{dl}" data-dl data-auto>{esc(t['cta'])}</a></div>
 <div class="fcol"><h3>{esc(t['foot_menu'])}</h3>{nav}</div>
 <div class="fcol"><h3>{esc(t['foot_links'])}</h3>{flinks}<a href="/sitemap.xml">Sitemap</a></div>
 <div class="fcol"><h3>{esc(t['foot_lang'])}</h3>{mlangs}</div>
@@ -187,9 +202,10 @@ document.addEventListener('click',function(e){{
   var el=e.target.closest&&e.target.closest('a,button');if(!el)return;
   var href=el.getAttribute('href')||'';
   var area=el.closest('header')?'header':el.closest('footer')?'footer':(el.closest('section')&&el.closest('section').id)||(el.closest('.hero')?'hero':'page');
-  var info={{event:'axomai_click',click_text:(el.textContent||'').replace(/\s+/g,' ').trim().slice(0,80),click_url:href,click_id:el.id||'',click_area:area,click_type:el.hasAttribute('data-dl')?'download':el.tagName==='BUTTON'?'button':/^https?:/.test(href)&&href.indexOf(location.host)<0?'outbound':'link',page_lang:document.documentElement.lang}};
+  var info={{event:'axomai_click',click_text:(el.textContent||'').replace(/\s+/g,' ').trim().slice(0,80),click_url:href,click_id:el.id||'',click_area:area,click_type:el.hasAttribute('data-apk')?'android_download':el.hasAttribute('data-dl')?'download':el.tagName==='BUTTON'?'button':/^https?:/.test(href)&&href.indexOf(location.host)<0?'outbound':'link',page_lang:document.documentElement.lang}};
   window.dataLayer=window.dataLayer||[];window.dataLayer.push(info);
   if(window.gtag)gtag('event','axomai_click',{{click_text:info.click_text,click_url:info.click_url,click_area:info.click_area,click_type:info.click_type,page_lang:info.page_lang}});
+  if(el.hasAttribute('data-apk')){{window.dataLayer.push({{event:'android_download_click',click_area:area,page_lang:info.page_lang}});if(window.gtag)gtag('event','android_download_click',{{click_area:area,page_lang:info.page_lang}})}}
   if(el.hasAttribute('data-dl'))window.dataLayer.push({{event:'download_click',click_area:area,page_lang:info.page_lang}});
   if(el.hasAttribute('data-dl')&&window.gtag)gtag('event','download_click',{{click_area:area,page_lang:info.page_lang}});
 }},true);
@@ -206,9 +222,21 @@ document.addEventListener('click',function(e){{
   document.addEventListener('keydown',function(e){{if(e.key==='Escape')set(false)}});
   window.addEventListener('resize',function(){{if(window.innerWidth>860)set(false)}});
 }})();
+// Android phones are offered the Android app: the header, footer and last-banner buttons switch to the APK and the hero puts it first.
+var IS_ANDROID=/Android/i.test(navigator.userAgent);
+var ANDROID={android_js};
+(function(){{
+  if(!IS_ANDROID)return;
+  document.documentElement.classList.add('android');
+  document.querySelectorAll('[data-auto]').forEach(function(a){{
+    a.href='{apk}';a.removeAttribute('data-dl');a.setAttribute('data-apk','');
+    var f=a.querySelector('.full'),s=a.querySelector('.short');
+    if(f&&s){{f.textContent=ANDROID.full;s.textContent=ANDROID.short}}else a.textContent=ANDROID.full;
+  }});
+}})();
 // On a phone or a Mac the Windows installer is of no use: offer to send the link to a Windows PC instead.
 (function(){{
-  if(/Windows NT/.test(navigator.userAgent))return;
+  if(/Windows NT|Android/.test(navigator.userAgent))return;
   document.documentElement.classList.add('nowin');
   var b=document.getElementById('share');if(!b)return;
   b.addEventListener('click',function(){{
@@ -217,6 +245,12 @@ document.addEventListener('click',function(e){{
     else if(navigator.clipboard){{navigator.clipboard.writeText(data.url).then(function(){{b.textContent='\u2713'}})}}
   }});
 }})();
+// The Android app: newest file and checksum without rebuilding this page.
+fetch('/downloads/android.json',{{cache:'no-store'}}).then(function(r){{if(!r.ok)throw 0;return r.json()}}).then(function(j){{
+  if(!j.file)return;var url='/downloads/'+j.file;
+  document.querySelectorAll('[data-apk]').forEach(function(a){{a.href=url}});
+  if(/^[0-9a-f]{{64}}$/.test(j.sha256||'')){{var el=document.getElementById('apk-sha');if(el)el.textContent=j.sha256}}
+}}).catch(function(){{}});
 // Keeps the download button and checksum on the newest release without rebuilding this page.
 fetch('/downloads/release.json',{{cache:'no-store'}}).then(function(r){{if(!r.ok)throw 0;return r.json()}}).then(function(j){{
   var exe=(j.assets||[]).filter(function(a){{return /^Axomai-Setup-.*\\.exe$/.test(a.name)}})[0];if(!exe)return;
@@ -258,7 +292,7 @@ def llms(ctx, full):
     lines = ['# Axomai Browser', '', '> ' + strip_tags(t['def_p']), '',
              'Axomai Browser (also written Axom AI Browser) is a free Windows web browser with a built-in AI assistant, made in Assam, India by Samarjit Kashyap.', '', '## Facts']
     lines += ['- %s: %s' % (k, fmt(v, ctx)) for k, v in t['facts']]
-    lines += ['', '## Links', '- About Axomai Browser and its parent company Axom AI: %s/about/' % C.SITE, '- Parent company Axom AI: https://aiaxom.co.in/', '- Download page: %s/' % C.SITE, '- Installer (Windows, %s MB): %s/downloads/Axomai-Setup-%s.exe' % (ctx['size'], C.SITE, ctx['version']), '- SHA-256 checksum: %s/downloads/Axomai-Setup-%s.exe.sha256' % (C.SITE, ctx['version']), '- Source code: ' + C.GITHUB]
+    lines += ['', '## Links', '- About Axomai Browser and its parent company Axom AI: %s/about/' % C.SITE, '- Parent company Axom AI: https://aiaxom.co.in/', '- Download page: %s/' % C.SITE, '- Installer (Windows, %s MB): %s/downloads/Axomai-Setup-%s.exe' % (ctx['size'], C.SITE, ctx['version']), '- SHA-256 checksum: %s/downloads/Axomai-Setup-%s.exe.sha256' % (C.SITE, ctx['version']), '- Android app (APK, v%s, %s MB, Android 7.0 or newer): %s/downloads/%s' % (ctx['apk_version'], ctx['apk_size'], C.SITE, ctx['apk_file']), '- Source code: ' + C.GITHUB]
     if full:
         lines += ['', '## Features']
         for f in t['features']:
@@ -274,6 +308,7 @@ def main():
     ap.add_argument('--version', default='4.1.0'); ap.add_argument('--size', default='28'); ap.add_argument('--date', default='2026-10-05')
     ap.add_argument('--sha', default='see the .sha256 file next to the installer'); ap.add_argument('--out', default=os.path.join(HERE, 'dist'))
     ap.add_argument('--overrides', default='', help='JSON file written by the admin panel: text that replaces the defaults')
+    ap.add_argument('--android', default='', help='android.json next to the APK: version, file, size and sha256')
     ap.add_argument('--dump-content', action='store_true', help='print every editable text as JSON and exit')
     ap.add_argument('--preview', action='store_true', help='build for the admin preview: no tracking code, marked as a preview')
     a = ap.parse_args()
@@ -290,6 +325,11 @@ def main():
         C.REVIEWED['as'] = bool((ov.get('settings') or {}).get('as_reviewed', C.REVIEWED['as']))
         A = about.ABOUT
     ctx = dict(version=a.version, size=a.size, sha=a.sha, date=a.date)
+    apk_info = dict(version='1.0.0', file='Axomai-Browser-1.0.0.apk', size=58020847, sha256='')
+    if a.android and os.path.isfile(a.android):
+        apk_info.update(json.load(open(a.android, encoding='utf-8-sig')))
+    ctx.update(apk_version=str(apk_info['version']), apk_file=str(apk_info['file']), apk_size=str(round(int(apk_info['size']) / 1048576)),
+               apk_sha=(apk_info.get('sha256') or 'see the .sha256 file next to the APK'))
     out = a.out
     if os.path.isdir(out):
         shutil.rmtree(out)
