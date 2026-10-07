@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "allow_subdomains": false,
+  "threshold": 0.30,
+  "top_lines": 0,
+  "junk_urls": ["/feed/", "[?&](page|paged|p|replytocom|print)=", "/page/\\d+"],
+  "keep_pages": ["^https://assamtimes\\.org/?$", "/category/[^/]+/?$", "/news/?$"],
+  "terms": ["Assam", "Guwahati"]
+}
