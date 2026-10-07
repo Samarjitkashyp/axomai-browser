@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "allow_subdomains": false,
+  "threshold": 0.30,
+  "top_lines": 0,
+  "junk_urls": ["[?&](share|nb|page|paged|p|replytocom|print)=", "/blog/tag/", "/page/\\d+"],
+  "keep_pages": ["^https://dainikagradoot\\.in/?$", "/blog/category/[^/]+/?$"],
+  "terms": ["অসম", "গুৱাহাটী"]
+}
