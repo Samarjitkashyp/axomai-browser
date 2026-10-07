@@ -1,9 +1,0 @@
-{
-  "enabled": true,
-  "allow_subdomains": false,
-  "threshold": 0.30,
-  "top_lines": 0,
-  "junk_urls": ["/user/", "[?&](page|paged|p|planId|redirectUrl)=", "/page/\\d+", "/full-page-pdf/"],
-  "keep_pages": ["^https://assamtribune\\.com/?$"],
-  "terms": ["Assam", "Guwahati"]
-}
