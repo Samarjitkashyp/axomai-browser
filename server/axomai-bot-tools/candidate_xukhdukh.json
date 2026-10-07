@@ -1,9 +1,0 @@
-{
-  "enabled": true,
-  "allow_subdomains": false,
-  "threshold": 0.30,
-  "top_lines": 0,
-  "junk_urls": ["/search", "[?&](max-results|updated-max|by-date|page|paged|p)=", "/page/\\d+"],
-  "keep_pages": ["^https://www\\.xukhdukh\\.com/?$"],
-  "terms": ["অসম", "গুৱাহাটী"]
-}
